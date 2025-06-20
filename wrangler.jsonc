@@ -1,12 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "prj_01jxfye3kresjsack1cp9ytfrb",
+  "name": "order-todo-app",
   "main": "worker/index.ts",
   "compatibility_date": "2025-06-10",
-  "assets": {
-    "not_found_handling": "single-page-application"
-  },
+  "account_id": "7de30598e3e63b149e9b6190a7ba7609",
   "observability": {
     "enabled": true
-  }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "order-todo-db",
+      "database_id": "eb64601c-2b31-42c6-bad9-acaa5d2b2d7b"
+    }
+  ]
 }

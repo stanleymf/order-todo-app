@@ -5,13 +5,7 @@ import { LogOut, Calendar, BarChart3, Package, Smartphone, Monitor } from 'lucid
 import { OrdersView } from './OrdersView';
 import { Analytics } from './Analytics';
 import { ProductManagement } from './ProductManagement';
-import type { User } from '../types';
-import { logout } from '../utils/storage';
-
-interface DashboardProps {
-  user: User;
-  onLogout: () => void;
-}
+import { useAuth } from '../contexts/AuthContext';
 
 // Mobile View Context
 interface MobileViewContextType {
@@ -26,7 +20,8 @@ const MobileViewContext = createContext<MobileViewContextType>({
 
 export const useMobileView = () => useContext(MobileViewContext);
 
-export function Dashboard({ user, onLogout }: DashboardProps) {
+export function Dashboard() {
+  const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('orders');
   const [isMobileView, setIsMobileView] = useState(false);
 
@@ -34,10 +29,13 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     setIsMobileView(!isMobileView);
   };
 
-  const handleLogout = () => {
-    logout();
-    onLogout();
+  const handleLogout = async () => {
+    await logout();
   };
+
+  if (!user) {
+    return null; // This shouldn't happen due to ProtectedRoute
+  }
 
   return (
     <MobileViewContext.Provider value={{ isMobileView, toggleMobileView }}>

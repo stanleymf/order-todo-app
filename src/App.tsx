@@ -1,39 +1,37 @@
-import { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProtectedRoute, TenantRoute } from './components/ProtectedRoute';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
-import type { User } from './types';
-import { getAuthState, initializeStorage, refreshMockData } from './utils/storage';
+import { LoadingSpinner } from './components/ui/loading-spinner';
 
-function App() {
-  const [user, setUser] = useState<User | null>(null);
+// Main app content wrapped with auth context
+function AppContent() {
+  const { isAuthenticated, user, loading } = useAuth();
 
-  useEffect(() => {
-    // Initialize localStorage with mock data
-    initializeStorage();
-    
-    // Force refresh with latest mock data (including 50 Windflower orders)
-    refreshMockData();
-    
-    // Check if user is already logged in
-    const authState = getAuthState();
-    if (authState.isAuthenticated && authState.user) {
-      setUser(authState.user);
-    }
-  }, []);
-
-  const handleLogin = (loggedInUser: User) => {
-    setUser(loggedInUser);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-  };
-
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
+  if (loading) {
+    return <LoadingSpinner />;
   }
 
-  return <Dashboard user={user} onLogout={handleLogout} />;
+  if (!isAuthenticated || !user) {
+    return <Login />;
+  }
+
+  return (
+    <TenantRoute>
+      <ProtectedRoute>
+        <Dashboard />
+      </ProtectedRoute>
+    </TenantRoute>
+  );
+}
+
+// Root app component with providers
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
 }
 
 export default App;

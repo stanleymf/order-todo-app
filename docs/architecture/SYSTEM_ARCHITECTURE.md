@@ -598,4 +598,40 @@ interface SecurityConfig {
 - **Global Deployment**: Multi-region infrastructure
 - **API Marketplace**: Third-party integrations
 
-This architecture document provides a comprehensive roadmap for building a world-class florist order management system that can scale from a single shop to a multi-tenant SaaS platform. 
+This architecture document provides a comprehensive roadmap for building a world-class florist order management system that can scale from a single shop to a multi-tenant SaaS platform.
+
+# System Architecture (Updated 2025-06-20)
+
+## Overview
+- The Order-To-Do App is now fully cloud-native, multi-tenant, and serverless, powered by Cloudflare Workers and D1.
+- All backend data (tenants, users, orders, products, stores) is stored in Cloudflare D1, accessible from any Worker instance.
+- The API is exposed via Worker routes, with CORS support for frontend integration.
+- JWT-based authentication and session management are planned for all protected endpoints.
+
+## Key Components
+- **Cloudflare Worker**: Handles all API requests, authentication, and business logic. Stateless, horizontally scalable.
+- **Cloudflare D1**: Primary database for all multi-tenant data. Schema includes tenants, users, orders, products, and Shopify stores.
+- **Frontend (React, Vite, Tailwind)**: Communicates with the Worker API for all data and authentication needs.
+- **Shopify Integration**: (Planned) Will use secure API endpoints and webhooks for product/order sync.
+
+## Data Model
+- **Tenants**: Each florist/store is a tenant, isolated by tenant_id.
+- **Users**: Linked to tenants, with roles and permissions.
+- **Orders, Products, Stores**: All scoped by tenant_id for strict isolation.
+
+## Deployment & Environment
+- **Wrangler**: Used for local dev, secret management, and deployment.
+- **Secrets**: JWT secrets and other sensitive config stored in Cloudflare environment.
+- **No local SQLite**: All data is now in D1 for true multi-user, multi-device sync.
+
+## API Example
+- `/api/tenants` (GET, POST)
+- `/api/tenants/:tenantId` (GET)
+- `/api/tenants/:tenantId/users` (GET, POST)
+- `/api/health`, `/api/test-d1`
+
+## Next Steps
+- Expand D1 schema for orders, products, batch assignment, analytics, etc.
+- Implement JWT authentication and protected routes.
+- Integrate Shopify sync and webhooks.
+- Build out frontend to consume new API. 

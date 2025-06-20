@@ -4,31 +4,30 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { login } from '../utils/storage';
-import type { User } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
-interface LoginProps {
-  onLogin: (user: User) => void;
-}
-
-export function Login({ onLogin }: LoginProps) {
+export function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [tenantDomain, setTenantDomain] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { login, error, clearError } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setError('');
+    clearError();
 
-    const user = login(email, password);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError('Invalid email or password');
+    const result = await login({
+      email,
+      password,
+      tenantDomain: tenantDomain || undefined
+    });
+
+    if (!result.success) {
+      // Error is handled by the auth context
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
@@ -40,6 +39,16 @@ export function Login({ onLogin }: LoginProps) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="tenantDomain">Tenant Domain (Optional)</Label>
+              <Input
+                id="tenantDomain"
+                type="text"
+                value={tenantDomain}
+                onChange={(e) => setTenantDomain(e.target.value)}
+                placeholder="e.g., test-florist"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -74,8 +83,8 @@ export function Login({ onLogin }: LoginProps) {
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
             <p className="text-sm font-medium text-blue-900 mb-2">Demo Credentials:</p>
             <div className="text-xs text-blue-700 space-y-1">
-              <p><strong>Admin:</strong> sarah@floralshop.com</p>
-              <p><strong>Florist:</strong> maya@floralshop.com</p>
+              <p><strong>Tenant:</strong> test-florist</p>
+              <p><strong>Admin:</strong> admin@test-florist.com</p>
               <p><strong>Password:</strong> password</p>
             </div>
           </div>

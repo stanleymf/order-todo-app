@@ -30,6 +30,65 @@ export interface CreateTenantRequest {
   settings?: Partial<TenantSettings>;
 }
 
+// Authentication types
+export interface LoginRequest {
+  email: string;
+  password: string;
+  tenantDomain?: string;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  user?: User;
+  tenant?: Tenant;
+  accessToken?: string;
+  refreshToken?: string;
+  message?: string;
+  error?: string;
+}
+
+export interface CreateUserRequest {
+  email: string;
+  name: string;
+  password: string;
+  role: 'owner' | 'admin' | 'florist' | 'viewer';
+  permissions?: Permission[];
+}
+
+export interface Store {
+  id: string;
+  tenantId: string;
+  name: string;
+  type: 'shopify' | 'manual' | 'other';
+  status: 'active' | 'inactive';
+  settings: StoreSettings;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoreSettings {
+  timezone: string;
+  currency: string;
+  businessHours: {
+    start: string;
+    end: string;
+  };
+  address?: string;
+  phone?: string;
+  email?: string;
+}
+
+export interface ProductLabel {
+  id: string;
+  tenantId: string;
+  name: string;
+  category: 'difficulty' | 'productType' | 'custom';
+  color: string;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Order {
   id: string;
   tenantId: string;
