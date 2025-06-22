@@ -2,7 +2,7 @@
   "name": "starter-react",
   "type": "module",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "scripts": {
     "check": "tsc -b",
     "dev": "vite",
@@ -94,6 +94,8 @@
   },
   "packageManager": "pnpm@10.6.2",
   "pnpm": {
-    "onlyBuiltDependencies": ["sqlite3"]
+    "onlyBuiltDependencies": [
+      "sqlite3"
+    ]
   }
 }
