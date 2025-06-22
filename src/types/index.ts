@@ -1,136 +1,333 @@
-export interface User {
-  id: string;
-  name: string;
-  role: 'admin' | 'florist';
-  email: string;
+// Consolidated types for multi-tenant florist order management app
+// All types are compatible with the multi-tenant architecture
+
+// ===== TENANT & AUTHENTICATION TYPES =====
+
+export interface Tenant {
+  id: string
+  name: string
+  domain: string
+  subscriptionPlan: "starter" | "professional" | "enterprise"
+  status: "active" | "suspended" | "cancelled"
+  settings: TenantSettings
+  createdAt: string
+  updatedAt: string
 }
+
+export interface TenantSettings {
+  timezone: string
+  currency: string
+  businessHours: {
+    start: string
+    end: string
+  }
+  features: {
+    analytics: boolean
+    multiStore: boolean
+    advancedReporting: boolean
+  }
+  orderCard?: any
+}
+
+export interface CreateTenantRequest {
+  name: string
+  domain: string
+  subscriptionPlan?: string
+  settings?: Partial<TenantSettings>
+}
+
+// Authentication types
+export interface LoginRequest {
+  email: string
+  password: string
+  tenantDomain?: string
+}
+
+export interface LoginResponse {
+  success: boolean
+  user?: User
+  tenant?: Tenant
+  accessToken?: string
+  refreshToken?: string
+  message?: string
+  error?: string
+}
+
+export interface CreateUserRequest {
+  email: string
+  name: string
+  password: string
+  role: "owner" | "admin" | "florist" | "viewer"
+  permissions?: Permission[]
+}
+
+// ===== USER & PERMISSIONS =====
+
+export interface User {
+  id: string
+  tenantId: string
+  email: string
+  name: string
+  role: "owner" | "admin" | "florist" | "viewer"
+  permissions: Permission[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type Permission =
+  | "orders:read"
+  | "orders:write"
+  | "orders:delete"
+  | "products:read"
+  | "products:write"
+  | "products:delete"
+  | "users:read"
+  | "users:write"
+  | "users:delete"
+  | "analytics:read"
+  | "settings:read"
+  | "settings:write"
+
+// ===== STORE TYPES =====
 
 export interface Store {
-  id: string;
-  name: string;
-  domain: string;
-  color: string; // For visual identification
+  id: string
+  tenantId: string
+  name: string
+  type: "shopify" | "manual" | "other"
+  status: "active" | "inactive"
+  settings: StoreSettings
+  createdAt: string
+  updatedAt: string
 }
 
-export interface ProductLabel {
-  id: string;
-  name: string;
-  color: string; // For visual styling
-  category: 'difficulty' | 'productType'; // Category of the label
-  priority: number; // Custom priority for sorting (lower numbers = higher priority)
-  createdAt: Date;
+export interface StoreSettings {
+  timezone: string
+  currency: string
+  businessHours: {
+    start: string
+    end: string
+  }
+  domain?: string
+  address?: string
+  phone?: string
+  email?: string
+  webhooks?: WebhookConfig[]
 }
+
+export interface WebhookConfig {
+  id: string
+  topic: string
+  address: string
+  status: "active" | "inactive" | "error"
+  lastTriggered?: string
+}
+
+export interface ShopifyStore {
+  id: string
+  tenantId: string
+  shopifyDomain: string
+  accessToken: string
+  webhookSecret?: string
+  syncEnabled: boolean
+  lastSyncAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+// ===== PRODUCT TYPES =====
 
 export interface Product {
-  id: string;
-  name: string;
-  variant: string;
-  difficultyLabel: string; // Difficulty level: Easy, Medium, Hard, Very Hard
-  productTypeLabel: string; // Product type: Vase, Bouquet, etc.
-  storeId: string;
-  
+  id: string
+  tenantId: string
+  name: string
+  variant: string
+  difficultyLabel: string
+  productTypeLabel: string
+  storeId: string
+
   // Shopify-specific fields
-  shopifyId?: string; // Shopify's product ID
-  handle?: string; // Product handle/URL slug
-  description?: string; // Product description
-  productType?: string; // Shopify's product type
-  vendor?: string; // Product vendor
-  tags?: string[]; // Product tags
-  status?: 'active' | 'archived' | 'draft'; // Product status
-  publishedAt?: string; // Publication date
-  createdAt?: string; // Creation date
-  updatedAt?: string; // Last update date
-  
+  shopifyId?: string
+  handle?: string
+  description?: string
+  productType?: string
+  vendor?: string
+  tags?: string[]
+  status?: "active" | "archived" | "draft"
+  publishedAt?: string
+  createdAt?: string
+  updatedAt?: string
+
   // Shopify variant fields
-  variants?: ProductVariant[];
-  
+  variants?: ProductVariant[]
+
   // Shopify images
-  images?: ProductImage[];
-  
+  images?: ProductImage[]
+
   // Shopify metafields for custom data
-  metafields?: ProductMetafield[];
-  
+  metafields?: ProductMetafield[]
+
   // Custom florist-specific metadata
   floristMetadata?: {
-    difficultyLevel?: string;
-    estimatedTime?: number; // in minutes
-    specialInstructions?: string;
-    seasonalAvailability?: string[];
-    materials?: string[];
-  };
+    difficultyLevel?: string
+    estimatedTime?: number // in minutes
+    specialInstructions?: string
+    seasonalAvailability?: string[]
+    materials?: string[]
+  }
+}
+
+export interface SavedProduct {
+  id: string
+  tenantId: string
+  shopifyProductId: string
+  shopifyVariantId: string
+  title: string
+  variantTitle?: string
+  description?: string
+  price: number
+  tags: string[]
+  productType?: string
+  vendor?: string
+  handle?: string
+  status: string
+  // Image fields
+  imageUrl?: string
+  imageAlt?: string
+  imageWidth?: number
+  imageHeight?: number
+  createdAt: string
+  updatedAt: string
+  labelIds?: string[]
+  labelNames?: string[]
 }
 
 export interface ProductVariant {
-  id: string;
-  shopifyId?: string;
-  title: string;
-  sku?: string;
-  price?: string;
-  compareAtPrice?: string;
-  inventoryQuantity?: number;
-  weight?: number;
-  weightUnit?: string;
-  requiresShipping?: boolean;
-  taxable?: boolean;
-  barcode?: string;
-  position?: number;
-  createdAt?: string;
-  updatedAt?: string;
+  id: string
+  shopifyId?: string
+  title: string
+  sku?: string
+  price?: string
+  compareAtPrice?: string
+  inventoryQuantity?: number
+  weight?: number
+  weightUnit?: string
+  requiresShipping?: boolean
+  taxable?: boolean
+  barcode?: string
+  position?: number
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface ProductImage {
-  id: string;
-  shopifyId?: string;
-  src: string;
-  alt?: string;
-  width?: number;
-  height?: number;
-  position?: number;
-  createdAt?: string;
-  updatedAt?: string;
+  id: string
+  shopifyId?: string
+  src: string
+  alt?: string
+  width?: number
+  height?: number
+  position?: number
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface ProductMetafield {
-  id: string;
-  shopifyId?: string;
-  namespace: string;
-  key: string;
-  value: string;
-  type: string;
-  description?: string;
-  createdAt?: string;
-  updatedAt?: string;
+  id: string
+  shopifyId?: string
+  namespace: string
+  key: string
+  value: string
+  type: string
+  description?: string
+  createdAt?: string
+  updatedAt?: string
 }
+
+export interface ProductLabel {
+  id: string
+  name: string
+  color: string
+  description?: string
+  category: "difficulty" | "productType" | "custom"
+}
+
+// ===== ORDER TYPES =====
 
 export interface Order {
-  id: string;
-  productId: string;
-  productName: string;
-  productVariant: string;
-  timeslot: string;
-  difficultyLabel: string; // Difficulty level inherited from product
-  productTypeLabel: string; // Product type inherited from product
-  remarks: string;
-  productCustomizations?: string; // Admin customizations/instructions for the product
-  assignedFloristId?: string;
-  assignedAt?: Date;
-  completedAt?: Date;
-  status: 'pending' | 'assigned' | 'completed';
-  date: string; // YYYY-MM-DD format
-  storeId: string;
+  id: string
+  tenantId: string
+  shopifyOrderId?: string
+  customerName: string
+  deliveryDate: string
+  status: string
+  priority: number
+  assignedTo?: string
+  notes?: string
+  product_label?: string
+  createdAt: string
+  updatedAt: string
 }
+
+export interface CreateOrderRequest {
+  shopifyOrderId?: string
+  customerName: string
+  deliveryDate: string
+  status?: string
+  priority?: number
+  assignedTo?: string
+  notes?: string
+}
+
+export interface OrderFilters {
+  status?: string
+  assignedTo?: string
+  deliveryDate?: string
+  priority?: number
+}
+
+// ===== ANALYTICS TYPES =====
 
 export interface FloristStats {
-  floristId: string;
-  floristName: string;
-  completedOrders: number;
-  averageCompletionTime: number; // in minutes
-  storeBreakdown?: { [storeId: string]: { orders: number; avgTime: number } };
+  floristId: string
+  floristName: string
+  completedOrders: number
+  averageCompletionTime: number // in minutes
+  storeBreakdown?: { [storeId: string]: { orders: number; avgTime: number } }
 }
+
+export type TimeFrame = "daily" | "weekly" | "monthly"
+
+// ===== MIGRATION & VALIDATION TYPES =====
+
+export interface MigrationResult {
+  success: boolean
+  migrated: number
+  errors: number
+  message: string
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors: string[]
+  summary?: {
+    tenant: string
+    ordersMigrated: number
+    productsMigrated: number
+    usersMigrated: number
+  }
+}
+
+export interface TenantFilters {
+  status?: string
+  subscriptionPlan?: string
+  domain?: string
+}
+
+// ===== LEGACY COMPATIBILITY =====
+// These types are kept for backward compatibility but should be phased out
 
 export interface AuthState {
-  user: User | null;
-  isAuthenticated: boolean;
+  user: User | null
+  isAuthenticated: boolean
 }
-
-export type TimeFrame = 'daily' | 'weekly' | 'monthly';

@@ -1,0 +1,1 @@
+ALTER TABLE tenant_orders ADD COLUMN product_label TEXT; 

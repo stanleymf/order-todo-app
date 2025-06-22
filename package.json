@@ -2,13 +2,13 @@
   "name": "starter-react",
   "type": "module",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "scripts": {
     "check": "tsc -b",
     "dev": "vite",
     "build": "vite build",
     "preview": "pnpm build && vite preview",
-    "deploy": "pnpm build && wrangler deploy",
+    "deploy": "pnpm build && wrangler deploy --env=\"\"",
     "lint": "eslint .",
     "format": "biome format --write",
     "lint:rest": "biome lint --write",
@@ -45,11 +45,13 @@
     "@radix-ui/react-tooltip": "^1.1.8",
     "@types/sqlite3": "^5.1.0",
     "@types/uuid": "^10.0.0",
+    "bcryptjs": "^3.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.0",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.5.2",
+    "hono": "^4.8.2",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.263.1",
     "next-themes": "^0.4.6",
@@ -58,6 +60,7 @@
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.55.0",
     "react-resizable-panels": "^2.1.7",
+    "react-router-dom": "^7.6.2",
     "recharts": "^2.15.2",
     "sonner": "^2.0.3",
     "sqlite3": "^5.1.7",
@@ -71,7 +74,9 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@cloudflare/vite-plugin": "^1.5.0",
+    "@cloudflare/workers-types": "^4.20250620.0",
     "@eslint/js": "^9.13.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.3",
@@ -89,8 +94,6 @@
   },
   "packageManager": "pnpm@10.6.2",
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "sqlite3"
-    ]
+    "onlyBuiltDependencies": ["sqlite3"]
   }
 }
