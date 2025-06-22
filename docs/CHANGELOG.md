@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2025-01-13
+
+### ✨ Features & Documentation
+
+- **Recipe Feature Planning**: Added comprehensive documentation for recipe management system in Phase 2 of the architecture
+- **Inventory Management System**: Created detailed documentation for the complete inventory management component
+- **Recipe Icon Positioning**: Moved the product image eye icon below the variant title in OrderCard preview for better UX
+- **System Architecture Updates**: Enhanced Phase 2 objectives to include recipe integration and modal display features
+- **Database Schema Planning**: Documented complete database schema for inventory items, suppliers, and stock transactions
+- **API Endpoint Specification**: Defined comprehensive API endpoints for inventory management operations
+- **Implementation Roadmap**: Created 7-week development plan with clear milestones for inventory system implementation
+
+### 📚 Documentation
+
+- **INVENTORY_MANAGEMENT.md**: Comprehensive 500+ line documentation covering:
+  - Complete data architecture and models
+  - Database schema with SQL table structures
+  - API endpoint specifications
+  - UI/UX design mockups and component interfaces
+  - Technical implementation details
+  - Integration points with recipe and order management
+  - Implementation roadmap and success metrics
+- **SYSTEM_ARCHITECTURE.md**: Updated Phase 2 section with:
+  - Recipe management system interfaces
+  - Recipe UI component specifications
+  - Integration with product image modals
+  - Enhanced objectives and technical implementation details
+
+### 🎯 Future Features Planned
+
+- **Recipe Builder**: Two-column modal interface for ingredients and quantities
+- **Ingredient Database**: Centralized management of florist materials
+- **Supplier Management**: Track suppliers and ordering information
+- **Stock Forecasting**: Predict required materials based on order volume
+- **Recipe Display**: Replace order notes with recipe lists in product image modals
+
 ## [0.4.0] - 2025-06-13
 
 ### ✨ Features & Fixes
