@@ -45,8 +45,11 @@ import {
   createOrder,
   updateOrder,
   deleteOrder,
+  getOrderCardConfig,
+  getOrdersByDate,
 } from "../services/api"
 import type { User, Order, Store, ProductLabel } from "../types"
+import type { OrderCardField } from "../types/orderCardFields"
 
 export function OrdersView() {
   const { user: currentUser, tenant } = useAuth()
@@ -74,13 +77,16 @@ export function OrdersView() {
   const [selectedStatus, setSelectedStatus] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [orders, setOrders] = useState<Order[]>([])
+  const [todoCards, setTodoCards] = useState<any[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [florists, setFlorists] = useState<User[]>([])
   const [productLabels, setProductLabels] = useState<ProductLabel[]>([])
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set())
   const [isBatchMode, setIsBatchMode] = useState<boolean>(false)
+  const [orderCardConfig, setOrderCardConfig] = useState<OrderCardField[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [processingOrders, setProcessingOrders] = useState<boolean>(false)
 
   // Get mobile view context
   const { isMobileView } = useMobileView()
@@ -97,10 +103,6 @@ export function OrdersView() {
       setLoading(true)
       setError(null)
 
-      // Fetch orders for the current tenant
-      const ordersData = await getOrders(tenant.id)
-      setOrders(ordersData)
-
       // Fetch users for the current tenant
       const usersData = await getUsers(tenant.id)
       setFlorists(usersData)
@@ -112,6 +114,10 @@ export function OrdersView() {
       // Fetch product labels for the current tenant
       const labelsData = await getProductLabels(tenant.id)
       setProductLabels(labelsData)
+
+      // Fetch order card config
+      const configData = await getOrderCardConfig(tenant.id)
+      setOrderCardConfig(configData.fields)
     } catch (err) {
       console.error("Error loading data:", err)
       setError("Failed to load data. Please try again.")
@@ -122,15 +128,7 @@ export function OrdersView() {
     } finally {
       setLoading(false)
     }
-  }, [
-    tenant?.id,
-    selectedDate,
-    selectedStore,
-    selectedDifficultyLabel,
-    selectedProductTypeLabel,
-    selectedStatus,
-    searchQuery,
-  ])
+  }, [tenant?.id])
 
   useEffect(() => {
     loadData()
@@ -138,6 +136,31 @@ export function OrdersView() {
 
   const handleOrderUpdate = () => {
     loadData()
+  }
+
+  // Separate function to process orders
+  const processOrders = async () => {
+    if (!tenant?.id) {
+      setError("No tenant found")
+      return
+    }
+
+    try {
+      setProcessingOrders(true)
+      setError(null)
+      console.log(`Processing orders for date: ${selectedDate}`)
+
+      // Fetch orders for the current tenant
+      const todoData = await getOrdersByDate(tenant.id, selectedDate)
+      console.log(`Processed orders result:`, todoData)
+      setTodoCards(todoData)
+    } catch (err) {
+      console.error("Error processing orders:", err)
+      setError("Failed to process orders. Please try again.")
+      setTodoCards([])
+    } finally {
+      setProcessingOrders(false)
+    }
   }
 
   // Handle status filter clicks
@@ -190,32 +213,19 @@ export function OrdersView() {
     console.log("Batch unassign:", Array.from(selectedOrderIds))
   }
 
-  // Convert multi-tenant Order to regular Order for OrderCard compatibility
-  const convertOrderForCard = (order: Order) => {
-    return {
-      id: order.id,
-      productId: order.shopifyOrderId || order.id,
-      productName: order.customerName,
-      productVariant: "Standard",
-      timeslot: order.deliveryDate,
-      difficultyLabel: "Medium",
-      productTypeLabel: "Bouquet",
-      remarks: order.notes || "",
-      productCustomizations: "",
-      assignedFloristId: order.assignedTo,
-      assignedAt: order.assignedTo ? new Date() : undefined,
-      completedAt: order.status === "completed" ? new Date() : undefined,
-      status: order.status as "pending" | "assigned" | "completed",
-      date: order.deliveryDate,
-      storeId: "default-store",
-    }
-  }
-
   // Filter orders based on selected criteria
   const filteredOrders = orders.filter((order) => {
     if (selectedStatus !== "all" && order.status !== selectedStatus) return false
     if (selectedDate && order.deliveryDate !== selectedDate) return false
     if (searchQuery && !order.customerName.toLowerCase().includes(searchQuery.toLowerCase()))
+      return false
+    return true
+  })
+
+  const filteredTodoCards = todoCards.filter((card) => {
+    if (selectedStatus !== "all" && card.status !== selectedStatus) return false
+    // we can add more client side filters here if needed
+    if (searchQuery && !card.customerName.toLowerCase().includes(searchQuery.toLowerCase()))
       return false
     return true
   })
@@ -401,6 +411,27 @@ export function OrdersView() {
               Completed
             </Button>
           </div>
+
+          {/* Process Orders Button */}
+          <div className="flex justify-center pt-4">
+            <Button 
+              onClick={processOrders} 
+              disabled={processingOrders}
+              className="w-full md:w-auto"
+            >
+              {processingOrders ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Processing Orders...
+                </>
+              ) : (
+                <>
+                  <Package className="mr-2 h-4 w-4" />
+                  Process Orders for {selectedDate}
+                </>
+              )}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -437,40 +468,40 @@ export function OrdersView() {
           </div>
         </CardHeader>
         <CardContent>
-          {orders.length === 0 ? (
+          {todoCards.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">No orders found for the selected criteria.</p>
               <p className="text-sm text-muted-foreground mt-2">
-                Orders will appear here once we connect to the D1 database.
+                Select a date to fetch orders.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={{
-                    id: order.id,
-                    productTitle: order.customerName,
-                    productVariantTitle: order.shopifyOrderId
-                      ? `Order #${order.shopifyOrderId}`
-                      : undefined,
-                    timeslot: order.deliveryDate,
-                    orderId: order.shopifyOrderId || order.id,
-                    orderDate: order.createdAt,
-                    orderTags: undefined,
-                    assignedTo: order.assignedTo,
-                    priorityLabel: undefined,
-                    customisations: order.notes,
-                    isCompleted: order.status === "completed",
-                  }}
-                  users={florists}
-                  difficultyLabels={productLabels}
-                  onUpdate={handleOrderUpdate}
-                  isEditable={true}
-                  currentUserId={currentUser.id}
-                />
-              ))}
+              {filteredTodoCards.map((card) => {
+                // Adapt the 'card' object to the 'Order' type expected by OrderCard
+                const orderAdapter: Order = {
+                  id: card.cardId,
+                  tenantId: tenant?.id || "",
+                  shopifyOrderId: card.shopifyOrderId,
+                  customerName: card.customerName,
+                  deliveryDate: card.deliveryDate,
+                  status: card.status || "pending", // Default status
+                  notes: `Product: ${card.productTitle} (${card.variantTitle || ""})\nAdd-ons: ${card.addOns.join(", ")}`,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  // The rest of the fields for Order type can be added if needed
+                }
+                return (
+                  <OrderCard
+                    key={card.cardId}
+                    order={orderAdapter}
+                    users={florists}
+                    difficultyLabels={productLabels}
+                    onUpdate={handleOrderUpdate}
+                    currentUserId={currentUser?.id}
+                  />
+                )
+              })}
             </div>
           )}
         </CardContent>

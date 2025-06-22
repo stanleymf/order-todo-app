@@ -250,7 +250,31 @@ export class ShopifyApiService {
         },
       }
     } catch (error) {
-      console.error("Error fetching products from Shopify:", error)
+      console.error("Error fetching Shopify products:", error)
+      throw error
+    }
+  }
+
+  // Fetch all orders from Shopify
+  async getOrders(): Promise<any[]> {
+    try {
+      const url = `${this.getBaseUrl()}/orders.json?status=any`
+      const response = await fetch(url, {
+        method: "GET",
+        headers: this.getHeaders(),
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(
+          `Shopify API error: ${response.status} ${response.statusText} - ${errorText}`
+        )
+      }
+
+      const data = await response.json()
+      return data.orders
+    } catch (error) {
+      console.error("Error fetching Shopify orders:", error)
       throw error
     }
   }

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2025-06-13
+
+### ✨ Features & Fixes
+
+-   **Enhanced Order Card Preview**: The Order Card Preview in the settings has been significantly improved for better usability and accuracy.
+-   **Mobile-Friendly Status Buttons**: The status buttons (Unassigned, Assigned, Completed) are now larger and have a wider click radius on mobile devices.
+-   **Difficulty Label in Collapsed View**: The collapsed view of the order card now displays the `Difficulty Label` as a colored badge in the bottom-right corner for quick reference.
+
+### 🐛 Bug Fixes
+
+-   **Textarea Focus Bug**: Fixed a persistent issue where the "Customisations" textarea would lose focus after every character typed. This was resolved by refactoring the view components to prevent unnecessary re-renders.
+-   **Data Sync for Difficulty Label**: Corrected a bug where the collapsed view would show stale or incorrect data for the `Difficulty Label`. Both collapsed and expanded views are now correctly synchronized.
+-   **Mobile/Desktop View Toggle**: The toggle in the main dashboard now correctly defaults to the appropriate view based on screen size and can be manually overridden for testing.
+-   **Product Title Wrapping**: Removed unwanted text truncation on the product title in the collapsed view, allowing it to wrap and display the full text.
+
+### ♻️ Improvements
+
+-   **Component Refactoring**: The `OrderCardPreview`'s sub-components were refactore out to improve stability and prevent re-render-related bugs.
+-   **Responsive Design**: Fixed several issues where the settings page layout would break on mobile screens, ensuring a smooth experience across all devices.
+
 ## [0.3.0] - 2025-01-13
 
 A major refactoring release focused on improving code maintainability and developer experience through component reorganization.

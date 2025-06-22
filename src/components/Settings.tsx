@@ -521,7 +521,8 @@ export const Settings: React.FC = () => {
     if (!tenant?.id) return
     try {
       const config = await getOrderCardConfig(tenant.id)
-      if (config && config.fields && config.settings) {
+      
+      if (config && config.fields) {
         const savedFields = config.fields
         const defaultFields = getAllFields()
 
@@ -539,7 +540,7 @@ export const Settings: React.FC = () => {
           return df
         })
 
-        setOrderCardConfig({ fields: mergedFields, settings: config.settings })
+        setOrderCardConfig({ fields: mergedFields, settings: { showTimeAndPriority: true } })
       } else {
         setOrderCardConfig({ fields: getAllFields(), settings: { showTimeAndPriority: true } })
       }
@@ -714,6 +715,7 @@ export const Settings: React.FC = () => {
       description: "Custom user-defined field",
       type: newCustomField.type,
       isVisible: true,
+      isSystem: false,
       isEditable: true,
       shopifyFields: [],
     }
@@ -1025,9 +1027,30 @@ export const Settings: React.FC = () => {
               <div className="flex items-center justify-between">
                 <CardTitle>Field Mappings</CardTitle>
                 <div className="flex items-center space-x-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowAddFieldDialog(true)}>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setShowAddFieldDialog(true)}
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     Add Custom Field
+                  </Button>
+                  <Button 
+                    onClick={handleSaveOrderCardConfig}
+                    disabled={isSaving}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Field Mappings
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { OrderCardField } from "../types/orderCardFields"
 import { useIsMobile } from "./hooks/use-mobile"
+import { ProductImageModal } from "./shared/ProductImageModal"
 
 // ============================================================================
 // TYPES AND INTERFACES
@@ -447,6 +448,8 @@ interface ExpandedViewProps {
   difficultyLabels: Array<{ id: string; name: string; color: string }>
   getFieldValue: (fieldId: string) => any
   onCustomisationsChange: (value: string) => void
+  realOrderData?: any
+  handleShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void
 }
 
 const ExpandedView: React.FC<ExpandedViewProps> = ({
@@ -458,6 +461,8 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
   difficultyLabels,
   getFieldValue,
   onCustomisationsChange,
+  realOrderData,
+  handleShowProductImage,
 }) => {
   const renderField = (field: OrderCardField) => {
     const value = getFieldValue(field.id)
@@ -480,6 +485,21 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
             <CardTitle className="text-lg font-semibold flex items-center gap-2">
               <Package className="h-5 w-5" />
               {sampleOrder.productTitle}
+              {realOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 ml-1"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const productId = realOrderData.lineItems.edges[0].node.product.id
+                    const variantId = realOrderData.lineItems.edges[0].node.variant?.id
+                    handleShowProductImage(productId, variantId)
+                  }}
+                >
+                  <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                </Button>
+              )}
             </CardTitle>
             {sampleOrder.productVariantTitle && (
               <p className="text-sm text-muted-foreground mt-1">
@@ -550,6 +570,8 @@ interface CollapsedViewProps {
   previewStatus: PreviewStatus
   onStatusChange: (status: PreviewStatus) => void
   difficultyLabels?: Array<{ id: string; name: string; color: string }>
+  realOrderData?: any
+  handleShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void
 }
 
 const CollapsedView: React.FC<CollapsedViewProps> = ({
@@ -557,6 +579,8 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
   previewStatus,
   onStatusChange,
   difficultyLabels = [],
+  realOrderData,
+  handleShowProductImage,
 }) => {
   const difficultyLabel = difficultyLabels.find((l) => l.id === sampleOrder.priorityLabel)
 
@@ -570,6 +594,23 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
           <div className="text-sm text-gray-500 font-normal mt-1">
             {sampleOrder.productVariantTitle}
           </div>
+          {realOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
+            <div className="mt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const productId = realOrderData.lineItems.edges[0].node.product.id
+                  const variantId = realOrderData.lineItems.edges[0].node.variant?.id
+                  handleShowProductImage(productId, variantId)
+                }}
+              >
+                <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+              </Button>
+            </div>
+          )}
         </div>
         <div className="absolute top-3 right-3 flex flex-col items-end gap-2 flex-shrink-0">
           <TooltipProvider>
@@ -617,6 +658,11 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   
   const [isExpanded, setIsExpanded] = useState(false)
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("assigned")
+  
+  // Product image modal state
+  const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>()
+  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>()
 
   // Sample data for preview
   const [sampleOrder, setSampleOrder] = useState<SampleOrder>({
@@ -709,6 +755,13 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   // Memoized customisations change handler
   const handleCustomisationsChange = useCallback((value: string) => {
     setSampleOrder((prev) => ({ ...prev, customisations: value }))
+  }, [])
+
+  // Product image modal handler
+  const handleShowProductImage = useCallback((shopifyProductId?: string, shopifyVariantId?: string) => {
+    setSelectedProductId(shopifyProductId)
+    setSelectedVariantId(shopifyVariantId)
+    setIsProductImageModalOpen(true)
   }, [])
 
   // ============================================================================
@@ -838,6 +891,8 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
             previewStatus={previewStatus}
             onStatusChange={handleStatusChange}
             difficultyLabels={difficultyLabels}
+            realOrderData={realOrderData}
+            handleShowProductImage={handleShowProductImage}
           />
         ) : (
           <ExpandedView
@@ -849,6 +904,8 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
             difficultyLabels={difficultyLabels}
             getFieldValue={getFieldValue}
             onCustomisationsChange={handleCustomisationsChange}
+            realOrderData={realOrderData}
+            handleShowProductImage={handleShowProductImage}
           />
         )}
       </Card>
@@ -856,6 +913,14 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
       <FieldVisibilityControls
         fields={fields}
         onToggleFieldVisibility={onToggleFieldVisibility}
+      />
+      
+      {/* Product Image Modal */}
+      <ProductImageModal
+        isOpen={isProductImageModalOpen}
+        onClose={() => setIsProductImageModalOpen(false)}
+        shopifyProductId={selectedProductId}
+        shopifyVariantId={selectedVariantId}
       />
     </div>
   )

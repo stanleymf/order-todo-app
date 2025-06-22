@@ -36,25 +36,13 @@ function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route
-            path="/*"
-            element={
-              <ProtectedRoute>
-                <Routes>
-                  <Route path="/" element={<Dashboard />}>
-                    <Route index element={<Navigate to="/orders" replace />} />
-                    <Route path="dashboard" element={<Navigate to="/orders" replace />} />
-                    <Route path="orders" element={<OrdersView />} />
-                    <Route path="analytics" element={<Analytics />} />
-                    <Route path="products" element={<ProductManagement />} />
-                    <Route path="settings/:tab" element={<Settings />} />
-                    <Route path="settings" element={<Navigate to="/settings/general" replace />} />
-                  </Route>
-                  <Route path="*" element={<Navigate to="/" />} />
-                </Routes>
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
+            <Route index element={<OrdersView />} />
+            <Route path="orders" element={<OrdersView />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="products" element={<ProductManagement />} />
+            <Route path="settings/:tab?" element={<Settings />} />
+          </Route>
         </Routes>
       </Router>
       <Toaster />

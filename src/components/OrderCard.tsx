@@ -62,7 +62,6 @@ export const OrderCard: React.FC<OrderCardProps> = ({
           setFields(getAllFields())
         }
       } catch (error) {
-        console.error("Failed to load order card config for OrderCard:", error)
         setFields(getAllFields())
       }
     }

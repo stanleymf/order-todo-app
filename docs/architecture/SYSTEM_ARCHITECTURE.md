@@ -17,6 +17,9 @@ The **Order To-Do App** is a comprehensive florist order management system desig
 ### **Phase 3: Shopify App Store Preparation**
 **Focus**: Multi-tenant architecture and app store compliance
 
+### **Phase 4: AI-Powered Bouquet Design System**
+**Focus**: AI-generated floral arrangements from customer prompts
+
 ---
 
 ## 🏗️ **Phase 1: Core Order Management & UI Foundation**
@@ -182,9 +185,10 @@ Shopify API + Webhooks
 ## 📦 **Phase 2: Product & Stock Management with Forecasting**
 
 ### **🎯 Phase 2 Objectives**
-- **Recipe Management**: Define ingredient lists for each product
+- **Recipe Management**: Define ingredient lists for each product with visual recipe builder
+- **Recipe Integration**: Display recipes in product image modals, replacing order notes
 - **Stock Forecasting**: Predict required materials based on order volume
-- **Inventory Tracking**: Real-time stock level monitoring
+- **Inventory Tracking**: Real-time stock level monitoring with ingredient management
 - **Decision Support**: Actionable insights for florist managers
 
 ### **📊 Phase 2 Data Architecture**
@@ -295,6 +299,30 @@ interface RecipeService {
   archiveRecipe(recipeId: string): Promise<void>;
 }
 
+// Recipe UI Components
+interface RecipeIconProps {
+  productId: string;
+  hasRecipe: boolean;
+  onClick: () => void;
+  className?: string;
+}
+
+interface RecipeModalProps {
+  productId: string;
+  productName: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (recipe: Recipe) => void;
+  ingredients: InventoryItem[]; // From Inventory Management
+}
+
+interface RecipeRowProps {
+  ingredient: RecipeIngredient;
+  availableIngredients: InventoryItem[];
+  onUpdate: (ingredient: RecipeIngredient) => void;
+  onRemove: () => void;
+}
+
 // Stock Management
 interface StockService {
   updateStockLevel(ingredientId: string, quantity: number): Promise<StockLevel>;
@@ -332,6 +360,10 @@ interface InventoryDashboardProps {
 ### **📊 Phase 2 UI/UX Features**
 
 #### **Recipe Management Interface**
+- **Recipe Icon**: Visual indicator beside product price in Saved Products
+- **Recipe Modal**: Two-column interface (Ingredients + Quantity) with dynamic row addition
+- **Ingredient Integration**: Dropdown populated from Inventory Management system
+- **Product Image Modal Integration**: Replace order notes with recipe display
 - **Visual Recipe Builder**: Drag-and-drop ingredient management
 - **Ingredient Library**: Reusable ingredient database
 - **Version Control**: Track recipe changes over time
@@ -539,9 +571,335 @@ interface SecurityConfig {
 
 ---
 
-## 📅 **Implementation Roadmap**
+## 🤖 **Phase 4: AI-Powered Bouquet Design System**
 
-### **Phase 1 Timeline: 4-6 weeks**
+### **🎯 Phase 4 Objectives**
+- **AI Bouquet Generation**: Create bespoke bouquet designs from customer prompts
+- **Style Replication**: Train AI to replicate your unique florist business style
+- **Virtual Arrangement**: Interactive bouquet design interface
+- **Seamless Checkout**: Direct integration with existing Shopify store
+- **Data Collection**: Systematic gathering of finished work for AI training
+
+### **💡 Core Concept: "From Thought to Bouquet"**
+
+The AI Arrange system enables customers to describe their dream bouquet through natural language prompts, generating a visual representation that matches your business's unique style. Customers can then purchase the generated design directly through your Shopify store.
+
+#### **Key Features**
+- **Natural Language Processing**: Convert customer descriptions into design specifications
+- **Style-Aware Generation**: AI trained on your business's unique aesthetic
+- **Real-time Preview**: Instant visual feedback on design changes
+- **Product Integration**: Seamless conversion to Shopify products
+- **Iterative Refinement**: Multiple design iterations based on feedback
+
+### **📊 Phase 4 Data Architecture**
+
+#### **AI Training Data Model**
+```typescript
+interface BouquetDesign {
+  id: string;
+  tenantId: string;
+  prompt: string;
+  generatedImage: string;
+  designSpecs: DesignSpecifications;
+  customerFeedback: CustomerFeedback[];
+  finalProductId?: string;
+  status: 'draft' | 'approved' | 'rejected' | 'published';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface DesignSpecifications {
+  style: 'romantic' | 'modern' | 'rustic' | 'elegant' | 'wild';
+  colorPalette: string[];
+  flowerTypes: string[];
+  arrangement: 'round' | 'cascade' | 'hand-tied' | 'asymmetric';
+  size: 'small' | 'medium' | 'large' | 'extra-large';
+  occasion: 'wedding' | 'birthday' | 'anniversary' | 'sympathy' | 'celebration';
+  budget: 'budget' | 'mid-range' | 'premium' | 'luxury';
+  specialRequests: string[];
+}
+
+interface CustomerFeedback {
+  id: string;
+  designId: string;
+  rating: number; // 1-5
+  comments: string;
+  requestedChanges: string[];
+  approved: boolean;
+  timestamp: Date;
+}
+
+interface FloristWorkSample {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  images: WorkImage[];
+  metadata: WorkMetadata;
+  designNotes: string;
+  customerSpecs: string;
+  finalOutcome: 'success' | 'partial' | 'failure';
+  uploadedBy: string;
+  uploadedAt: Date;
+}
+
+interface WorkImage {
+  id: string;
+  url: string;
+  angle: 'front' | 'side' | 'back' | 'top' | 'detail';
+  lighting: 'natural' | 'studio' | 'outdoor';
+  resolution: string;
+  tags: string[];
+}
+
+interface WorkMetadata {
+  flowers: string[];
+  colors: string[];
+  arrangement: string;
+  size: string;
+  occasion: string;
+  season: string;
+  difficulty: string;
+  timeSpent: number; // minutes
+  materials: string[];
+  techniques: string[];
+}
+```
+
+#### **AI Model Training Pipeline**
+```typescript
+interface AIModelConfig {
+  modelType: 'stable-diffusion' | 'midjourney' | 'dall-e' | 'custom';
+  trainingData: TrainingDataset;
+  styleEmbeddings: StyleEmbedding[];
+  promptTemplates: PromptTemplate[];
+  qualityThresholds: QualityMetrics;
+}
+
+interface TrainingDataset {
+  tenantId: string;
+  workSamples: FloristWorkSample[];
+  approvedDesigns: BouquetDesign[];
+  customerPreferences: CustomerPreference[];
+  seasonalData: SeasonalPattern[];
+  totalSamples: number;
+  lastUpdated: Date;
+}
+
+interface StyleEmbedding {
+  id: string;
+  styleName: string;
+  embedding: number[];
+  characteristics: string[];
+  colorPalettes: string[][];
+  arrangementPatterns: string[];
+  flowerPreferences: string[];
+}
+
+interface PromptTemplate {
+  id: string;
+  category: string;
+  template: string;
+  variables: string[];
+  examples: PromptExample[];
+  successRate: number;
+}
+
+interface QualityMetrics {
+  styleAccuracy: number; // 0-1
+  customerSatisfaction: number; // 0-1
+  conversionRate: number; // 0-1
+  designUniqueness: number; // 0-1
+  technicalFeasibility: number; // 0-1
+}
+```
+
+### **🔧 Phase 4 Technical Implementation**
+
+#### **AI Generation Service**
+```typescript
+interface AIGenerationService {
+  // Generate bouquet design from prompt
+  generateDesign(prompt: string, styleConfig: StyleConfig): Promise<GeneratedDesign>;
+  
+  // Refine design based on feedback
+  refineDesign(designId: string, feedback: CustomerFeedback): Promise<GeneratedDesign>;
+  
+  // Batch generate variations
+  generateVariations(baseDesign: GeneratedDesign, count: number): Promise<GeneratedDesign[]>;
+  
+  // Style transfer to match business aesthetic
+  applyStyleTransfer(design: GeneratedDesign, styleEmbedding: StyleEmbedding): Promise<GeneratedDesign>;
+}
+
+interface GeneratedDesign {
+  id: string;
+  prompt: string;
+  imageUrl: string;
+  confidence: number;
+  designSpecs: DesignSpecifications;
+  generationTime: number; // seconds
+  modelVersion: string;
+  cost: number; // API cost
+}
+
+interface StyleConfig {
+  tenantId: string;
+  preferredStyle: string;
+  colorPalette: string[];
+  flowerPreferences: string[];
+  arrangementStyle: string;
+  seasonalAdjustments: boolean;
+}
+```
+
+#### **Data Collection System**
+```typescript
+interface DataCollectionService {
+  // Capture finished work from florists
+  captureWorkSample(orderId: string, images: File[], metadata: WorkMetadata): Promise<FloristWorkSample>;
+  
+  // Process and tag images automatically
+  processWorkImages(images: File[]): Promise<ProcessedImage[]>;
+  
+  // Extract design patterns from samples
+  extractDesignPatterns(samples: FloristWorkSample[]): Promise<DesignPattern[]>;
+  
+  // Update training dataset
+  updateTrainingDataset(newSamples: FloristWorkSample[]): Promise<TrainingDataset>;
+}
+
+interface ProcessedImage {
+  id: string;
+  originalUrl: string;
+  processedUrl: string;
+  extractedFeatures: ImageFeatures;
+  autoTags: string[];
+  qualityScore: number;
+}
+
+interface ImageFeatures {
+  dominantColors: string[];
+  detectedFlowers: string[];
+  arrangementType: string;
+  composition: string;
+  lighting: string;
+  mood: string;
+}
+```
+
+#### **Frontend AI Arrange Component**
+```typescript
+interface AIArrangeProps {
+  tenantId: string;
+  onDesignGenerated: (design: GeneratedDesign) => void;
+  onDesignPurchased: (designId: string, productId: string) => void;
+}
+
+interface PromptBuilderProps {
+  onPromptChange: (prompt: string) => void;
+  onStyleSelect: (style: string) => void;
+  onBudgetSelect: (budget: string) => void;
+  onOccasionSelect: (occasion: string) => void;
+}
+
+interface DesignPreviewProps {
+  design: GeneratedDesign;
+  onRefine: (feedback: CustomerFeedback) => void;
+  onPurchase: () => void;
+  onSave: () => void;
+}
+```
+
+### **📱 Phase 4 UI/UX Features**
+
+#### **AI Arrange Interface**
+- **Smart Prompt Builder**: Guided prompt creation with style suggestions
+- **Real-time Generation**: Live preview as design generates
+- **Style Customization**: Adjust colors, flowers, arrangement style
+- **Iterative Refinement**: Multiple design variations and feedback loops
+- **Purchase Integration**: Direct checkout to Shopify store
+
+#### **Florist Work Capture**
+- **Mobile Photo Capture**: Easy photo upload from order completion
+- **Auto-tagging**: Automatic metadata extraction from images
+- **Quality Assurance**: Review and approve captured samples
+- **Progress Tracking**: Monitor data collection progress
+- **Style Analysis**: Insights into design patterns and preferences
+
+#### **Design Management Dashboard**
+- **Generated Designs**: Library of all AI-generated designs
+- **Customer Feedback**: Track satisfaction and improvement areas
+- **Style Evolution**: Monitor how AI style improves over time
+- **Performance Metrics**: Conversion rates and customer satisfaction
+- **Training Progress**: AI model improvement tracking
+
+### **🚀 Phase 4 Implementation Roadmap**
+
+#### **Prototype Phase (Weeks 1-4)**
+- **Week 1**: Basic AI Arrange page with prompt input
+- **Week 2**: Integration with existing image generation APIs (DALL-E, Midjourney)
+- **Week 3**: Simple design preview and feedback system
+- **Week 4**: Basic Shopify product creation from designs
+
+#### **Data Collection Phase (Weeks 5-8)**
+- **Week 5**: Florist work capture system in OrderCard
+- **Week 6**: Image processing and metadata extraction
+- **Week 7**: Training dataset compilation and analysis
+- **Week 8**: Style pattern identification and documentation
+
+#### **AI Training Phase (Weeks 9-16)**
+- **Week 9-10**: Custom model training setup
+- **Week 11-12**: Style embedding creation and testing
+- **Week 13-14**: Prompt template optimization
+- **Week 15-16**: Quality metrics and validation
+
+#### **Production Integration (Weeks 17-20)**
+- **Week 17**: Advanced AI Arrange interface
+- **Week 18**: Seamless Shopify integration
+- **Week 19**: Performance optimization and testing
+- **Week 20**: Launch and monitoring
+
+### **📊 Phase 4 Success Metrics**
+
+#### **Customer Engagement**
+- **Design Generation Rate**: 80% of visitors generate at least one design
+- **Conversion Rate**: 25% of generated designs result in purchases
+- **Customer Satisfaction**: 4.5+ average rating on generated designs
+- **Return Usage**: 60% of customers use AI Arrange multiple times
+
+#### **AI Performance**
+- **Style Accuracy**: 90% of designs match business aesthetic
+- **Generation Speed**: Average generation time under 30 seconds
+- **Design Quality**: 85% of designs meet technical feasibility standards
+- **Uniqueness**: 70% of designs are sufficiently unique
+
+#### **Business Impact**
+- **Revenue Increase**: 40% increase in average order value
+- **Customer Acquisition**: 50% increase in new customers
+- **Operational Efficiency**: 30% reduction in custom design consultation time
+- **Data Value**: 1000+ high-quality training samples collected
+
+### **🔮 Future AI Enhancements**
+
+#### **Advanced Features**
+- **3D Bouquet Visualization**: Interactive 3D design interface
+- **AR Preview**: Augmented reality bouquet preview
+- **Seasonal Intelligence**: Automatic seasonal adjustments
+- **Personalization**: Customer preference learning
+- **Collaborative Design**: Real-time design collaboration
+
+#### **AI Model Evolution**
+- **Custom Fine-tuned Models**: Business-specific AI models
+- **Multi-modal Generation**: Text, image, and voice input
+- **Style Transfer Learning**: Continuous style improvement
+- **Predictive Design**: Anticipate customer preferences
+- **Quality Assurance AI**: Automatic design validation
+
+---
+
+## 📅 **Updated Implementation Roadmap**
+
+### **Phase 1 Timeline: 4-6 weeks** ⭐ *Current Phase*
 - **Week 1-2**: UI/UX perfection and mobile optimization
 - **Week 3-4**: Authentication system and protected routes
 - **Week 5-6**: Testing, bug fixes, and performance optimization
@@ -560,9 +918,16 @@ interface SecurityConfig {
 - **Week 10-12**: Scalability and performance optimization
 - **Week 13-16**: Testing, documentation, and app store submission
 
+### **Phase 4 Timeline: 20-24 weeks** 🆕
+- **Week 1-4**: AI Arrange prototype development
+- **Week 5-8**: Data collection system implementation
+- **Week 9-16**: AI model training and optimization
+- **Week 17-20**: Production integration and testing
+- **Week 21-24**: Launch, monitoring, and iterative improvements
+
 ---
 
-## 🎯 **Success Metrics**
+## 🎯 **Updated Success Metrics**
 
 ### **Phase 1 Metrics**
 - **User Adoption**: 90% of florists use the app daily
@@ -582,6 +947,13 @@ interface SecurityConfig {
 - **Revenue Growth**: 200% year-over-year growth
 - **Market Share**: Top 3 florist management apps
 
+### **Phase 4 Metrics** 🆕
+- **AI Design Conversion**: 25% of generated designs result in purchases
+- **Customer Satisfaction**: 4.5+ average rating on AI designs
+- **Revenue Impact**: 40% increase in average order value
+- **Data Collection**: 1000+ high-quality training samples
+- **Style Accuracy**: 90% of designs match business aesthetic
+
 ---
 
 ## 🔮 **Future Considerations**
@@ -591,14 +963,16 @@ interface SecurityConfig {
 - **IoT Integration**: Smart inventory sensors
 - **Mobile App**: Native iOS/Android applications
 - **Advanced Analytics**: Business intelligence dashboard
+- **AI Bouquet Design**: Custom AI-generated floral arrangements 🆕
 
 ### **Scalability Plans**
 - **Microservices Architecture**: Service decomposition
 - **Event-Driven Architecture**: Real-time data processing
 - **Global Deployment**: Multi-region infrastructure
 - **API Marketplace**: Third-party integrations
+- **AI Model Marketplace**: Share and monetize custom AI models 🆕
 
-This architecture document provides a comprehensive roadmap for building a world-class florist order management system that can scale from a single shop to a multi-tenant SaaS platform.
+This architecture document provides a comprehensive roadmap for building a world-class florist order management system with cutting-edge AI capabilities that can scale from a single shop to a multi-tenant SaaS platform.
 
 # System Architecture (Updated 2025-06-20)
 

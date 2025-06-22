@@ -100,15 +100,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const tenantData = localStorage.getItem("auth_tenant")
 
         if (token && userData && tenantData) {
-          // TODO: Validate token with backend
-          // For now, we'll trust the stored data
-          const user = JSON.parse(userData)
-          const tenant = JSON.parse(tenantData)
+          // Validate token with backend
+          try {
+            const response = await fetch('/api/health', {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            })
+            
+            if (response.ok) {
+              // Token is valid
+              const user = JSON.parse(userData)
+              const tenant = JSON.parse(tenantData)
 
-          dispatch({
-            type: "INIT_AUTH",
-            payload: { user, tenant },
-          })
+              dispatch({
+                type: "INIT_AUTH",
+                payload: { user, tenant },
+              })
+            } else {
+              // Token is invalid, clear storage and logout
+              console.log("Token validation failed, logging out")
+              removeStoredToken()
+              localStorage.removeItem("auth_user")
+              localStorage.removeItem("auth_tenant")
+              localStorage.removeItem("refresh_token")
+              dispatch({ type: "AUTH_FAILURE", payload: { error: "Token expired" } })
+            }
+          } catch (error) {
+            console.error("Token validation error:", error)
+            // Network error or other issue, clear storage and logout
+            removeStoredToken()
+            localStorage.removeItem("auth_user")
+            localStorage.removeItem("auth_tenant")
+            localStorage.removeItem("refresh_token")
+            dispatch({ type: "AUTH_FAILURE", payload: { error: "Authentication failed" } })
+          }
         } else {
           dispatch({ type: "AUTH_FAILURE", payload: { error: "No stored authentication" } })
         }

@@ -12,7 +12,12 @@ import type {
   CreateOrderRequest,
   OrderFilters,
 } from "../types"
-import { getStoredToken } from "./auth"
+import {
+  OrderCardField,
+  getAllFields,
+  OrderCardFieldType,
+} from "../types/orderCardFields"
+import { getStoredToken, removeStoredToken } from "./auth"
 
 const API_BASE_URL =
   typeof window !== "undefined" && window.location.hostname.includes(".workers.dev")
@@ -47,20 +52,54 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
   return response.json()
 }
 
+// This function is intended for internal use within this service
 async function authenticatedRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getStoredToken()
   if (!token) {
-    throw new Error("No authentication token found")
+    // On the client-side, we can redirect to login
+    if (typeof window !== "undefined") {
+      // To prevent redirect loops, only redirect if not already on the login page
+      if (window.location.pathname !== "/login") {
+        console.log("No token found, redirecting to login.")
+        // Clear any lingering auth state
+        removeStoredToken()
+        localStorage.removeItem("auth_user")
+        localStorage.removeItem("auth_tenant")
+        // Redirect to login
+        window.location.href = "/login"
+      }
+      // Throw an error to stop the current request process
+      throw new Error("Redirecting to login.")
+    } else {
+      // In a non-window environment (like server-side rendering, though not our case),
+      // just throw the error.
+      throw new Error("No authentication token found")
+    }
   }
 
-  return apiRequest<T>(endpoint, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  })
+  try {
+    return await apiRequest<T>(endpoint, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      // Token is invalid, clear storage and redirect to login
+      console.log("401 Unauthorized - clearing auth data")
+      removeStoredToken()
+      localStorage.removeItem("auth_user")
+      localStorage.removeItem("auth_tenant")
+      localStorage.removeItem("refresh_token")
+      
+      // Redirect to login page
+      window.location.href = '/login'
+    }
+    throw error
+  }
 }
 
 // Authentication
@@ -140,6 +179,21 @@ export async function getOrders(tenantId: string, filters?: OrderFilters): Promi
     ? `?${new URLSearchParams(filters as Record<string, string>).toString()}`
     : ""
   return authenticatedRequest<Order[]>(`/api/tenants/${tenantId}/orders${queryParams}`)
+}
+
+export async function getOrdersByDate(tenantId: string, date: string): Promise<any[]> {
+  // The date should be in dd/mm/yyyy format for the API
+  const formattedDate = date.split("-").reverse().join("/")
+  console.log(`Calling getOrdersByDate with tenantId: ${tenantId}, date: ${date}, formattedDate: ${formattedDate}`)
+  
+  try {
+    const result = await authenticatedRequest<any[]>(`/api/tenants/${tenantId}/orders-by-date?date=${formattedDate}`)
+    console.log(`getOrdersByDate response:`, result)
+    return result
+  } catch (error) {
+    console.error(`Error in getOrdersByDate:`, error)
+    throw error
+  }
 }
 
 export async function createOrder(tenantId: string, orderData: CreateOrderRequest): Promise<Order> {
@@ -299,14 +353,133 @@ export async function getFloristStats(tenantId: string): Promise<any[]> {
 }
 
 // Configuration management
-export async function getOrderCardConfig(tenantId: string): Promise<any> {
-  return authenticatedRequest<any>(`/api/tenants/${tenantId}/config/order-card`)
+export async function getOrderCardConfig(tenantId: string): Promise<{ fields: OrderCardField[] }> {
+  const response = await authenticatedRequest<{ config: any[] }>(
+    `/api/tenants/${tenantId}/order-card-config`
+  )
+
+  if (!response.config || response.config.length === 0) {
+    return { fields: getAllFields() }
+  }
+
+  // Check if the config is in the new format (OrderCardField objects)
+  const firstField = response.config[0]
+  if (firstField && firstField.id && firstField.label) {
+    // New format: direct OrderCardField objects
+    return { fields: response.config }
+  }
+
+  // Old format: field configs with field_id, custom_options, etc.
+  const fields = response.config.map((fieldConfig: any): OrderCardField => {
+    const customOptions = fieldConfig.custom_options
+      ? JSON.parse(fieldConfig.custom_options)
+      : {}
+
+    const shopifyFields =
+      customOptions.shopifyFields !== undefined && customOptions.shopifyFields !== null
+        ? customOptions.shopifyFields
+        : getDefaultShopifyFields(fieldConfig.field_id)
+
+    return {
+      id: fieldConfig.field_id,
+      label: fieldConfig.custom_label || getDefaultFieldLabel(fieldConfig.field_id),
+      description: getDefaultFieldDescription(fieldConfig.field_id),
+      type: getDefaultFieldType(fieldConfig.field_id) as OrderCardFieldType,
+      isVisible: !!fieldConfig.is_visible,
+      isSystem: false, // Assuming all from this table are not system fields
+      isEditable: getDefaultFieldEditable(fieldConfig.field_id),
+      shopifyFields: shopifyFields,
+      transformation: customOptions.transformation,
+      transformationRule: customOptions.transformationRule,
+    }
+  })
+
+  return { fields }
+}
+
+// Helper functions to get default field properties
+function getDefaultFieldLabel(fieldId: string): string {
+  const labels: { [key: string]: string } = {
+    productTitle: "Product Title",
+    productVariantTitle: "Product Variant Title",
+    timeslot: "Timeslot",
+    orderId: "Order ID",
+    orderDate: "Order Date",
+    orderTags: "Order Tags",
+    assignedTo: "Assigned To",
+    difficultyLabel: "Difficulty Label",
+    productTypeLabel: "Product Type Label",
+    addOns: "Add-Ons",
+    customisations: "Customisations",
+    isCompleted: "Completed",
+  }
+  return labels[fieldId] || fieldId
+}
+
+function getDefaultFieldDescription(fieldId: string): string {
+  const descriptions: { [key: string]: string } = {
+    productTitle: "Name of the product",
+    productVariantTitle: "Specific variant of the product",
+    timeslot: "Scheduled order preparation timeslot",
+    orderId: "Unique order identifier",
+    orderDate: "Date when order was placed",
+    orderTags: "Tags associated with the order",
+    assignedTo: "Florist assigned to this order",
+    difficultyLabel: "Difficulty/Priority level",
+    productTypeLabel: "Product type assigned to the product from Product Management",
+    addOns: "Special requests or add-ons for the order",
+    customisations: "Additional remarks and customisation notes",
+    isCompleted: "Order completion status",
+  }
+  return descriptions[fieldId] || ""
+}
+
+function getDefaultFieldType(fieldId: string): string {
+  const types: { [key: string]: string } = {
+    productTitle: "text",
+    productVariantTitle: "text",
+    timeslot: "text",
+    orderId: "text",
+    orderDate: "date",
+    orderTags: "tags",
+    assignedTo: "select",
+    difficultyLabel: "text",
+    productTypeLabel: "text",
+    addOns: "text",
+    customisations: "textarea",
+    isCompleted: "select",
+  }
+  return types[fieldId] || "text"
+}
+
+function getDefaultFieldEditable(fieldId: string): boolean {
+  const editableFields = ["timeslot", "assignedTo", "addOns", "customisations", "isCompleted"]
+  return editableFields.includes(fieldId)
+}
+
+function getDefaultShopifyFields(fieldId: string): string[] {
+  const shopifyFields: { [key: string]: string[] } = {
+    productTitle: ["line_items.title"],
+    productVariantTitle: ["line_items.variant_title"],
+    orderId: ["name"],
+    orderDate: ["created_at"],
+    orderTags: ["tags"],
+    difficultyLabel: ["product:difficultyLabel"],
+    productTypeLabel: ["product:productTypeLabel"],
+    addOns: ["note_attributes"],
+    customisations: ["note"],
+    isCompleted: ["fulfillment_status"],
+  }
+  return shopifyFields[fieldId] || []
 }
 
 export async function saveOrderCardConfig(tenantId: string, config: any): Promise<any> {
-  return authenticatedRequest<any>(`/api/tenants/${tenantId}/config/order-card`, {
-    method: "PUT",
-    body: JSON.stringify(config),
+  // Extract the fields array from the config object
+  const fields = config.fields || config
+  
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/order-card-config`, {
+    method: "POST",
+    body: JSON.stringify({ config: fields }),
   })
 }
 
@@ -350,23 +523,15 @@ export const fetchShopifyOrder = async (
 // Saved Products management
 export async function saveProducts(
   tenantId: string,
-  products: Array<{
-    shopifyProductId: string
-    shopifyVariantId: string
-    title: string
-    variantTitle?: string
-    description?: string
-    price: number
-    tags?: string[]
-    productType?: string
-    vendor?: string
-    handle?: string
-  }>
-): Promise<any[]> {
-  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/saved-products`, {
-    method: "POST",
-    body: JSON.stringify({ products }),
-  })
+  products: any[]
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/saved-products`,
+    {
+      method: "POST",
+      body: JSON.stringify({ products }),
+    }
+  )
 }
 
 export async function getSavedProducts(
@@ -427,5 +592,19 @@ export async function getProductByShopifyIds(
 ): Promise<any | null> {
   return authenticatedRequest<any>(
     `/api/tenants/${tenantId}/saved-products/by-shopify-ids?productId=${shopifyProductId}&variantId=${shopifyVariantId}`
+  )
+}
+
+export async function syncShopifyProduct(
+  tenantId: string,
+  storeId: string,
+  shopifyProductId: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/stores/${storeId}/sync-product`,
+    {
+      method: "POST",
+      body: JSON.stringify({ shopifyProductId }),
+    }
   )
 }

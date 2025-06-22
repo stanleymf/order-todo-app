@@ -939,7 +939,7 @@ export const d1DatabaseService = {
   // Get all Shopify stores for a tenant
   async getShopifyStores(env: any, tenantId: string): Promise<any[]> {
     const { results } = await env.DB.prepare(
-      `SELECT id, tenant_id, shopify_domain as shopifyDomain, access_token as accessToken, webhook_secret as webhookSecret, sync_enabled as syncEnabled, last_sync_at as lastSyncAt, created_at, updated_at FROM shopify_stores WHERE tenant_id = ?`
+      `SELECT id, name, type, shopify_domain as shopifyDomain, sync_enabled as syncEnabled FROM stores WHERE tenant_id = ?`
     )
       .bind(tenantId)
       .all()
@@ -1122,25 +1122,6 @@ export const d1DatabaseService = {
       updatedAt: result.updated_at,
       labelIds: result.label_ids ? result.label_ids.split(",") : [],
       labelNames: result.label_names ? result.label_names.split(",") : [],
-    }))
-  },
-
-  async getSavedProductsWithLabels(env: any, tenantId: string): Promise<any[]> {
-    const query = `
-      SELECT
-        p.id, p.shopify_product_id, p.shopify_variant_id,
-        (SELECT json_group_array(json_object('id', pl.id, 'name', pl.name, 'category', pl.category))
-         FROM saved_product_labels spl
-         JOIN product_labels pl ON spl.label_id = pl.id
-         WHERE spl.product_id = p.id) as labels
-      FROM saved_products p
-      WHERE p.tenant_id = ? AND EXISTS (SELECT 1 FROM saved_product_labels spl WHERE spl.product_id = p.id)
-    `
-    const { results } = await env.DB.prepare(query).bind(tenantId).all()
-
-    return results.map((row: any) => ({
-      ...row,
-      labels: row.labels ? JSON.parse(row.labels) : [],
     }))
   },
 

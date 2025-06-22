@@ -260,13 +260,14 @@ export interface Order {
   shopifyOrderId?: string
   customerName: string
   deliveryDate: string
-  status: string
-  priority: number
+  status: "pending" | "assigned" | "in_progress" | "completed" | "cancelled"
+  priority?: "low" | "medium" | "high"
   assignedTo?: string
   notes?: string
-  product_label?: string
   createdAt: string
   updatedAt: string
+  shopifyOrderData?: any // To store raw Shopify order for dynamic mapping
+  totalPrice?: number
 }
 
 export interface CreateOrderRequest {
