@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-06-22
+
+### ✨ Features & Fixes
+
+-   **Comprehensive Mobile Responsiveness**: A full-site audit and update were performed to ensure all pages and components are mobile-friendly.
+-   **Orders Page (`OrdersView.tsx`)**: The main orders grid, buttons, and text have been optimized for smaller screens.
+-   **Analytics Page (`Analytics.tsx`)**: Card layouts, tables, and spacing have been refined for a better mobile experience.
+-   **Settings Page (`Settings.tsx`)**: All tabs (General, Order Card, Users, Billing), dialogs, and form controls are now fully responsive.
+-   **Live Preview**: The "Fetch a test Shopify order" controls are now stacked and full-width on mobile.
+
+### ♻️ Improvements
+
+-   **UI Consistency**: Improved UI consistency across different screen sizes.
+-   **Touch Targets**: Increased the size of buttons and other interactive elements on mobile for better usability.
+-   **Removed "Save All Settings" Button**: The global "Save All Settings" button in the header was removed to reduce user confusion, as settings are saved per section.
+
 ## [0.5.0] - 2025-01-13
 
 ### ✨ Features & Documentation
