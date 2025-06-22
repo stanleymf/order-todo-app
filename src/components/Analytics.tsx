@@ -165,9 +165,9 @@ export function Analytics() {
   }
 
   return (
-    <div className={`${isMobileView ? "p-3" : "p-6"} max-w-6xl mx-auto`}>
+    <div className={`${isMobileView ? "space-y-4" : "space-y-6"} max-w-6xl mx-auto`}>
       <div
-        className={`flex justify-between ${isMobileView ? "flex-col gap-3 mb-4" : "items-center mb-6"}`}
+        className={`flex justify-between ${isMobileView ? "flex-col gap-3" : "items-center"}`}
       >
         <h2 className={`font-bold text-gray-900 ${isMobileView ? "text-lg" : "text-2xl"}`}>
           {isMobileView ? "Analytics" : "Analytics Dashboard"}
@@ -179,7 +179,7 @@ export function Analytics() {
             onStoreChange={setSelectedStoreId}
           />
           <Select value={timeFrame} onValueChange={(value: TimeFrame) => setTimeFrame(value)}>
-            <SelectTrigger className={`${isMobileView ? "w-full" : "w-[180px]"}`}>
+            <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-[180px]"}`}>
               <SelectValue placeholder="Select timeframe" />
             </SelectTrigger>
             <SelectContent>
@@ -192,7 +192,7 @@ export function Analytics() {
       </div>
 
       {selectedStore && (
-        <div className={`${isMobileView ? "mb-4" : "mb-6"}`}>
+        <div className={isMobileView ? "mb-3" : "mb-6"}>
           <Card
             className="border-l-4"
             style={{ borderLeftColor: generateStoreColor(selectedStore.id) }}
@@ -215,10 +215,10 @@ export function Analytics() {
       )}
 
       <div
-        className={`grid gap-4 ${isMobileView ? "grid-cols-1 mb-6" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"}`}
+        className={`grid gap-4 ${isMobileView ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"}`}
       >
         {/* Total Orders */}
-        <Card>
+        <Card className={isMobileView ? "p-3" : ""}>
           <CardHeader className={`${isMobileView ? "pb-1" : "pb-2"}`}>
             <CardTitle
               className={`font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
@@ -238,7 +238,7 @@ export function Analytics() {
         </Card>
 
         {/* Average Completion Time */}
-        <Card>
+        <Card className={isMobileView ? "p-3" : ""}>
           <CardHeader className={`${isMobileView ? "pb-1" : "pb-2"}`}>
             <CardTitle
               className={`font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
@@ -264,7 +264,7 @@ export function Analytics() {
         </Card>
 
         {/* Top Performer */}
-        <Card>
+        <Card className={isMobileView ? "p-3" : ""}>
           <CardHeader className={`${isMobileView ? "pb-1" : "pb-2"}`}>
             <CardTitle
               className={`font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
@@ -295,7 +295,7 @@ export function Analytics() {
 
       {/* Store Breakdown for All Stores View */}
       {!selectedStoreId && (
-        <div className={`${isMobileView ? "mb-6" : "mb-8"}`}>
+        <div className={isMobileView ? "mb-4" : "mb-8"}>
           <Card>
             <CardHeader className={`${isMobileView ? "pb-2" : ""}`}>
               <CardTitle className={`${isMobileView ? "text-base" : ""}`}>
@@ -304,7 +304,7 @@ export function Analytics() {
                   : `Performance by Store - ${getTimeFrameLabel(timeFrame)}`}
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={isMobileView ? "pt-0" : ""}>
               <div
                 className={`grid gap-4 ${isMobileView ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3"}`}
               >
@@ -329,10 +329,10 @@ export function Analytics() {
                   return (
                     <Card
                       key={store.id}
-                      className="border-l-4"
+                      className={`border-l-4 ${isMobileView ? "p-3" : ""}`}
                       style={{ borderLeftColor: generateStoreColor(store.id) }}
                     >
-                      <CardContent className={`${isMobileView ? "p-3" : "p-4"}`}>
+                      <CardContent className={`${isMobileView ? "p-0" : "p-4"}`}>
                         <div className={`flex items-center ${isMobileView ? "mb-2" : "mb-3"}`}>
                           <div
                             className={`${isMobileView ? "w-2 h-2 mr-2" : "w-3 h-3 mr-2"} rounded-full`}
@@ -388,7 +388,7 @@ export function Analytics() {
             {selectedStore && !isMobileView && ` • ${selectedStore.name}`}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className={isMobileView ? "pt-0" : ""}>
           {isMobileView ? (
             // Mobile Card Layout
             <div className="space-y-3">

@@ -616,7 +616,7 @@ export function ProductManagement() {
   }
 
   return (
-    <div className={`${isMobileView ? "space-y-4 p-3" : "space-y-6"}`}>
+    <div className={`${isMobileView ? "space-y-4" : "space-y-6"}`}>
       {/* Labels Management Section */}
       <Card>
         <CardHeader className={`${isMobileView ? "pb-2" : ""}`}>
@@ -635,33 +635,34 @@ export function ProductManagement() {
                     Add Label
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className={isMobileView ? "w-[95vw] max-w-none" : ""}>
                   <DialogHeader>
-                    <DialogTitle>Add New Product Label</DialogTitle>
-                    <DialogDescription>
+                    <DialogTitle className={isMobileView ? "text-lg" : ""}>Add New Product Label</DialogTitle>
+                    <DialogDescription className={isMobileView ? "text-sm" : ""}>
                       Create and categorize a new label for your products. This helps in organizing
                       and filtering them later.
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-4">
+                  <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
                     <div>
-                      <Label htmlFor="labelName">Label Name</Label>
+                      <Label htmlFor="labelName" className={isMobileView ? "text-sm" : ""}>Label Name</Label>
                       <Input
                         id="labelName"
                         value={newLabelName}
                         onChange={(e) => setNewLabelName(e.target.value)}
                         placeholder="e.g., Very Hard"
+                        className={isMobileView ? "h-9 text-sm" : ""}
                       />
                     </div>
                     <div>
-                      <Label htmlFor="labelCategory">Category</Label>
+                      <Label htmlFor="labelCategory" className={isMobileView ? "text-sm" : ""}>Category</Label>
                       <Select
                         value={newLabelCategory}
                         onValueChange={(value: "difficulty" | "productType") =>
                           setNewLabelCategory(value)
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className={isMobileView ? "h-9 text-sm" : ""}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -671,24 +672,25 @@ export function ProductManagement() {
                       </Select>
                     </div>
                     <div>
-                      <Label htmlFor="labelColor">Color</Label>
+                      <Label htmlFor="labelColor" className={isMobileView ? "text-sm" : ""}>Color</Label>
                       <div className="flex items-center gap-2">
                         <input
                           id="labelColor"
                           type="color"
                           value={newLabelColor}
                           onChange={(e) => setNewLabelColor(e.target.value)}
-                          className="w-12 h-10 rounded border"
+                          className={`rounded border ${isMobileView ? "w-10 h-8" : "w-12 h-10"}`}
                         />
                         <Input
                           value={newLabelColor}
                           onChange={(e) => setNewLabelColor(e.target.value)}
                           placeholder="#3b82f6"
+                          className={isMobileView ? "h-9 text-sm" : ""}
                         />
                       </div>
                     </div>
                     <div>
-                      <Label htmlFor="labelPriority">
+                      <Label htmlFor="labelPriority" className={isMobileView ? "text-sm" : ""}>
                         Priority (lower numbers = higher priority)
                       </Label>
                       <Input
@@ -698,13 +700,14 @@ export function ProductManagement() {
                         value={newLabelPriority}
                         onChange={(e) => setNewLabelPriority(parseInt(e.target.value) || 1)}
                         placeholder="1"
+                        className={isMobileView ? "h-9 text-sm" : ""}
                       />
                     </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setIsAddingLabel(false)}>
+                    <div className={`flex justify-end gap-2 ${isMobileView ? "pt-2" : ""}`}>
+                      <Button variant="outline" onClick={() => setIsAddingLabel(false)} className={isMobileView ? "text-sm" : ""}>
                         Cancel
                       </Button>
-                      <Button onClick={handleAddLabel}>Add Label</Button>
+                      <Button onClick={handleAddLabel} className={isMobileView ? "text-sm" : ""}>Add Label</Button>
                     </div>
                   </div>
                 </DialogContent>
@@ -785,16 +788,16 @@ export function ProductManagement() {
 
       {/* All Products Section */}
       <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              All Products
+        <CardHeader className={isMobileView ? "pb-3" : ""}>
+          <div className={`flex flex-col ${isMobileView ? "gap-3" : "sm:flex-row sm:items-center sm:justify-between gap-2"}`}>
+            <CardTitle className={`flex items-center gap-2 ${isMobileView ? "text-base" : ""}`}>
+              <Package className={`${isMobileView ? "h-4 w-4" : "h-5 w-5"}`} />
+              {isMobileView ? "All Products" : "All Products"}
             </CardTitle>
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto">
-              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+            <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto"}`}>
+              <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:flex-wrap sm:items-center gap-2"}`}>
                 <Select value={syncStoreId} onValueChange={setSyncStoreId}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-40"}`}>
                     <SelectValue placeholder="Select a store" />
                   </SelectTrigger>
                   <SelectContent>
@@ -809,7 +812,7 @@ export function ProductManagement() {
                   value={savedFilter}
                   onValueChange={(value: "all" | "saved" | "not-saved") => setSavedFilter(value)}
                 >
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-40"}`}>
                     <SelectValue placeholder="Filter by saved status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -819,35 +822,36 @@ export function ProductManagement() {
                   </SelectContent>
                 </Select>
                 <Input
-                  className="w-40"
+                  className={`${isMobileView ? "w-full h-9 text-sm" : "w-40"}`}
                   value={syncTitleFilter}
                   onChange={(e) => setSyncTitleFilter(e.target.value)}
                   placeholder="Filter by title"
                 />
                 <Input
-                  className="w-40"
+                  className={`${isMobileView ? "w-full h-9 text-sm" : "w-40"}`}
                   value={syncTagFilter}
                   onChange={(e) => setSyncTagFilter(e.target.value)}
                   placeholder="Filter by tag"
                 />
                 <Input
-                  className="w-40"
+                  className={`${isMobileView ? "w-full h-9 text-sm" : "w-40"}`}
                   value={syncExcludeTags}
                   onChange={(e) => setSyncExcludeTags(e.target.value)}
                   placeholder="Exclude tags (comma separated)"
                 />
               </div>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:ml-auto">
+              <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:items-center gap-2 sm:ml-auto"}`}>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => handleFetchProducts(1)}
                   disabled={isFetchingProducts}
+                  className={isMobileView ? "w-full h-9 text-sm" : ""}
                 >
                   {isFetchingProducts ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
+                    <RefreshCw className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   )}
                   Fetch Products
                 </Button>
@@ -855,16 +859,17 @@ export function ProductManagement() {
                   size="sm"
                   onClick={handleSaveSelectedProducts}
                   disabled={selectedProducts.size === 0 || isSavingProducts}
+                  className={isMobileView ? "w-full h-9 text-sm" : ""}
                 >
                   {isSavingProducts ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   ) : (
-                    <Save className="h-4 w-4 mr-2" />
+                    <Save className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   )}
                   Save Selected ({selectedProducts.size})
                 </Button>
-                <Button size="sm" variant="outline" onClick={clearAllFilters}>
-                  <X className="h-4 w-4 mr-2" />
+                <Button size="sm" variant="outline" onClick={clearAllFilters} className={isMobileView ? "w-full h-9 text-sm" : ""}>
+                  <X className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   Clear Filters
                 </Button>
               </div>
@@ -872,22 +877,22 @@ export function ProductManagement() {
           </div>
           {/* Search bar for All Products */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
             <Input
               type="text"
               placeholder="Search fetched products..."
               value={allProductsSearch}
               onChange={(e) => setAllProductsSearch(e.target.value)}
-              className="pl-10"
+              className={`pl-10 ${isMobileView ? "h-9 text-sm" : ""}`}
             />
             {allProductsSearch && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setAllProductsSearch("")}
-                className="absolute right-1 top-1/2 transform -translate-y-1/2 p-1 h-auto w-8 h-8"
+                className={`absolute right-1 top-1/2 transform -translate-y-1/2 p-1 h-auto ${isMobileView ? "w-6 h-6" : "w-8 h-8"}`}
               >
-                <X className="text-gray-400 h-4 w-4" />
+                <X className={`text-gray-400 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
               </Button>
             )}
           </div>
@@ -898,173 +903,175 @@ export function ProductManagement() {
             syncTitleFilter ||
             syncTagFilter ||
             syncExcludeTags) && (
-            <div className="flex flex-wrap gap-2 mt-2">
+            <div className={`flex flex-wrap ${isMobileView ? "gap-1 mt-2" : "gap-2 mt-2"}`}>
               {allProductsSearch && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   Search: "{allProductsSearch}"
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setAllProductsSearch("")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
               {savedFilter !== "all" && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   {savedFilter === "saved" ? "Saved Only" : "Not Saved"}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSavedFilter("all")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
               {syncTitleFilter && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   Title: "{syncTitleFilter}"
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSyncTitleFilter("")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
               {syncTagFilter && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   Tag: "{syncTagFilter}"
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSyncTagFilter("")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
               {syncExcludeTags && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   Exclude: "{syncExcludeTags}"
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSyncExcludeTags("")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
             </div>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className={isMobileView ? "pt-0" : ""}>
           {finalFilteredProducts.length > 0 ? (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[50px]">
-                      <Checkbox
-                        checked={
-                          selectedProducts.size === finalFilteredProducts.length &&
-                          finalFilteredProducts.length > 0
-                        }
-                        onCheckedChange={handleToggleSelectAll}
-                      />
-                    </TableHead>
-                    <TableHead>Image</TableHead>
-                    <TableHead>Title and Variant Title</TableHead>
-                    <TableHead>Product Tags</TableHead>
-                    <TableHead>Product Price</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {finalFilteredProducts.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
+              <div className={`overflow-x-auto ${isMobileView ? "-mx-3" : ""}`}>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={`${isMobileView ? "w-[40px] px-2" : "w-[50px]"}`}>
                         <Checkbox
-                          checked={selectedProducts.has(product.id)}
-                          onCheckedChange={() => handleToggleSelectProduct(product.id)}
+                          checked={
+                            selectedProducts.size === finalFilteredProducts.length &&
+                            finalFilteredProducts.length > 0
+                          }
+                          onCheckedChange={handleToggleSelectAll}
                         />
-                      </TableCell>
-                      <TableCell>
-                        {product.images?.[0]?.src ? (
-                          <div className="relative">
-                            <img
-                              src={product.images[0].src}
-                              alt={product.images[0].alt || product.title}
-                              className="w-12 h-12 object-cover rounded"
-                            />
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="absolute -top-1 -right-1 h-6 w-6 p-0 bg-white border rounded-full shadow-sm hover:bg-gray-50"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle>{product.title}</DialogTitle>
-                                </DialogHeader>
-                                <div className="flex justify-center">
-                                  <img
-                                    src={product.images[0].src}
-                                    alt={product.images[0].alt || product.title}
-                                    className="max-w-full max-h-96 object-contain"
-                                  />
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          </div>
-                        ) : (
-                          <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">
-                            <Package className="h-4 w-4 text-gray-400" />
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{product.title}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {product.variants?.[0]?.title}
-                        </div>
-                        {isProductAlreadySaved(product.shopifyId) && (
-                          <Badge variant="outline" className="mt-1 text-xs">
-                            ✓ Already Saved
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {product.tags?.map((tag: string) => (
-                            <Badge key={tag} variant="secondary">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>{product.variants?.[0]?.price}</TableCell>
+                      </TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Image</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Title and Variant Title</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Product Tags</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Product Price</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {finalFilteredProducts.map((product) => (
+                      <TableRow key={product.id}>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <Checkbox
+                            checked={selectedProducts.has(product.id)}
+                            onCheckedChange={() => handleToggleSelectProduct(product.id)}
+                          />
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          {product.images?.[0]?.src ? (
+                            <div className="relative">
+                              <img
+                                src={product.images[0].src}
+                                alt={product.images[0].alt || product.title}
+                                className={`object-cover rounded ${isMobileView ? "w-10 h-10" : "w-12 h-12"}`}
+                              />
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`absolute -top-1 -right-1 p-0 bg-white border rounded-full shadow-sm hover:bg-gray-50 ${isMobileView ? "h-5 w-5" : "h-6 w-6"}`}
+                                  >
+                                    <Eye className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className={`${isMobileView ? "w-[95vw] max-w-none" : "max-w-2xl"}`}>
+                                  <DialogHeader>
+                                    <DialogTitle className={isMobileView ? "text-lg" : ""}>{product.title}</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="flex justify-center">
+                                    <img
+                                      src={product.images[0].src}
+                                      alt={product.images[0].alt || product.title}
+                                      className="max-w-full max-h-96 object-contain"
+                                    />
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                          ) : (
+                            <div className={`bg-gray-100 rounded flex items-center justify-center ${isMobileView ? "w-10 h-10" : "w-12 h-12"}`}>
+                              <Package className={`text-gray-400 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <div className={`font-medium ${isMobileView ? "text-sm" : ""}`}>{product.title}</div>
+                          <div className={`text-muted-foreground ${isMobileView ? "text-xs" : "text-sm"}`}>
+                            {product.variants?.[0]?.title}
+                          </div>
+                          {isProductAlreadySaved(product.shopifyId) && (
+                            <Badge variant="outline" className={`mt-1 ${isMobileView ? "text-[10px]" : "text-xs"}`}>
+                              ✓ Already Saved
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <div className={`flex flex-wrap ${isMobileView ? "gap-1" : "gap-1"}`}>
+                            {product.tags?.map((tag: string) => (
+                              <Badge key={tag} variant="secondary" className={isMobileView ? "text-[10px]" : ""}>
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2 text-sm" : ""}>{product.variants?.[0]?.price}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
 
               {/* Pagination Controls */}
               {pagination && (
-                <div className="flex justify-between items-center mt-4">
-                  <div className="text-sm text-gray-600">
+                <div className={`flex justify-between items-center mt-4 ${isMobileView ? "flex-col gap-2" : ""}`}>
+                  <div className={`text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}>
                     Showing {finalFilteredProducts.length} of ~{pagination.total} products
                   </div>
                   <div className="flex gap-2">
@@ -1074,9 +1081,10 @@ export function ProductManagement() {
                         variant="outline"
                         onClick={handleLoadMoreProducts}
                         disabled={isFetchingProducts}
+                        className={isMobileView ? "text-xs px-3 py-1 h-8" : ""}
                       >
                         {isFetchingProducts ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                         ) : null}
                         Load More
                       </Button>
@@ -1087,8 +1095,8 @@ export function ProductManagement() {
             </>
           ) : (
             <div className="text-center py-8 text-gray-500">
-              <p>No products fetched yet.</p>
-              <p className="text-sm">Use the "Fetch Products" button to get started.</p>
+              <p className={isMobileView ? "text-sm" : ""}>No products fetched yet.</p>
+              <p className={`${isMobileView ? "text-xs" : "text-sm"}`}>Use the "Fetch Products" button to get started.</p>
             </div>
           )}
         </CardContent>
@@ -1096,21 +1104,22 @@ export function ProductManagement() {
 
       {/* Saved Products Section */}
       <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Save className="h-5 w-5" />
+        <CardHeader className={isMobileView ? "pb-3" : ""}>
+          <div className={`flex flex-col ${isMobileView ? "gap-3" : "sm:flex-row sm:items-center sm:justify-between"}`}>
+            <CardTitle className={`flex items-center gap-2 ${isMobileView ? "text-base" : ""}`}>
+              <Save className={`${isMobileView ? "h-4 w-4" : "h-5 w-5"}`} />
               Saved Products
             </CardTitle>
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-4">
+          <div className={`flex flex-col ${isMobileView ? "gap-3" : "sm:flex-row sm:items-center sm:justify-between mt-4"}`}>
             {/* Filters on the left */}
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
-              <div className="w-64">
+            <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:flex-wrap sm:items-center gap-2"}`}>
+              <div className={isMobileView ? "w-full" : "w-64"}>
                 <Input
                   placeholder="Search saved products..."
                   value={savedProductSearch}
                   onChange={(e) => setSavedProductSearch(e.target.value)}
+                  className={isMobileView ? "h-9 text-sm" : ""}
                 />
               </div>
               <Select
@@ -1119,7 +1128,7 @@ export function ProductManagement() {
                   setLabelledFilter(value)
                 }
               >
-                <SelectTrigger className="w-48">
+                <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-48"}`}>
                   <SelectValue placeholder="Filter by label status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1128,16 +1137,16 @@ export function ProductManagement() {
                   <SelectItem value="not-labelled">Not Labelled</SelectItem>
                 </SelectContent>
               </Select>
-              <Button size="sm" variant="outline" onClick={clearSavedProductFilters}>
-                <X className="h-4 w-4 mr-2" />
+              <Button size="sm" variant="outline" onClick={clearSavedProductFilters} className={isMobileView ? "w-full h-9 text-sm" : ""}>
+                <X className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Clear Filters
               </Button>
             </div>
 
             {/* Actions on the right */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-2 sm:mt-0">
+            <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:items-center gap-2 mt-2 sm:mt-0"}`}>
               <Select value={selectedDifficultyLabel} onValueChange={setSelectedDifficultyLabel}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-48"}`}>
                   <SelectValue placeholder="Select difficulty label" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1155,7 +1164,7 @@ export function ProductManagement() {
                 </SelectContent>
               </Select>
               <Select value={selectedProductTypeLabel} onValueChange={setSelectedProductTypeLabel}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-48"}`}>
                   <SelectValue placeholder="Select product type label" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1181,8 +1190,9 @@ export function ProductManagement() {
                   selectedSavedProducts.size === 0 ||
                   (!selectedDifficultyLabel && !selectedProductTypeLabel)
                 }
+                className={isMobileView ? "w-full h-9 text-sm" : ""}
               >
-                <Tag className="h-4 w-4 mr-2" />
+                <Tag className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Apply Labels ({selectedSavedProducts.size})
               </Button>
 
@@ -1191,153 +1201,157 @@ export function ProductManagement() {
                 variant="destructive"
                 onClick={handleBulkDeleteSavedProducts}
                 disabled={selectedSavedProducts.size === 0}
+                className={isMobileView ? "w-full h-9 text-sm" : ""}
               >
-                <Trash2 className="h-4 w-4 mr-2" />
+                <Trash2 className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Delete ({selectedSavedProducts.size})
               </Button>
             </div>
           </div>
           {(savedProductSearch || labelledFilter !== "all") && (
-            <div className="flex flex-wrap gap-2 mt-2">
+            <div className={`flex flex-wrap ${isMobileView ? "gap-1 mt-2" : "gap-2 mt-2"}`}>
               {savedProductSearch && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   Search: "{savedProductSearch}"
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSavedProductSearch("")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
               {labelledFilter !== "all" && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
                   {labelledFilter === "labelled" ? "Labelled" : "Not Labelled"}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setLabelledFilter("all")}
-                    className="ml-1 h-4 w-4 p-0"
+                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
                   >
-                    <X className="h-3 w-3" />
+                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
                   </Button>
                 </Badge>
               )}
             </div>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className={isMobileView ? "pt-0" : ""}>
           {paginatedSavedProducts.length > 0 ? (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[50px]">
-                      <Checkbox
-                        checked={
-                          selectedSavedProducts.size === paginatedSavedProducts.length &&
-                          paginatedSavedProducts.length > 0
-                        }
-                        onCheckedChange={handleToggleSelectAllSavedProducts}
-                      />
-                    </TableHead>
-                    <TableHead>Image</TableHead>
-                    <TableHead>Title and Variant Title</TableHead>
-                    <TableHead>Product Tags</TableHead>
-                    <TableHead>Labels</TableHead>
-                    <TableHead>Product Price</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedSavedProducts.map((product) => (
-                    <TableRow key={product.id}>
-                      <TableCell>
+              <div className={`overflow-x-auto ${isMobileView ? "-mx-3" : ""}`}>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={`${isMobileView ? "w-[40px] px-2" : "w-[50px]"}`}>
                         <Checkbox
-                          checked={selectedSavedProducts.has(product.id)}
-                          onCheckedChange={() => handleToggleSelectSavedProduct(product.id)}
+                          checked={
+                            selectedSavedProducts.size === paginatedSavedProducts.length &&
+                            paginatedSavedProducts.length > 0
+                          }
+                          onCheckedChange={handleToggleSelectAllSavedProducts}
                         />
-                      </TableCell>
-                      <TableCell>
-                        {product.imageUrl ? (
-                          <div className="relative">
-                            <img
-                              src={product.imageUrl}
-                              alt={product.imageAlt || product.title}
-                              className="w-12 h-12 object-cover rounded"
-                            />
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="absolute -top-1 -right-1 h-6 w-6 p-0 bg-white border rounded-full shadow-sm hover:bg-gray-50"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle>{product.title}</DialogTitle>
-                                </DialogHeader>
-                                <div className="flex justify-center">
-                                  <img
-                                    src={product.imageUrl}
-                                    alt={product.imageAlt || product.title}
-                                    className="max-w-full max-h-96 object-contain"
-                                  />
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          </div>
-                        ) : (
-                          <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">
-                            <Package className="h-4 w-4 text-gray-400" />
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{product.title}</div>
-                        <div className="text-sm text-muted-foreground">{product.variantTitle}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {product.tags.map((tag: string) => (
-                            <Badge key={tag} variant="secondary">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {product.labelNames?.map((labelName: string) => {
-                            const labelObj = labels.find((l) => l.name === labelName)
-                            return (
-                              <Badge
-                                key={labelName}
-                                variant="secondary"
-                                style={
-                                  labelObj ? { backgroundColor: labelObj.color, color: "#fff" } : {}
-                                }
-                              >
-                                {labelName}
-                              </Badge>
-                            )
-                          })}
-                        </div>
-                      </TableCell>
-                      <TableCell>{product.price}</TableCell>
+                      </TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Image</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Title and Variant Title</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Product Tags</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Labels</TableHead>
+                      <TableHead className={isMobileView ? "px-2" : ""}>Product Price</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedSavedProducts.map((product) => (
+                      <TableRow key={product.id}>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <Checkbox
+                            checked={selectedSavedProducts.has(product.id)}
+                            onCheckedChange={() => handleToggleSelectSavedProduct(product.id)}
+                          />
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          {product.imageUrl ? (
+                            <div className="relative">
+                              <img
+                                src={product.imageUrl}
+                                alt={product.imageAlt || product.title}
+                                className={`object-cover rounded ${isMobileView ? "w-10 h-10" : "w-12 h-12"}`}
+                              />
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`absolute -top-1 -right-1 p-0 bg-white border rounded-full shadow-sm hover:bg-gray-50 ${isMobileView ? "h-5 w-5" : "h-6 w-6"}`}
+                                  >
+                                    <Eye className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className={`${isMobileView ? "w-[95vw] max-w-none" : "max-w-2xl"}`}>
+                                  <DialogHeader>
+                                    <DialogTitle className={isMobileView ? "text-lg" : ""}>{product.title}</DialogTitle>
+                                  </DialogHeader>
+                                  <div className="flex justify-center">
+                                    <img
+                                      src={product.imageUrl}
+                                      alt={product.imageAlt || product.title}
+                                      className="max-w-full max-h-96 object-contain"
+                                    />
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                          ) : (
+                            <div className={`bg-gray-100 rounded flex items-center justify-center ${isMobileView ? "w-10 h-10" : "w-12 h-12"}`}>
+                              <Package className={`text-gray-400 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <div className={`font-medium ${isMobileView ? "text-sm" : ""}`}>{product.title}</div>
+                          <div className={`text-muted-foreground ${isMobileView ? "text-xs" : "text-sm"}`}>{product.variantTitle}</div>
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <div className={`flex flex-wrap ${isMobileView ? "gap-1" : "gap-1"}`}>
+                            {product.tags.map((tag: string) => (
+                              <Badge key={tag} variant="secondary" className={isMobileView ? "text-[10px]" : ""}>
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2" : ""}>
+                          <div className={`flex flex-wrap ${isMobileView ? "gap-1" : "gap-1"}`}>
+                            {product.labelNames?.map((labelName: string) => {
+                              const labelObj = labels.find((l) => l.name === labelName)
+                              return (
+                                <Badge
+                                  key={labelName}
+                                  variant="secondary"
+                                  style={
+                                    labelObj ? { backgroundColor: labelObj.color, color: "#fff" } : {}
+                                  }
+                                  className={isMobileView ? "text-[10px]" : ""}
+                                >
+                                  {labelName}
+                                </Badge>
+                              )
+                            })}
+                          </div>
+                        </TableCell>
+                        <TableCell className={isMobileView ? "px-2 text-sm" : ""}>{product.price}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
 
               {/* Pagination Controls for Saved Products */}
               {totalSavedProductsPages > 1 && (
-                <div className="flex justify-between items-center mt-4">
-                  <div className="text-sm text-gray-600">
+                <div className={`flex justify-between items-center mt-4 ${isMobileView ? "flex-col gap-2" : ""}`}>
+                  <div className={`text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}>
                     Showing {(savedProductsPage - 1) * savedProductsPerPage + 1} to{" "}
                     {Math.min(
                       savedProductsPage * savedProductsPerPage,
@@ -1345,12 +1359,13 @@ export function ProductManagement() {
                     )}{" "}
                     of {filteredSavedProducts.length} saved products
                   </div>
-                  <div className="flex gap-2">
+                  <div className={`flex gap-2 ${isMobileView ? "flex-wrap justify-center" : ""}`}>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={handleFirstSavedProductsPage}
                       disabled={savedProductsPage === 1}
+                      className={isMobileView ? "text-xs px-2 py-1 h-8" : ""}
                     >
                       First
                     </Button>
@@ -1359,10 +1374,11 @@ export function ProductManagement() {
                       variant="outline"
                       onClick={handlePrevSavedProductsPage}
                       disabled={savedProductsPage === 1}
+                      className={isMobileView ? "text-xs px-2 py-1 h-8" : ""}
                     >
                       Previous
                     </Button>
-                    <span className="flex items-center px-3 text-sm">
+                    <span className={`flex items-center px-3 ${isMobileView ? "text-xs" : "text-sm"}`}>
                       Page {savedProductsPage} of {totalSavedProductsPages}
                     </span>
                     <Button
@@ -1370,6 +1386,7 @@ export function ProductManagement() {
                       variant="outline"
                       onClick={handleNextSavedProductsPage}
                       disabled={!hasNextSavedProductsPage}
+                      className={isMobileView ? "text-xs px-2 py-1 h-8" : ""}
                     >
                       Next
                     </Button>
@@ -1378,6 +1395,7 @@ export function ProductManagement() {
                       variant="outline"
                       onClick={handleLastSavedProductsPage}
                       disabled={!hasNextSavedProductsPage}
+                      className={isMobileView ? "text-xs px-2 py-1 h-8" : ""}
                     >
                       Last
                     </Button>
@@ -1387,8 +1405,8 @@ export function ProductManagement() {
             </>
           ) : (
             <div className="text-center py-8 text-gray-500">
-              <p>No saved products found.</p>
-              <p className="text-sm">Use the search bar to find saved products.</p>
+              <p className={isMobileView ? "text-sm" : ""}>No saved products found.</p>
+              <p className={`${isMobileView ? "text-xs" : "text-sm"}`}>Use the search bar to find saved products.</p>
             </div>
           )}
         </CardContent>

@@ -367,39 +367,52 @@ const FetchOrderControls: React.FC<FetchOrderControlsProps> = ({
   setOrderNameToFetch,
   onFetchOrder,
   isFetching,
-}) => (
-  <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/40">
-    <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
-      <SelectTrigger className="w-[200px]">
-        <SelectValue placeholder="Select a store" />
-      </SelectTrigger>
-      <SelectContent>
-        {stores.map((store) => (
-          <SelectItem key={store.id} value={store.id}>
-            {store.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-    <Input
-      className="w-[180px]"
-      placeholder="Order Name (e.g. #1001)"
-      value={orderNameToFetch}
-      onChange={(e) => setOrderNameToFetch(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onFocus={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    />
-    <Button onClick={onFetchOrder} disabled={isFetching} variant="outline" className="w-[140px]">
-      {isFetching ? (
-        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-      ) : (
-        <RefreshCw className="h-4 w-4 mr-2" />
-      )}
-      Fetch Order
-    </Button>
-  </div>
-)
+}) => {
+  const isMobile = useIsMobile()
+
+  return (
+    <div
+      className={`flex items-center gap-2 p-3 border rounded-lg bg-muted/40 ${
+        isMobile ? "flex-col" : ""
+      }`}
+    >
+      <Select value={selectedStoreId} onValueChange={setSelectedStoreId}>
+        <SelectTrigger className={isMobile ? "w-full" : "w-[200px]"}>
+          <SelectValue placeholder="Select a store" />
+        </SelectTrigger>
+        <SelectContent>
+          {stores.map((store) => (
+            <SelectItem key={store.id} value={store.id}>
+              {store.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        className={isMobile ? "w-full" : "w-[180px]"}
+        placeholder="Order Name (e.g. #1001)"
+        value={orderNameToFetch}
+        onChange={(e) => setOrderNameToFetch(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        onFocus={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      />
+      <Button
+        onClick={onFetchOrder}
+        disabled={isFetching}
+        variant="outline"
+        className={isMobile ? "w-full" : "w-[140px]"}
+      >
+        {isFetching ? (
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        ) : (
+          <RefreshCw className="h-4 w-4 mr-2" />
+        )}
+        Fetch Order
+      </Button>
+    </div>
+  )
+}
 
 interface FieldVisibilityControlsProps {
   fields: OrderCardField[]

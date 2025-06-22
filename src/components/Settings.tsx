@@ -757,76 +757,73 @@ export const Settings: React.FC = () => {
   if (error) return <div>{error}</div>
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <Button onClick={handleSaveOrderCardConfig} disabled={isSaving}>
-          <Save className="mr-2 h-4 w-4" />
-          Save All Settings
-        </Button>
+    <div className={`space-y-6 ${isMobile ? "p-3" : ""}`}>
+      <div className={`flex items-center justify-between ${isMobile ? "flex-col gap-3" : ""}`}>
+        <h1 className={`font-bold tracking-tight ${isMobile ? "text-2xl" : "text-3xl"}`}>Settings</h1>
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <ScrollArea className="w-full whitespace-nowrap rounded-md border">
-          <TabsList className="inline-flex h-auto">
-            <TabsTrigger value="general">
-              <SettingsIcon className="mr-2 h-4 w-4" />
-              General
+          <TabsList className={`inline-flex h-auto ${isMobile ? "p-1 gap-1" : ""}`}>
+            <TabsTrigger value="general" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
+              <SettingsIcon className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
+              {isMobile ? "General" : "General"}
             </TabsTrigger>
-            <TabsTrigger value="order-card">
-              <Layout className="mr-2 h-4 w-4" />
-              Order Card
+            <TabsTrigger value="order-card" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
+              <Layout className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
+              {isMobile ? "Order Card" : "Order Card"}
             </TabsTrigger>
-            <TabsTrigger value="users">
-              <Users className="mr-2 h-4 w-4" />
-              User Management
+            <TabsTrigger value="users" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
+              <Users className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
+              {isMobile ? "Users" : "User Management"}
             </TabsTrigger>
-            <TabsTrigger value="billing">
-              <CreditCard className="mr-2 h-4 w-4" />
-              Billing
+            <TabsTrigger value="billing" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
+              <CreditCard className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
+              {isMobile ? "Billing" : "Billing"}
             </TabsTrigger>
           </TabsList>
         </ScrollArea>
 
         <TabsContent value="general">
           <Card>
-            <CardHeader>
-              <CardTitle>Store Management</CardTitle>
-              <CardDescription>
+            <CardHeader className={isMobile ? "pb-3" : ""}>
+              <CardTitle className={isMobile ? "text-lg" : ""}>Store Management</CardTitle>
+              <CardDescription className={isMobile ? "text-sm" : ""}>
                 Manage your Shopify store connections, API keys, and webhooks.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
+            <CardContent className={isMobile ? "pt-0" : ""}>
+              <div className={`space-y-6 ${isMobile ? "space-y-4" : ""}`}>
                 {/* Store List */}
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">Connected Stores</h3>
+                  <div className={`flex items-center justify-between mb-4 ${isMobile ? "flex-col gap-3" : ""}`}>
+                    <h3 className={`font-semibold ${isMobile ? "text-base" : "text-lg"}`}>Connected Stores</h3>
                     <Dialog open={showAddStoreDialog} onOpenChange={setShowAddStoreDialog}>
                       <DialogTrigger asChild>
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" /> Add Store
+                        <Button className={isMobile ? "w-full" : ""}>
+                          <Plus className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} /> Add Store
                         </Button>
                       </DialogTrigger>
-                      <DialogContent>
+                      <DialogContent className={isMobile ? "w-[95vw] max-w-none" : ""}>
                         <DialogHeader>
-                          <DialogTitle>Add Shopify Store</DialogTitle>
-                          <DialogDescription>
+                          <DialogTitle className={isMobile ? "text-lg" : ""}>Add Shopify Store</DialogTitle>
+                          <DialogDescription className={isMobile ? "text-sm" : ""}>
                             Enter your Shopify store details to connect.
                           </DialogDescription>
                         </DialogHeader>
-                        <div className="space-y-4 py-4">
+                        <div className={`space-y-4 py-4 ${isMobile ? "space-y-3" : ""}`}>
                           <div className="space-y-2">
-                            <Label htmlFor="store-name">Store Name</Label>
+                            <Label htmlFor="store-name" className={isMobile ? "text-sm" : ""}>Store Name</Label>
                             <Input
                               id="store-name"
                               placeholder="My Awesome Flower Shop"
                               value={newStore.name}
                               onChange={(e) => setNewStore({ ...newStore, name: e.target.value })}
+                              className={isMobile ? "h-9 text-sm" : ""}
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="store-domain">Store Domain</Label>
+                            <Label htmlFor="store-domain" className={isMobile ? "text-sm" : ""}>Store Domain</Label>
                             <Input
                               id="store-domain"
                               placeholder="your-store.myshopify.com"
@@ -837,10 +834,11 @@ export const Settings: React.FC = () => {
                                   settings: { ...newStore.settings, domain: e.target.value },
                                 })
                               }
+                              className={isMobile ? "h-9 text-sm" : ""}
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="access-token">Admin API Access Token</Label>
+                            <Label htmlFor="access-token" className={isMobile ? "text-sm" : ""}>Admin API Access Token</Label>
                             <Input
                               id="access-token"
                               type="password"
@@ -852,10 +850,11 @@ export const Settings: React.FC = () => {
                                   settings: { ...newStore.settings, accessToken: e.target.value },
                                 })
                               }
+                              className={isMobile ? "h-9 text-sm" : ""}
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="api-secret-key">API Secret Key</Label>
+                            <Label htmlFor="api-secret-key" className={isMobile ? "text-sm" : ""}>API Secret Key</Label>
                             <Input
                               id="api-secret-key"
                               type="password"
@@ -867,9 +866,10 @@ export const Settings: React.FC = () => {
                                   settings: { ...newStore.settings, apiSecretKey: e.target.value },
                                 })
                               }
+                              className={isMobile ? "h-9 text-sm" : ""}
                             />
                           </div>
-                          <Button onClick={handleAddStore} className="w-full">
+                          <Button onClick={handleAddStore} className={`w-full ${isMobile ? "h-9 text-sm" : ""}`}>
                             Connect Store
                           </Button>
                         </div>
@@ -877,65 +877,65 @@ export const Settings: React.FC = () => {
                     </Dialog>
                   </div>
 
-                  <div className="grid gap-4">
+                  <div className={`grid gap-4 ${isMobile ? "gap-3" : ""}`}>
                     {stores.map((s) => (
-                      <Card key={s.id} className="p-4">
-                        <CardHeader className="p-0 pb-4">
-                          <div className="flex items-center justify-between">
+                      <Card key={s.id} className={`p-4 ${isMobile ? "p-3" : ""}`}>
+                        <CardHeader className={`p-0 pb-4 ${isMobile ? "pb-3" : ""}`}>
+                          <div className={`flex items-center justify-between ${isMobile ? "flex-col gap-2 items-start" : ""}`}>
                             <div>
-                              <CardTitle className="text-lg">{s.name}</CardTitle>
-                              <CardDescription>
+                              <CardTitle className={`${isMobile ? "text-base" : "text-lg"}`}>{s.name}</CardTitle>
+                              <CardDescription className={isMobile ? "text-xs" : ""}>
                                 {s.settings.address || "No domain configured"}
                               </CardDescription>
                             </div>
-                            <Badge variant={s.status === "active" ? "default" : "secondary"}>
+                            <Badge variant={s.status === "active" ? "default" : "secondary"} className={isMobile ? "text-xs" : ""}>
                               {s.status}
                             </Badge>
                           </div>
                         </CardHeader>
                         <CardContent className="p-0">
-                          <div className="space-y-4">
+                          <div className={`space-y-4 ${isMobile ? "space-y-3" : ""}`}>
                             {/* API Configuration */}
                             <div>
-                              <h4 className="font-semibold mb-2 flex items-center">
-                                <Key className="h-4 w-4 mr-2" />
+                              <h4 className={`font-semibold mb-2 flex items-center ${isMobile ? "text-sm" : ""}`}>
+                                <Key className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                                 API Configuration
                               </h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                              <div className={`grid grid-cols-1 ${isMobile ? "gap-1" : "md:grid-cols-2 gap-2"} text-sm`}>
                                 <div>
                                   <span className="text-muted-foreground">Domain:</span>
-                                  <span className="ml-2 font-mono">
+                                  <span className={`ml-2 font-mono ${isMobile ? "text-xs" : ""}`}>
                                     {s.settings.address || "Not set"}
                                   </span>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Access Token:</span>
-                                  <span className="ml-2 font-mono">••••••••</span>
+                                  <span className={`ml-2 font-mono ${isMobile ? "text-xs" : ""}`}>••••••••</span>
                                 </div>
                                 <div>
                                   <span className="text-muted-foreground">Secret Key:</span>
-                                  <span className="ml-2 font-mono">••••••••</span>
+                                  <span className={`ml-2 font-mono ${isMobile ? "text-xs" : ""}`}>••••••••</span>
                                 </div>
                               </div>
                             </div>
 
                             {/* Webhook Status */}
                             <div>
-                              <h4 className="font-semibold mb-2 flex items-center">
-                                <Webhook className="h-4 w-4 mr-2" />
+                              <h4 className={`font-semibold mb-2 flex items-center ${isMobile ? "text-sm" : ""}`}>
+                                <Webhook className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                                 Webhooks
                               </h4>
                               {s.settings.webhooks && s.settings.webhooks.length > 0 ? (
-                                <div className="space-y-2">
+                                <div className={`space-y-2 ${isMobile ? "space-y-1" : ""}`}>
                                   {s.settings.webhooks.map((wh: WebhookConfig) => (
                                     <div
                                       key={wh.id}
-                                      className="flex items-center justify-between text-sm"
+                                      className={`flex items-center justify-between ${isMobile ? "text-xs" : "text-sm"}`}
                                     >
-                                      <span className="font-mono">{wh.topic}</span>
+                                      <span className={`font-mono ${isMobile ? "text-xs" : ""}`}>{wh.topic}</span>
                                       <Badge
                                         variant={wh.status === "active" ? "default" : "secondary"}
-                                        className="text-xs"
+                                        className={`${isMobile ? "text-[10px]" : "text-xs"}`}
                                       >
                                         {wh.status}
                                       </Badge>
@@ -943,32 +943,32 @@ export const Settings: React.FC = () => {
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-sm text-muted-foreground">
+                                <p className={`text-muted-foreground ${isMobile ? "text-xs" : "text-sm"}`}>
                                   No webhooks configured.
                                 </p>
                               )}
                               <Button
-                                className="mt-2"
+                                className={`mt-2 ${isMobile ? "w-full h-8 text-xs" : ""}`}
                                 onClick={() => handleRegisterWebhooks(s.id)}
                                 variant="outline"
                                 size="sm"
                               >
-                                <RefreshCw className="h-4 w-4 mr-2" />
+                                <RefreshCw className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                                 Register Webhooks
                               </Button>
                             </div>
 
                             {/* Webhook URL */}
                             <div>
-                              <h4 className="font-semibold mb-2 flex items-center">
-                                <Link className="h-4 w-4 mr-2" />
+                              <h4 className={`font-semibold mb-2 flex items-center ${isMobile ? "text-sm" : ""}`}>
+                                <Link className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                                 Webhook URL
                               </h4>
-                              <div className="flex items-center space-x-2">
+                              <div className={`flex items-center space-x-2 ${isMobile ? "flex-col gap-2" : ""}`}>
                                 <Input
                                   value={`https://${window.location.hostname}/api/webhooks/shopify`}
                                   readOnly
-                                  className="font-mono text-sm"
+                                  className={`font-mono ${isMobile ? "text-xs h-8" : "text-sm"}`}
                                 />
                                 <Button
                                   variant="outline"
@@ -978,11 +978,12 @@ export const Settings: React.FC = () => {
                                       `https://${window.location.hostname}/api/webhooks/shopify`
                                     )
                                   }
+                                  className={isMobile ? "w-full h-8 text-xs" : ""}
                                 >
                                   Copy
                                 </Button>
                               </div>
-                              <p className="text-xs text-muted-foreground mt-1">
+                              <p className={`text-muted-foreground mt-1 ${isMobile ? "text-[10px]" : "text-xs"}`}>
                                 Use this URL when configuring webhooks in your Shopify admin.
                               </p>
                             </div>
@@ -999,10 +1000,10 @@ export const Settings: React.FC = () => {
 
         <TabsContent value="order-card" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Live Preview</CardTitle>
+            <CardHeader className={isMobile ? "pb-3" : ""}>
+              <CardTitle className={isMobile ? "text-lg" : ""}>Live Preview</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className={isMobile ? "pt-0" : ""}>
               <OrderCardPreview
                 fields={orderCardConfig.fields.filter((f) => f.isVisible)}
                 onToggleFieldVisibility={handleToggleFieldVisibility}
@@ -1023,31 +1024,32 @@ export const Settings: React.FC = () => {
             </CardContent>
           </Card>
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Field Mappings</CardTitle>
-                <div className="flex items-center space-x-2">
+            <CardHeader className={isMobile ? "pb-3" : ""}>
+              <div className={`flex items-center justify-between ${isMobile ? "flex-col gap-3" : ""}`}>
+                <CardTitle className={isMobile ? "text-lg" : ""}>Field Mappings</CardTitle>
+                <div className={`flex items-center space-x-2 ${isMobile ? "flex-col gap-2 w-full" : ""}`}>
                   <Button 
                     variant="outline" 
                     size="sm" 
                     onClick={() => setShowAddFieldDialog(true)}
+                    className={isMobile ? "w-full h-9 text-sm" : ""}
                   >
-                    <Plus className="h-4 w-4 mr-2" />
+                    <Plus className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                     Add Custom Field
                   </Button>
                   <Button 
                     onClick={handleSaveOrderCardConfig}
                     disabled={isSaving}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className={`bg-blue-600 hover:bg-blue-700 text-white ${isMobile ? "w-full h-9 text-sm" : ""}`}
                   >
                     {isSaving ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        <Loader2 className={`animate-spin mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                         Saving...
                       </>
                     ) : (
                       <>
-                        <Save className="h-4 w-4 mr-2" />
+                        <Save className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                         Save Field Mappings
                       </>
                     )}
@@ -1055,24 +1057,24 @@ export const Settings: React.FC = () => {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className={`space-y-4 ${isMobile ? "pt-0 space-y-3" : ""}`}>
               {orderCardConfig.fields.map((field) => (
-                <div key={field.id} className="p-4 border rounded-lg space-y-4">
-                  <div className="flex items-center justify-between">
+                <div key={field.id} className={`p-4 border rounded-lg space-y-4 ${isMobile ? "p-3 space-y-3" : ""}`}>
+                  <div className={`flex items-center justify-between ${isMobile ? "flex-col gap-3 items-start" : ""}`}>
                     <div className="flex items-center gap-3">
                       <div className="text-gray-400">{getFieldIcon(field.id)}</div>
                       <div>
-                        <Label htmlFor={`mapping-${field.id}`} className="font-semibold text-base">
+                        <Label htmlFor={`mapping-${field.id}`} className={`font-semibold ${isMobile ? "text-sm" : "text-base"}`}>
                           {field.label}
                         </Label>
-                        <p className="text-sm text-muted-foreground">{field.description}</p>
+                        <p className={`text-muted-foreground ${isMobile ? "text-xs" : "text-sm"}`}>{field.description}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-2 ${isMobile ? "w-full justify-between" : ""}`}>
                       <div className="flex items-center gap-2">
                         <Label
                           htmlFor={`visible-${field.id}`}
-                          className="text-sm font-medium text-muted-foreground"
+                          className={`font-medium text-muted-foreground ${isMobile ? "text-xs" : "text-sm"}`}
                         >
                           {field.isVisible ? "Visible" : "Hidden"}
                         </Label>
@@ -1086,17 +1088,17 @@ export const Settings: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="text-muted-foreground hover:text-destructive"
+                          className={`text-muted-foreground hover:text-destructive ${isMobile ? "h-8 w-8" : ""}`}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className={`${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                         </Button>
                       )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end pl-10">
+                  <div className={`grid grid-cols-1 ${isMobile ? "gap-3" : "md:grid-cols-2 lg:grid-cols-3 gap-4"} items-end ${isMobile ? "pl-0" : "pl-10"}`}>
                     <div>
-                      <Label className="text-xs text-muted-foreground">Shopify Field</Label>
+                      <Label className={`text-muted-foreground ${isMobile ? "text-xs" : "text-xs"}`}>Shopify Field</Label>
                       <Popover
                         open={popoverOpen[field.id]}
                         onOpenChange={(isOpen) =>
@@ -1108,18 +1110,19 @@ export const Settings: React.FC = () => {
                             variant="outline"
                             role="combobox"
                             aria-expanded={popoverOpen[field.id]}
-                            className="w-full justify-between"
+                            className={`w-full justify-between ${isMobile ? "h-10 text-sm" : ""}`}
                           >
                             {getMappedFieldLabel(field.shopifyFields)}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            <ChevronsUpDown className={`ml-2 shrink-0 opacity-50 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-[300px] p-0">
+                        <PopoverContent className={`p-0 ${isMobile ? "w-[95vw] max-w-none" : "w-[300px]"}`}>
                           <Command>
                             <CommandInput
                               placeholder="Search Shopify fields..."
                               value={searchTerm}
                               onValueChange={setSearchTerm}
+                              className={isMobile ? "h-10 text-sm" : ""}
                             />
                             <CommandList>
                               <CommandEmpty>No results found.</CommandEmpty>
@@ -1141,16 +1144,18 @@ export const Settings: React.FC = () => {
                                           onSelect={(currentValue) => {
                                             handleShopifyFieldMapping(field.id, currentValue)
                                           }}
+                                          className={isMobile ? "text-sm py-3" : ""}
                                         >
                                           <Check
                                             className={cn(
-                                              "mr-2 h-4 w-4",
+                                              "mr-2",
                                               field.shopifyFields?.includes(option.value)
                                                 ? "opacity-100"
-                                                : "opacity-0"
+                                                : "opacity-0",
+                                              isMobile ? "h-3 w-3" : "h-4 w-4"
                                             )}
                                           />
-                                          <option.icon className="mr-2 h-4 w-4" />
+                                          <option.icon className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
                                           {option.label}
                                         </CommandItem>
                                       ))}
@@ -1163,14 +1168,14 @@ export const Settings: React.FC = () => {
                       </Popover>
                     </div>
                     <div>
-                      <Label className="text-xs text-muted-foreground">Data Processor</Label>
+                      <Label className={`text-muted-foreground ${isMobile ? "text-xs" : "text-xs"}`}>Data Processor</Label>
                       <Select
                         value={field.transformation || "none"}
                         onValueChange={(value: "extract" | "transform" | "none") => {
                           handleTransformationChange(field.id, value)
                         }}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className={isMobile ? "h-10 text-sm" : ""}>
                           <SelectValue placeholder="Processor" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1181,13 +1186,14 @@ export const Settings: React.FC = () => {
                     </div>
                     {field.transformation === "extract" && (
                       <div>
-                        <Label className="text-xs text-muted-foreground">Extraction Rule (Regex)</Label>
+                        <Label className={`text-muted-foreground ${isMobile ? "text-xs" : "text-xs"}`}>Extraction Rule (Regex)</Label>
                         <Input
                           placeholder="e.g. (d{2})/(d{2})"
                           value={field.transformationRule || ""}
                           onChange={(e) => {
                             handleTransformationRuleChange(field.id, e.target.value)
                           }}
+                          className={isMobile ? "h-10 text-sm" : ""}
                         />
                       </div>
                     )}
@@ -1200,55 +1206,58 @@ export const Settings: React.FC = () => {
 
         <TabsContent value="users">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className={`flex flex-row items-center justify-between ${isMobile ? "flex-col gap-3" : ""}`}>
               <div>
-                <CardTitle>User Management</CardTitle>
-                <CardDescription>Manage users and their roles.</CardDescription>
+                <CardTitle className={isMobile ? "text-lg" : ""}>User Management</CardTitle>
+                <CardDescription className={isMobile ? "text-sm" : ""}>Manage users and their roles.</CardDescription>
               </div>
               <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
                 <DialogTrigger asChild>
-                  <Button>
-                    <UserPlus className="h-4 w-4 mr-2" /> Add User
+                  <Button className={isMobile ? "w-full" : ""}>
+                    <UserPlus className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} /> Add User
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className={isMobile ? "w-[95vw] max-w-none" : ""}>
                   <DialogHeader>
-                    <DialogTitle>Add New User</DialogTitle>
+                    <DialogTitle className={isMobile ? "text-lg" : ""}>Add New User</DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-4 py-4">
+                  <div className={`space-y-4 py-4 ${isMobile ? "space-y-3" : ""}`}>
                     <div className="space-y-2">
-                      <Label htmlFor="name">Name</Label>
+                      <Label htmlFor="name" className={isMobile ? "text-sm" : ""}>Name</Label>
                       <Input
                         id="name"
                         value={newUser.name}
                         onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                        className={isMobile ? "h-9 text-sm" : ""}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="email" className={isMobile ? "text-sm" : ""}>Email</Label>
                       <Input
                         id="email"
                         type="email"
                         value={newUser.email}
                         onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                        className={isMobile ? "h-9 text-sm" : ""}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="password">Password</Label>
+                      <Label htmlFor="password" className={isMobile ? "text-sm" : ""}>Password</Label>
                       <Input
                         id="password"
                         type="password"
                         value={newUser.password}
                         onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                        className={isMobile ? "h-9 text-sm" : ""}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="role">Role</Label>
+                      <Label htmlFor="role" className={isMobile ? "text-sm" : ""}>Role</Label>
                       <Select
                         value={newUser.role}
                         onValueChange={(value: UserRole) => setNewUser({ ...newUser, role: value })}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger className={isMobile ? "h-9 text-sm" : ""}>
                           <SelectValue placeholder="Select a role" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1260,84 +1269,87 @@ export const Settings: React.FC = () => {
                         </SelectContent>
                       </Select>
                     </div>
-                    <Button onClick={handleCreateUser} className="w-full">
+                    <Button onClick={handleCreateUser} className={`w-full ${isMobile ? "h-9 text-sm" : ""}`}>
                       Create User
                     </Button>
                   </div>
                 </DialogContent>
               </Dialog>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {users.map((userItem) => (
-                    <TableRow key={userItem.id}>
-                      <TableCell>{userItem.name}</TableCell>
-                      <TableCell>{userItem.email}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{userItem.role}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" disabled={userItem.id === user?.id}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+            <CardContent className={isMobile ? "pt-0" : ""}>
+              <div className={`overflow-x-auto ${isMobile ? "-mx-3" : ""}`}>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={isMobile ? "px-3 py-3" : ""}>Name</TableHead>
+                      <TableHead className={isMobile ? "px-3 py-3" : ""}>Email</TableHead>
+                      <TableHead className={isMobile ? "px-3 py-3" : ""}>Role</TableHead>
+                      <TableHead className={`text-right ${isMobile ? "px-3 py-3" : ""}`}>Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((userItem) => (
+                      <TableRow key={userItem.id}>
+                        <TableCell className={`${isMobile ? "px-3 py-3 text-sm font-medium" : ""}`}>{userItem.name}</TableCell>
+                        <TableCell className={`${isMobile ? "px-3 py-3 text-sm" : ""}`}>{userItem.email}</TableCell>
+                        <TableCell className={isMobile ? "px-3 py-3" : ""}>
+                          <Badge variant="outline" className={isMobile ? "text-xs px-2 py-1" : ""}>{userItem.role}</Badge>
+                        </TableCell>
+                        <TableCell className={`text-right ${isMobile ? "px-3 py-3" : ""}`}>
+                          <Button variant="ghost" size="icon" disabled={userItem.id === user?.id} className={isMobile ? "h-10 w-10" : ""}>
+                            <Trash2 className={`${isMobile ? "h-4 w-4" : "h-4 w-4"}`} />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="billing">
           <Card>
-            <CardHeader>
-              <CardTitle>Billing</CardTitle>
-              <CardDescription>Manage your subscription and view invoices.</CardDescription>
+            <CardHeader className={isMobile ? "pb-3" : ""}>
+              <CardTitle className={isMobile ? "text-lg" : ""}>Billing</CardTitle>
+              <CardDescription className={isMobile ? "text-sm" : ""}>Manage your subscription and view invoices.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <p>Billing management is coming soon.</p>
+            <CardContent className={isMobile ? "pt-0" : ""}>
+              <p className={isMobile ? "text-sm" : ""}>Billing management is coming soon.</p>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
       <Dialog open={showAddFieldDialog} onOpenChange={setShowAddFieldDialog}>
-        <DialogContent>
+        <DialogContent className={isMobile ? "w-[95vw] max-w-none" : ""}>
           <DialogHeader>
-            <DialogTitle>Add Custom Field</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className={isMobile ? "text-lg" : ""}>Add Custom Field</DialogTitle>
+            <DialogDescription className={isMobile ? "text-sm" : ""}>
               Create a new field to display on your order cards.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className={`space-y-4 py-4 ${isMobile ? "space-y-3" : ""}`}>
             <div className="space-y-2">
-              <Label htmlFor="custom-field-name">Field Name</Label>
+              <Label htmlFor="custom-field-name" className={isMobile ? "text-sm" : ""}>Field Name</Label>
               <Input
                 id="custom-field-name"
                 placeholder="e.g., Delivery Driver"
                 value={newCustomField.name}
                 onChange={(e) => setNewCustomField({ ...newCustomField, name: e.target.value })}
+                className={isMobile ? "h-9 text-sm" : ""}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="custom-field-type">Field Type</Label>
+              <Label htmlFor="custom-field-type" className={isMobile ? "text-sm" : ""}>Field Type</Label>
               <Select
                 value={newCustomField.type}
                 onValueChange={(value: OrderCardFieldType) =>
                   setNewCustomField({ ...newCustomField, type: value })
                 }
               >
-                <SelectTrigger id="custom-field-type">
+                <SelectTrigger id="custom-field-type" className={isMobile ? "h-9 text-sm" : ""}>
                   <SelectValue placeholder="Select a type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1349,11 +1361,11 @@ export const Settings: React.FC = () => {
               </Select>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddFieldDialog(false)}>
+          <DialogFooter className={isMobile ? "flex-col gap-2" : ""}>
+            <Button variant="outline" onClick={() => setShowAddFieldDialog(false)} className={isMobile ? "w-full h-9 text-sm" : ""}>
               Cancel
             </Button>
-            <Button onClick={handleAddCustomField}>Add Field</Button>
+            <Button onClick={handleAddCustomField} className={isMobile ? "w-full h-9 text-sm" : ""}>Add Field</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -256,47 +256,47 @@ export function OrdersView() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${isMobileView ? "space-y-4" : ""}`}>
       {/* Header with stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+      <div className={`grid grid-cols-1 ${isMobileView ? "grid-cols-2 gap-2" : "md:grid-cols-4 gap-4"}`}>
+        <Card className={isMobileView ? "p-3" : ""}>
+          <CardHeader className={`flex flex-row items-center justify-between space-y-0 pb-2 ${isMobileView ? "pb-1" : ""}`}>
+            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Total Orders</CardTitle>
+            <Package className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{orders.length}</div>
+          <CardContent className={isMobileView ? "pt-1" : ""}>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>{orders.length}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Assigned to Me</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+        <Card className={isMobileView ? "p-3" : ""}>
+          <CardHeader className={`flex flex-row items-center justify-between space-y-0 pb-2 ${isMobileView ? "pb-1" : ""}`}>
+            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Assigned to Me</CardTitle>
+            <Users className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className={isMobileView ? "pt-1" : ""}>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
               {orders.filter((order) => order.assignedTo === currentUser.id).length}
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Completed</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
+        <Card className={isMobileView ? "p-3" : ""}>
+          <CardHeader className={`flex flex-row items-center justify-between space-y-0 pb-2 ${isMobileView ? "pb-1" : ""}`}>
+            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Completed</CardTitle>
+            <CheckCircle className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className={isMobileView ? "pt-1" : ""}>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
               {orders.filter((order) => order.status === "completed").length}
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending</CardTitle>
-            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+        <Card className={isMobileView ? "p-3" : ""}>
+          <CardHeader className={`flex flex-row items-center justify-between space-y-0 pb-2 ${isMobileView ? "pb-1" : ""}`}>
+            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Pending</CardTitle>
+            <CalendarDays className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
+          <CardContent className={isMobileView ? "pt-1" : ""}>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
               {orders.filter((order) => order.status === "pending").length}
             </div>
           </CardContent>
@@ -305,18 +305,18 @@ export function OrdersView() {
 
       {/* Filters */}
       <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
+        <CardHeader className={isMobileView ? "pb-3" : ""}>
+          <CardTitle className={isMobileView ? "text-base" : ""}>Filters</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <CardContent className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
+          <div className={`grid grid-cols-1 ${isMobileView ? "gap-3" : "md:grid-cols-2 lg:grid-cols-4 gap-4"}`}>
             {/* Date Picker */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Date</label>
+              <label className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Date</label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-left font-normal">
-                    <CalendarDays className="mr-2 h-4 w-4" />
+                  <Button variant="outline" className={`justify-start text-left font-normal ${isMobileView ? "h-9 text-sm" : "w-full"}`}>
+                    <CalendarDays className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                     {calendarDate ? format(calendarDate, "PPP") : "Pick a date"}
                   </Button>
                 </PopoverTrigger>
@@ -333,9 +333,9 @@ export function OrdersView() {
 
             {/* Store Filter */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Store</label>
+              <label className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Store</label>
               <Select value={selectedStore} onValueChange={setSelectedStore}>
-                <SelectTrigger>
+                <SelectTrigger className={isMobileView ? "h-9 text-sm" : ""}>
                   <SelectValue placeholder="Select store" />
                 </SelectTrigger>
                 <SelectContent>
@@ -351,9 +351,9 @@ export function OrdersView() {
 
             {/* Status Filter */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Status</label>
+              <label className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Status</label>
               <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                <SelectTrigger>
+                <SelectTrigger className={isMobileView ? "h-9 text-sm" : ""}>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -367,46 +367,50 @@ export function OrdersView() {
 
             {/* Search */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Search</label>
+              <label className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Search</label>
               <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Search className={`absolute left-2 top-2.5 text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 <Input
                   placeholder="Search orders..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8"
+                  className={`pl-8 ${isMobileView ? "h-9 text-sm" : ""}`}
                 />
               </div>
             </div>
           </div>
 
           {/* Status Filter Buttons */}
-          <div className="flex flex-wrap gap-2">
+          <div className={`flex flex-wrap ${isMobileView ? "gap-1" : "gap-2"}`}>
             <Button
               variant={selectedStatus === "all" ? "default" : "outline"}
-              size="sm"
+              size={isMobileView ? "sm" : "sm"}
               onClick={() => handleStatusFilter("all")}
+              className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}
             >
               All
             </Button>
             <Button
               variant={selectedStatus === "pending" ? "default" : "outline"}
-              size="sm"
+              size={isMobileView ? "sm" : "sm"}
               onClick={() => handleStatusFilter("pending")}
+              className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}
             >
               Pending
             </Button>
             <Button
               variant={selectedStatus === "in_progress" ? "default" : "outline"}
-              size="sm"
+              size={isMobileView ? "sm" : "sm"}
               onClick={() => handleStatusFilter("in_progress")}
+              className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}
             >
               In Progress
             </Button>
             <Button
               variant={selectedStatus === "completed" ? "default" : "outline"}
-              size="sm"
+              size={isMobileView ? "sm" : "sm"}
               onClick={() => handleStatusFilter("completed")}
+              className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}
             >
               Completed
             </Button>
@@ -417,17 +421,17 @@ export function OrdersView() {
             <Button 
               onClick={processOrders} 
               disabled={processingOrders}
-              className="w-full md:w-auto"
+              className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
             >
               {processingOrders ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Processing Orders...
+                  <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
+                  {isMobileView ? "Processing..." : "Processing Orders..."}
                 </>
               ) : (
                 <>
-                  <Package className="mr-2 h-4 w-4" />
-                  Process Orders for {selectedDate}
+                  <Package className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  {isMobileView ? `Process ${selectedDate}` : `Process Orders for ${selectedDate}`}
                 </>
               )}
             </Button>
@@ -437,29 +441,30 @@ export function OrdersView() {
 
       {/* Orders List */}
       <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>Orders</CardTitle>
-            <div className="flex gap-2">
+        <CardHeader className={isMobileView ? "pb-3" : ""}>
+          <div className={`flex justify-between items-center ${isMobileView ? "flex-col gap-3 items-start" : ""}`}>
+            <CardTitle className={isMobileView ? "text-base" : ""}>Orders</CardTitle>
+            <div className={`flex gap-2 ${isMobileView ? "flex-wrap w-full" : ""}`}>
               <Button
                 variant={isBatchMode ? "default" : "outline"}
                 size="sm"
                 onClick={toggleBatchMode}
+                className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}
               >
                 {isBatchMode ? "Exit Batch Mode" : "Batch Mode"}
               </Button>
               {isBatchMode && (
                 <>
-                  <Button size="sm" onClick={selectAllOrders}>
+                  <Button size="sm" onClick={selectAllOrders} className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}>
                     Select All
                   </Button>
-                  <Button size="sm" onClick={clearSelection}>
+                  <Button size="sm" onClick={clearSelection} className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}>
                     Clear
                   </Button>
-                  <Button size="sm" onClick={batchAssignToMe}>
+                  <Button size="sm" onClick={batchAssignToMe} className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}>
                     Assign to Me
                   </Button>
-                  <Button size="sm" onClick={batchUnassign}>
+                  <Button size="sm" onClick={batchUnassign} className={isMobileView ? "text-xs px-2 py-1 h-7" : ""}>
                     Unassign
                   </Button>
                 </>
@@ -467,16 +472,16 @@ export function OrdersView() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className={isMobileView ? "pt-0" : ""}>
           {todoCards.length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-muted-foreground">No orders found for the selected criteria.</p>
-              <p className="text-sm text-muted-foreground mt-2">
+              <p className={`text-muted-foreground ${isMobileView ? "text-sm" : ""}`}>No orders found for the selected criteria.</p>
+              <p className={`text-muted-foreground mt-2 ${isMobileView ? "text-xs" : "text-sm"}`}>
                 Select a date to fetch orders.
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
               {filteredTodoCards.map((card) => {
                 // Adapt the 'card' object to the 'Order' type expected by OrderCard
                 const orderAdapter: Order = {
