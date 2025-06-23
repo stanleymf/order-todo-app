@@ -6,12 +6,7 @@ import { d1DatabaseService, getFloristPhotos } from "../src/services/database-d1
 import { ShopifyApiService } from "../src/services/shopify/shopifyApi"
 import type { D1Database, ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types"
 import { etag } from "hono/etag"
-import { serveStatic } from 'hono/cloudflare-pages'
-import { WebhookConfig } from "../src/types"
-import crypto from 'crypto'
-
-// @ts-ignore
-// import manifest from '__STATIC_CONTENT_MANIFEST';
+import type { Tenant, User, Order, Store, WebhookConfig } from "../src/types"
 
 // Define the environment bindings
 type Bindings = {
@@ -303,16 +298,20 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',
-    '/api/tenants/:tenantId/ai/knowledge-base-analytics'
+    '/api/tenants/:tenantId/ai/knowledge-base-analytics',
+    '/api/tenants/:tenantId/orders/realtime-status'
   ]
   
   // Check if this is a public endpoint
   const isPublicEndpoint = publicEndpoints.some(endpoint => {
-    const pattern = endpoint.replace(':tenantId', c.req.param('tenantId'))
-    return path === pattern || path.startsWith(pattern + '/')
+    // Create a regex pattern that matches the endpoint with tenantId parameter
+    const pattern = endpoint.replace(':tenantId', '[^/]+')
+    const regex = new RegExp(`^${pattern}$`)
+    return regex.test(path)
   })
   
   if (isPublicEndpoint) {
+    console.log(`Public endpoint accessed: ${path}`)
     return next()
   }
   
@@ -792,60 +791,165 @@ app.get("/api/tenants/:tenantId/stores/:storeId/orders/lookup", async (c) => {
 app.post("/api/tenants/:tenantId/stores/:storeId/register-webhooks", async (c) => {
   const tenantId = c.req.param("tenantId")
   const storeId = c.req.param("storeId")
+  console.log(`Webhook registration started for tenant ${tenantId}, store ${storeId}`)
+
   try {
     const store = await d1DatabaseService.getStore(c.env, tenantId, storeId)
     if (!store) {
+      console.error(`Store not found for tenant ${tenantId}, store ${storeId}`)
       return c.json({ error: "Store not found" }, 404)
     }
+    console.log("Found store:", store.name)
 
     const domain = store.settings.domain
     const accessToken = store.settings.accessToken
 
     if (!domain || !accessToken) {
+      console.error("Store domain or access token not configured.")
       return c.json({ error: "Store domain or access token not configured." }, 400)
     }
+    console.log("Store credentials found, proceeding with webhook registration.")
 
-    const webhookTopics = ["orders/create", "orders/updated", "products/update"]
-    const webhookUrl = `https://${new URL(c.req.url).hostname}/api/webhooks/shopify`
+    // Define all webhook topics we want to listen to
+    const webhookTopics = [
+      "orders/create",
+      "orders/updated", 
+      "orders/fulfilled",
+      "orders/cancelled",
+      "products/create",
+      "products/update",
+      "products/delete",
+      "inventory_items/update", // Corrected from inventory_levels/update
+      "app/uninstalled"
+    ]
+    
+    const baseUrl = new URL(c.req.url).hostname
+    const webhookUrl = `https://${baseUrl}/api/webhooks/shopify`
 
     const registeredWebhooks: WebhookConfig[] = []
 
-    for (const topic of webhookTopics) {
-      const response = await fetch(`https://${domain}/admin/api/2023-10/webhooks.json`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": accessToken,
-        },
-        body: JSON.stringify({
-          webhook: {
-            topic,
-            address: webhookUrl,
-            format: "json",
-          },
-        }),
-      })
-      const data = await response.json()
-      if (response.ok) {
-        registeredWebhooks.push({
-          id: data.webhook.id,
-          topic: data.webhook.topic,
-          address: data.webhook.address,
-          status: "active",
-        })
-      } else {
-        console.error(`Failed to register webhook for ${topic}:`, data)
+    // First, get existing webhooks to avoid duplicates
+    const existingWebhooksResponse = await fetch(`https://${domain}/admin/api/2023-10/webhooks.json`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": accessToken,
+      },
+    })
+
+    let existingWebhooks: any[] = []
+    if (existingWebhooksResponse.ok) {
+      const existingData = await existingWebhooksResponse.json()
+      existingWebhooks = existingData.webhooks || []
+    }
+
+    // Delete existing webhooks that point to our endpoint
+    for (const webhook of existingWebhooks) {
+      if (webhook.address.includes(baseUrl)) {
+        try {
+          await fetch(`https://${domain}/admin/api/2023-10/webhooks/${webhook.id}.json`, {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": accessToken,
+            },
+          })
+          console.log(`Deleted existing webhook: ${webhook.topic}`)
+        } catch (error) {
+          console.error(`Failed to delete webhook ${webhook.id}:`, error)
+        }
       }
     }
 
-    const updatedSettings = { ...store.settings, webhooks: registeredWebhooks }
-    await d1DatabaseService.updateStore(c.env, tenantId, storeId, { settings: updatedSettings })
+    // Register new webhooks
+    for (const topic of webhookTopics) {
+      try {
+        const response = await fetch(`https://${domain}/admin/api/2023-10/webhooks.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+          },
+          body: JSON.stringify({
+            webhook: {
+              topic,
+              address: webhookUrl,
+              format: "json",
+            },
+          }),
+        })
+        
+        const data = await response.json()
+        
+        if (response.ok && data.webhook) {
+          registeredWebhooks.push({
+            id: data.webhook.id.toString(),
+            topic: data.webhook.topic,
+            address: data.webhook.address,
+            status: "active",
+            lastTriggered: new Date().toISOString(),
+          })
+          console.log(`Successfully registered webhook for ${topic}`)
+        } else {
+          console.error(`Failed to register webhook for ${topic}:`, JSON.stringify(data, null, 2))
+          // Add failed webhook to track issues
+          registeredWebhooks.push({
+            id: `failed-${topic}`,
+            topic,
+            address: webhookUrl,
+            status: "error",
+            lastTriggered: new Date().toISOString(),
+          })
+        }
+      } catch (error) {
+        console.error(`Fatal error registering webhook for ${topic}:`, error)
+      }
+    }
 
-    const updatedStore = { ...store, settings: updatedSettings }
+    // Always fetch the latest settings from the DB before updating
+    const latestStore = await d1DatabaseService.getStore(c.env, tenantId, storeId);
+    const mergedSettings = {
+      ...latestStore.settings,
+      webhooks: registeredWebhooks,
+    };
+    await d1DatabaseService.updateStore(c.env, tenantId, storeId, { settings: mergedSettings });
+    console.log(`Updated store ${storeId} with ${registeredWebhooks.length} webhook configurations.`)
+
+    const updatedStore = await d1DatabaseService.getStore(c.env, tenantId, storeId)
     return c.json(updatedStore)
-  } catch (error) {
-    console.error("Failed to register webhooks:", error)
-    return c.json({ error: "Failed to register webhooks" }, 500)
+  } catch (error: any) {
+    console.error("Webhook registration failed:", error.message)
+    return c.json({ error: "Failed to register webhooks", details: error.message }, 500)
+  }
+})
+
+app.post("/api/tenants/:tenantId/stores/:storeId/orders/by_name", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const storeId = c.req.param("storeId")
+  
+  try {
+    const { orderName } = await c.req.json()
+
+    if (!orderName) {
+      return c.json({ error: "orderName is required" }, 400)
+    }
+
+    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId)
+    if (!store) {
+      return c.json({ error: "Store not found" }, 404)
+    }
+
+    const shopify = new ShopifyApiService(store, store.settings.accessToken)
+    const orders = await shopify.getOrders({ name: orderName, status: "any" })
+
+    if (!orders || orders.length === 0) {
+      return c.json({ error: "Order not found" }, 404)
+    }
+
+    return c.json(orders[0])
+  } catch (error: any) {
+    console.error("Failed to fetch order by name:", error)
+    return c.json({ error: "Failed to fetch order", details: error.message }, 500)
   }
 })
 
@@ -2781,202 +2885,7 @@ app.get("/api/tenants/:tenantId/ai/customer-data", async (c) => {
   }
 })
 
-app.get("/api/tenants/:tenantId/shopify/analytics", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const { dateRange, compareWith, productType, storeId } = c.req.query()
-  try {
-    const analytics = await d1DatabaseService.getShopifyAnalytics(c.env, tenantId, {
-      dateRange: dateRange || "last_30_days",
-      compareWith: compareWith || "previous_period",
-      productType,
-      storeId
-    })
-    return c.json(analytics)
-  } catch (error) {
-    console.error("Error fetching Shopify analytics:", error)
-    return c.json({ error: "Failed to fetch Shopify analytics" }, 500)
-  }
-})
 
-// --- Missing photo endpoints ---
-app.get("/api/tenants/:tenantId/photos", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const { photo_id, status, date_range, user_id } = c.req.query()
-  try {
-    const filters: any = {}
-    if (photo_id) filters.photo_id = photo_id
-    if (status) filters.status = status
-    if (date_range) filters.date_range = JSON.parse(date_range)
-    if (user_id) filters.user_id = user_id
-    
-    const photos = await getFloristPhotos(c.env, tenantId, filters)
-    return c.json(photos)
-  } catch (error) {
-    console.error("Error fetching photos:", error)
-    return c.json({ error: "Failed to fetch photos" }, 500)
-  }
-})
-
-// --- AI Florist Widget Endpoints ---
-
-// Get AI Knowledge Base (tenant-specific)
-app.get("/api/tenants/:tenantId/ai/knowledge-base", async (c) => {
-  try {
-    // In the future, fetch tenant-specific knowledge base
-    const knowledgeBase = {
-      styles: [
-        { name: "romantic", description: "Soft, dreamy, and intimate arrangements" },
-        { name: "modern", description: "Clean, minimalist, and contemporary designs" },
-        { name: "rustic", description: "Natural, earthy, and charming bouquets" },
-        { name: "elegant", description: "Sophisticated and refined arrangements" },
-        { name: "wild", description: "Free-flowing and natural designs" }
-      ],
-      flowers: [
-        { name: "roses", colors: ["red", "pink", "white", "yellow"] },
-        { name: "lilies", colors: ["white", "pink", "orange"] },
-        { name: "peonies", colors: ["pink", "white", "red"] },
-        { name: "tulips", colors: ["red", "yellow", "pink", "purple"] },
-        { name: "orchids", colors: ["white", "purple", "pink"] }
-      ],
-      occasions: [
-        { name: "wedding", description: "Elegant arrangements for special ceremonies" },
-        { name: "birthday", description: "Celebratory and colorful designs" },
-        { name: "anniversary", description: "Romantic and meaningful bouquets" },
-        { name: "sympathy", description: "Respectful and comforting arrangements" },
-        { name: "celebration", description: "Joyful and festive designs" }
-      ],
-      budgetTiers: [
-        { name: "budget", range: "$25-50", description: "Affordable options" },
-        { name: "mid-range", range: "$50-100", description: "Quality designs" },
-        { name: "premium", range: "$100-200", description: "Luxury arrangements" },
-        { name: "luxury", range: "$200+", description: "Ultimate premium designs" }
-      ]
-    }
-    return c.json(knowledgeBase)
-  } catch (error) {
-    console.error("Error fetching AI knowledge base (tenant):", error)
-    return c.json({ error: "Failed to fetch AI knowledge base" }, 500)
-  }
-})
-
-// AI Chat Endpoint
-app.post("/api/ai/chat", async (c) => {
-  try {
-    const body = await c.req.json();
-    const { messages, knowledgeBase, tenantId, designSpecs } = body;
-
-    // --- Fetch Tenant-Specific OpenAI API Key ---
-    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
-    if (!tenantSettingsRaw?.settings) {
-      return c.json({ error: 'Could not find settings for this tenant.' }, 404);
-    }
-    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
-    const openaiApiKey = tenantSettings.openaiApiKey;
-    if (!openaiApiKey) {
-      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
-    }
-
-    // --- Prepare messages for OpenAI Chat API ---
-    // Add a system prompt to guide the AI's behavior
-    const systemPrompt = {
-      role: 'system',
-      content: `You are an expert florist assistant. Be creative, helpful, and friendly. Use the provided knowledge base to suggest beautiful, personalized bouquets. Ask clarifying questions if needed. Always keep the conversation focused on flowers, bouquets, and customer preferences. If the user mentions a specific flower, style, or occasion, incorporate it into your suggestions.`,
-    };
-    const openaiMessages = [
-      systemPrompt,
-      ...messages.map((msg: any) => ({
-        role: msg.sender === 'user' ? 'user' : 'assistant',
-        content: msg.text,
-      })),
-    ];
-
-    // --- Call OpenAI Chat API ---
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: openaiMessages,
-        temperature: 0.8,
-        max_tokens: 300,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error('OpenAI Chat API Error:', error);
-      throw new Error(`OpenAI Chat API error: ${error.error?.message || 'Unknown error'}`);
-    }
-
-    const data = await response.json();
-    const aiReply = data.choices?.[0]?.message?.content || "I'm sorry, I couldn't generate a response right now.";
-
-    return c.json({
-      response: aiReply,
-      designSpecs: designSpecs || {
-        style: "romantic",
-        occasion: "general",
-        budget: "mid-range",
-        size: "medium"
-      }
-    });
-  } catch (error) {
-    console.error("Error in AI chat:", error);
-    // Declare designSpecs with a default value if not defined
-    let designSpecs = undefined;
-    try {
-      const body = await c.req.json();
-      designSpecs = body?.designSpecs;
-    } catch {}
-    const fallbackSpecs = designSpecs ? designSpecs : {
-      style: "romantic",
-      occasion: "general",
-      budget: "mid-range",
-      size: "medium"
-    };
-    return c.json({
-      response: "I'm sorry, I'm having trouble connecting to the AI service right now. Please try again later!",
-      designSpecs: fallbackSpecs
-    }, 200);
-  }
-});
-
-// Generate Bouquet Image Endpoint
-app.post("/api/ai/generate-bouquet-image", async (c) => {
-  try {
-    const body = await c.req.json()
-    const { messages, knowledgeBase, tenantId, designSpecs } = body
-    
-    // For now, return a mock generated image
-    // In the future, this should integrate with DALL-E or another image generation service
-    const mockImageUrl = "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=800&h=800&fit=crop&crop=center"
-    
-    const generatedImage = {
-      id: `generated-${Date.now()}`,
-      prompt: messages[messages.length - 1]?.text || "Beautiful bouquet",
-      generatedImage: mockImageUrl,
-      designSpecs: designSpecs || {
-        style: "romantic",
-        occasion: "general",
-        budget: "mid-range",
-        size: "medium"
-      },
-      cost: 0.04,
-      generationTime: 3.2,
-      modelVersion: "v1.0-mock",
-      confidence: 0.85,
-      status: "completed"
-    }
-    
-    return c.json(generatedImage)
-  } catch (error) {
-    console.error("Error generating bouquet image:", error)
-    return c.json({ error: "Failed to generate bouquet image" }, 500)
-  }
-})
 
 // SPA routing - handle all non-API routes
 app.get('*', async (c) => {
@@ -3015,87 +2924,12 @@ app.get('*', async (c) => {
   return c.notFound()
 })
 
-// --- Database Migration Route ---
-app.post("/api/migrate/add-settings-to-stores", async (c) => {
-  try {
-    // Check if settings column exists
-    const { results } = await c.env.DB.prepare("PRAGMA table_info(shopify_stores)").all()
-    const hasSettingsColumn = results.some((col: any) => col.name === 'settings')
-    
-    if (!hasSettingsColumn) {
-      // Add settings column to existing table
-      await c.env.DB.prepare("ALTER TABLE shopify_stores ADD COLUMN settings TEXT DEFAULT '{}'").run()
-      return c.json({ success: true, message: "Settings column added to shopify_stores table" })
-    } else {
-      return c.json({ success: true, message: "Settings column already exists" })
-    }
-  } catch (error) {
-    console.error("Migration error:", error)
-    return c.json({ error: "Failed to migrate database" }, 500)
-  }
+app.onError((err, c) => {
+  console.error("Unhandled error:", err)
+  return c.json({ error: "Internal Server Error" }, 500)
 })
 
-// GET all generated designs for a tenant
-app.get('/api/tenants/:tenantId/ai/generated-designs', async (c) => {
-    try {
-        const { tenantId } = c.req.param();
-        if (!tenantId) {
-            return c.json({ error: 'Tenant ID is required.' }, 400);
-        }
-        const db = c.env.DB;
-        const { results } = await db.prepare("SELECT * FROM ai_generated_designs WHERE tenant_id = ? ORDER BY created_at DESC").bind(tenantId).all();
-        return c.json(results || []);
-    } catch (error) {
-        console.error('Error fetching generated designs:', error);
-        return c.json({ error: 'Failed to fetch generated designs.' }, 500);
-    }
-});
-
-// PUT (update) a generated design, e.g., for rating
-app.put('/api/tenants/:tenantId/ai/generated-designs/:designId', async (c) => {
-    try {
-        const { tenantId, designId } = c.req.param();
-        const updates = await c.req.json();
-
-        if (!tenantId || !designId) {
-            return c.json({ error: 'Tenant ID and Design ID are required.' }, 400);
-        }
-
-        const db = c.env.DB;
-
-        const allowedFields = ['quality_rating', 'feedback', 'is_favorite', 'is_approved'];
-        const updateFields = Object.keys(updates).filter(key => allowedFields.includes(key));
-
-        if (updateFields.length === 0) {
-            return c.json({ error: 'No valid fields provided for update.' }, 400);
-        }
-
-        if (updates.quality_rating && (typeof updates.quality_rating !== 'number' || updates.quality_rating < 1 || updates.quality_rating > 5)) {
-            return c.json({ error: 'Rating must be a number between 1 and 5.' }, 400);
-        }
-
-        const setClause = updateFields.map(field => `${field} = ?`).join(', ');
-        const values = updateFields.map(field => updates[field]);
-
-        const finalSetClause = setClause + ', updated_at = ?';
-        const finalValues = [...values, new Date().toISOString(), designId, tenantId];
-
-        const stmt = `UPDATE ai_generated_designs SET ${finalSetClause} WHERE id = ? AND tenant_id = ?`;
-
-        const info = await db.prepare(stmt).bind(...finalValues).run();
-
-        if (info.meta.changes === 0) {
-            return c.json({ error: 'Design not found or update failed.' }, 404);
-        }
-
-        const updatedDesign = await db.prepare("SELECT * FROM ai_generated_designs WHERE id = ?").bind(designId).first();
-
-        return c.json(updatedDesign);
-    } catch (error) {
-        console.error('Error updating generated design:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-        return c.json({ error: 'Failed to update design.', details: errorMessage }, 500);
-    }
-});
-
-export default app
+// Export the app
+export default {
+  fetch: app.fetch,
+}
