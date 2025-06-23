@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Send, Loader2, CheckCircle, Image, Download } from 'lucide-react';
+import { Sparkles, Send, Loader2, CheckCircle, Image, Download, Star } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { cn } from '@/lib/utils';
+import { DesignRatingModal } from './DesignRatingModal';
 
 // Define the types for our chat messages and conversation state
 type Message = {
@@ -35,6 +36,8 @@ type GeneratedImage = {
   cost: number;
   status: string;
   conversationSummary?: string;
+  quality_rating?: number;
+  feedback?: string;
 };
 
 // Define the type for the product data we'll fetch
@@ -70,6 +73,7 @@ const AIFlorist = () => {
   const [knowledgeBase, setKnowledgeBase] = useState<Partial<KnowledgeBase>>({});
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
   const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
 
   // Initial welcome message & Fetch knowledge base
@@ -236,6 +240,33 @@ const AIFlorist = () => {
     document.body.removeChild(link);
   };
 
+  const handleRatingSubmit = async (rating: number, feedback: string) => {
+    try {
+      // TODO: Implement API call to save rating
+      console.log('Rating submitted:', { designId: currentImage?.id, rating, feedback });
+      
+      // Update the current image with rating
+      if (currentImage) {
+        setCurrentImage({
+          ...currentImage,
+          quality_rating: rating,
+          feedback: feedback
+        });
+      }
+      
+      addMessage({
+        sender: 'ai',
+        text: `Thank you for your feedback! Your rating of ${rating}/5 stars helps us improve our AI.`,
+      });
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      addMessage({
+        sender: 'ai',
+        text: "Sorry, there was an issue saving your rating. Please try again.",
+      });
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-screen bg-[#E2E5DA] p-4 font-sans">
       <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col h-[90vh]">
@@ -336,6 +367,15 @@ const AIFlorist = () => {
                     <Download className="h-4 w-4 mr-2" />
                     Download
                   </Button>
+                  
+                  <Button 
+                    onClick={() => setShowRatingModal(true)}
+                    className="w-full mt-2 bg-[#FFD700] hover:bg-[#FFC000] text-gray-800"
+                    size="sm"
+                  >
+                    <Star className="h-4 w-4 mr-2" />
+                    Rate This Design
+                  </Button>
                 </div>
 
                 {/* Previous Images */}
@@ -364,6 +404,18 @@ const AIFlorist = () => {
           )}
         </div>
       </div>
+      
+      {/* Rating Modal */}
+      {showRatingModal && currentImage && (
+        <DesignRatingModal
+          isOpen={showRatingModal}
+          onClose={() => setShowRatingModal(false)}
+          designId={currentImage.id}
+          designImage={currentImage.generatedImage}
+          prompt={currentImage.prompt}
+          onRatingSubmit={handleRatingSubmit}
+        />
+      )}
     </div>
   );
 };

@@ -33,7 +33,8 @@ import {
   Trash2,
   MessageSquare,
   Calendar,
-  DollarSign
+  DollarSign,
+  Star
 } from 'lucide-react';
 import { createAITrainingService, type TrainingDataStats } from '../services/aiTrainingService';
 import { useAuth } from '../contexts/AuthContext';
@@ -51,6 +52,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from './ui/dialog';
+import { DesignRatingModal } from './DesignRatingModal';
 
 interface AITrainingManagerProps {
   tenantId: string;
@@ -98,6 +100,8 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
   const [showAddOccasion, setShowAddOccasion] = useState(false);
   const [showAddBudgetTier, setShowAddBudgetTier] = useState(false);
   const [showAddCustomerData, setShowAddCustomerData] = useState(false);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [selectedDesign, setSelectedDesign] = useState<any>(null);
   const [newFlower, setNewFlower] = useState({
     name: "",
     variety: "",
@@ -643,6 +647,22 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
     } catch (error) {
       toast.error('Failed to delete customer data');
     }
+  };
+
+  const handleRatingSubmit = async (designId: string, rating: number, feedback: string) => {
+    try {
+      await aiTrainingService.updateDesignRating(designId, rating, feedback);
+      toast.success('Rating submitted successfully');
+      await loadTrainingData(); // Reload to update stats
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      toast.error('Failed to submit rating');
+    }
+  };
+
+  const openRatingModal = (design: any) => {
+    setSelectedDesign(design);
+    setShowRatingModal(true);
   };
 
   const renderOverviewTab = () => (
@@ -2032,6 +2052,177 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
     </Card>
   );
 
+  const renderRatingsTab = () => (
+    <div className="space-y-6">
+      {/* Rating Statistics */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Star className="h-5 w-5" />
+            Rating Statistics
+          </CardTitle>
+          <CardDescription>
+            Overview of design ratings and feedback
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">
+                {generatedDesigns.filter(d => d.quality_rating).length}
+              </div>
+              <div className="text-sm text-blue-600">Rated Designs</div>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">
+                {generatedDesigns.filter(d => d.quality_rating).length > 0 
+                  ? (generatedDesigns.filter(d => d.quality_rating)
+                      .reduce((sum, d) => sum + (d.quality_rating || 0), 0) / 
+                     generatedDesigns.filter(d => d.quality_rating).length).toFixed(1)
+                  : '0.0'
+                }
+              </div>
+              <div className="text-sm text-green-600">Average Rating</div>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <div className="text-2xl font-bold text-purple-600">
+                {generatedDesigns.filter(d => d.quality_rating && d.quality_rating >= 4).length}
+              </div>
+              <div className="text-sm text-purple-600">High Ratings (4+)</div>
+            </div>
+            <div className="text-center p-4 bg-orange-50 rounded-lg">
+              <div className="text-2xl font-bold text-orange-600">
+                {generatedDesigns.filter(d => d.feedback && d.feedback.trim()).length}
+              </div>
+              <div className="text-sm text-orange-600">With Feedback</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Rated Designs */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Rated Designs</CardTitle>
+          <CardDescription>
+            Manage and review design ratings and feedback
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {generatedDesigns.filter(d => d.quality_rating).map((design) => (
+              <div key={design.id} className="flex items-center gap-4 p-4 border rounded-lg">
+                <img 
+                  src={design.generated_image_url || design.generated_image_data} 
+                  alt="Generated design"
+                  className="w-16 h-16 object-cover rounded-lg"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={`h-4 w-4 ${
+                            star <= (design.quality_rating || 0)
+                              ? 'text-yellow-500 fill-current'
+                              : 'text-gray-300'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-sm font-medium">
+                      {design.quality_rating}/5
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 line-clamp-2">
+                    {design.prompt}
+                  </p>
+                  {design.feedback && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      "{design.feedback}"
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(design.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openRatingModal(design)}
+                >
+                  Edit Rating
+                </Button>
+              </div>
+            ))}
+            {generatedDesigns.filter(d => d.quality_rating).length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <Star className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No rated designs yet. Start rating designs to see them here.</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Unrated Designs */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Unrated Designs</CardTitle>
+          <CardDescription>
+            Designs that haven't been rated yet
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {generatedDesigns.filter(d => !d.quality_rating).slice(0, 5).map((design) => (
+              <div key={design.id} className="flex items-center gap-4 p-4 border rounded-lg">
+                <img 
+                  src={design.generated_image_url || design.generated_image_data} 
+                  alt="Generated design"
+                  className="w-16 h-16 object-cover rounded-lg"
+                />
+                <div className="flex-1">
+                  <p className="text-sm text-gray-600 line-clamp-2">
+                    {design.prompt}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(design.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => openRatingModal(design)}
+                >
+                  Rate Design
+                </Button>
+              </div>
+            ))}
+            {generatedDesigns.filter(d => !d.quality_rating).length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>All designs have been rated!</p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Rating Modal */}
+      {showRatingModal && selectedDesign && (
+        <DesignRatingModal
+          isOpen={showRatingModal}
+          onClose={() => setShowRatingModal(false)}
+          designId={selectedDesign.id}
+          designImage={selectedDesign.generated_image_url || selectedDesign.generated_image_data}
+          prompt={selectedDesign.prompt}
+          onRatingSubmit={(rating: number, feedback: string) => handleRatingSubmit(selectedDesign.id, rating, feedback)}
+        />
+      )}
+    </div>
+  );
+
   const renderTrainingDataContent = () => {
     switch (trainingDataSubTab) {
       case 'flowers':
@@ -2077,6 +2268,10 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
           <TabsTrigger value="ai-config">
             <Brain className="h-4 w-4 mr-2" />
             AI Configuration
+          </TabsTrigger>
+          <TabsTrigger value="ratings">
+            <Star className="h-4 w-4 mr-2" />
+            Ratings
           </TabsTrigger>
           <TabsTrigger value="analytics">
             <BarChart3 className="h-4 w-4 mr-2" />
@@ -2144,6 +2339,9 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
               {renderAIConfigContent()}
             </TabsContent>
           </Tabs>
+        </TabsContent>
+        <TabsContent value="ratings" className="mt-4">
+          {renderRatingsTab()}
         </TabsContent>
         <TabsContent value="analytics" className="mt-4">
           {renderAnalyticsTab()}
