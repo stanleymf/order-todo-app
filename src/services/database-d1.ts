@@ -615,25 +615,37 @@ export const d1DatabaseService = {
     )
       .bind(tenantId)
       .all()
-    return results.map((result: any) => ({
-      id: result.id,
-      tenantId: result.tenant_id,
-      name: result.shopify_domain, // Use domain as name for now
-      type: "shopify",
-      status: "active",
-      settings: {
-        domain: result.shopify_domain,
-        address: result.shopify_domain,
-        accessToken: result.access_token,
-        apiSecretKey: result.webhook_secret,
-        timezone: "UTC",
-        currency: "USD",
-        businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [], // Will be populated when webhooks are registered
-      },
-      createdAt: result.created_at,
-      updatedAt: result.updated_at,
-    }))
+    return results.map((result: any) => {
+      // Parse settings from JSON string, defaulting to empty object
+      let settings: any = {}
+      try {
+        settings = result.settings ? JSON.parse(result.settings) : {}
+      } catch (error) {
+        console.error('Error parsing store settings:', error)
+        settings = {}
+      }
+
+      return {
+        id: result.id,
+        tenantId: result.tenant_id,
+        name: result.shopify_domain, // Use domain as name for now
+        type: "shopify",
+        status: "active",
+        settings: {
+          domain: result.shopify_domain,
+          address: result.shopify_domain,
+          accessToken: result.access_token,
+          apiSecretKey: result.webhook_secret,
+          timezone: "UTC",
+          currency: "USD",
+          businessHours: { start: "09:00", end: "17:00" },
+          webhooks: settings.webhooks || [], // Use stored webhooks or empty array
+          ...settings, // Include any other settings
+        },
+        createdAt: result.created_at,
+        updatedAt: result.updated_at,
+      }
+    })
   },
 
   // Create a new store
@@ -645,13 +657,24 @@ export const d1DatabaseService = {
       accessToken: string
       webhookSecret?: string
       syncEnabled?: boolean
+      settings?: any
     }
   ): Promise<any> {
     const storeId = crypto.randomUUID()
     const now = new Date().toISOString()
+    
+    // Prepare settings with default values
+    const defaultSettings = {
+      webhooks: [],
+      timezone: "UTC",
+      currency: "USD",
+      businessHours: { start: "09:00", end: "17:00" },
+      ...storeData.settings
+    }
+
     await env.DB.prepare(
-      `INSERT INTO shopify_stores (id, tenant_id, shopify_domain, access_token, webhook_secret, sync_enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO shopify_stores (id, tenant_id, shopify_domain, access_token, webhook_secret, sync_enabled, settings, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         storeId,
@@ -660,6 +683,7 @@ export const d1DatabaseService = {
         storeData.accessToken,
         storeData.webhookSecret || null,
         storeData.syncEnabled !== false, // Default to true
+        JSON.stringify(defaultSettings),
         now,
         now
       )
@@ -677,10 +701,7 @@ export const d1DatabaseService = {
         address: storeData.shopifyDomain,
         accessToken: storeData.accessToken,
         apiSecretKey: storeData.webhookSecret,
-        timezone: "UTC",
-        currency: "USD",
-        businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [],
+        ...defaultSettings,
       },
       createdAt: now,
       updatedAt: now,
@@ -696,6 +717,16 @@ export const d1DatabaseService = {
       .all()
     const result = results[0]
     if (!result) return null
+
+    // Parse settings from JSON string, defaulting to empty object
+    let settings: any = {}
+    try {
+      settings = result.settings ? JSON.parse(result.settings) : {}
+    } catch (error) {
+      console.error('Error parsing store settings:', error)
+      settings = {}
+    }
+
     return {
       id: result.id,
       tenantId: result.tenant_id,
@@ -710,7 +741,8 @@ export const d1DatabaseService = {
         timezone: "UTC",
         currency: "USD",
         businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [], // Will be populated when webhooks are registered
+        webhooks: settings.webhooks || [], // Use stored webhooks or empty array
+        ...settings, // Include any other settings
       },
       createdAt: result.created_at,
       updatedAt: result.updated_at,
@@ -747,6 +779,10 @@ export const d1DatabaseService = {
     if (updateData.lastSyncAt !== undefined) {
       fields.push("last_sync_at = ?")
       values.push(updateData.lastSyncAt)
+    }
+    if (updateData.settings !== undefined) {
+      fields.push("settings = ?")
+      values.push(JSON.stringify(updateData.settings))
     }
 
     fields.push("updated_at = ?")

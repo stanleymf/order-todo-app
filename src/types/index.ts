@@ -246,10 +246,14 @@ export interface ProductMetafield {
 
 export interface ProductLabel {
   id: string
+  tenantId: string
   name: string
   color: string
   description?: string
   category: "difficulty" | "productType" | "custom"
+  priority: number
+  createdAt: string
+  updatedAt: string
 }
 
 // ===== ORDER TYPES =====

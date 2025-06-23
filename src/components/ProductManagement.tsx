@@ -49,7 +49,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Checkbox } from "./ui/checkbox"
 
 export function ProductManagement() {
-  const { tenant } = useAuth()
+  const { tenant, isAuthenticated, loading: authLoading } = useAuth()
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>([])
   const [fetchedProducts, setFetchedProducts] = useState<any[]>([])
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
@@ -107,30 +107,48 @@ export function ProductManagement() {
 
   const [nextPageInfo, setNextPageInfo] = useState<string | undefined>(undefined)
 
+  // Guard: Don't render until auth and tenant context is ready
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated || !tenant?.id) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <div className="text-6xl mb-4">🔐</div>
+        <h1 className="text-2xl font-bold mb-2">Authentication Required</h1>
+        <p className="text-gray-600">Please log in to view products.</p>
+      </div>
+    )
+  }
+
+  // Load data when component mounts and tenant is available
   useEffect(() => {
-    loadData()
-  }, [])
+    if (tenant?.id) {
+      loadData()
+    }
+  }, [tenant?.id])
 
   const loadData = async () => {
     if (!tenant?.id) {
-      setError("No tenant found")
-      setLoading(false)
+      console.warn('Tenant context not ready, skipping data load')
       return
     }
 
+    setLoading(true)
+    setError(null)
+    
     try {
-      setLoading(true)
-      setError(null)
-
-      // Fetch products, labels, and stores
-      const [productsData, labelsData, storesData, savedProductsData] = await Promise.all([
-        getProducts(tenant.id),
+      console.log('Loading data for tenant:', tenant.id)
+      const [labelsData, storesData, savedProductsData] = await Promise.all([
         getProductLabels(tenant.id),
         getStores(tenant.id),
         getSavedProducts(tenant.id),
       ])
-
-      setFetchedProducts(productsData)
       setLabels(labelsData)
       setStores(storesData)
       setSavedProducts(savedProductsData)
@@ -139,13 +157,9 @@ export function ProductManagement() {
       if (storesData.length > 0 && !syncStoreId) {
         setSyncStoreId(storesData[0].id)
       }
-    } catch (err) {
-      console.error("Error loading data:", err)
-      setError("Failed to load data. Please try again.")
-      setFetchedProducts([])
-      setLabels([])
-      setStores([])
-      setSavedProducts([])
+    } catch (error) {
+      console.error('Error loading data:', error)
+      setError(error instanceof Error ? error.message : 'Failed to load data')
     } finally {
       setLoading(false)
     }
@@ -590,6 +604,17 @@ export function ProductManagement() {
         })
       : savedFilteredProducts
 
+  if (!tenant?.id) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading tenant context...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -603,13 +628,21 @@ export function ProductManagement() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <div className="text-lg font-semibold text-red-600">Error</div>
-          <div className="text-sm text-gray-500 mt-2">{error}</div>
-          <Button onClick={loadData} className="mt-4">
+          <div className="text-red-500 mb-4">
+            <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <h3 className="text-lg font-semibold">Error Loading Data</h3>
+            <p className="text-sm text-gray-600 mt-2">{error}</p>
+          </div>
+          <button
+            onClick={loadData}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
             Retry
-          </Button>
+          </button>
         </div>
       </div>
     )

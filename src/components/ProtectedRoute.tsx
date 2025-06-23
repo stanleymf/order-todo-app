@@ -257,13 +257,12 @@ export function ProductsManagementRoute({
   fallback,
 }: { children: ReactNode; fallback?: ReactNode }) {
   return (
-    <ProtectedRoute
-      requiredPermissions={["products:read", "products:write"]}
-      requiredStoreAccess={true}
+    <RoleBasedRoute
+      roles={["owner", "admin", "florist"]}
       fallback={fallback}
     >
       {children}
-    </ProtectedRoute>
+    </RoleBasedRoute>
   )
 }
 

@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (token && userData && tenantData) {
           // Validate token with backend
           try {
-            const response = await fetch('/api/health', {
+            const response = await fetch('/api/auth/validate', {
               headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -110,14 +110,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             })
             
             if (response.ok) {
-              // Token is valid
-              const user = JSON.parse(userData)
-              const tenant = JSON.parse(tenantData)
-
-              dispatch({
-                type: "INIT_AUTH",
-                payload: { user, tenant },
-              })
+              const validationResult = await response.json()
+              if (validationResult.valid) {
+                // Token is valid, use the data from validation
+                dispatch({
+                  type: "INIT_AUTH",
+                  payload: { user: validationResult.user, tenant: validationResult.tenant },
+                })
+              } else {
+                // Token is invalid, clear storage and logout
+                console.log("Token validation failed, logging out")
+                removeStoredToken()
+                localStorage.removeItem("auth_user")
+                localStorage.removeItem("auth_tenant")
+                localStorage.removeItem("refresh_token")
+                dispatch({ type: "AUTH_FAILURE", payload: { error: "Token expired" } })
+              }
             } else {
               // Token is invalid, clear storage and logout
               console.log("Token validation failed, logging out")

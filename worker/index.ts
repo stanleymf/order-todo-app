@@ -1127,7 +1127,7 @@ app.post("/api/init-db", async (c) => {
       `CREATE TABLE IF NOT EXISTS tenant_products (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, shopify_product_id TEXT, name TEXT NOT NULL, description TEXT, price REAL, stock_quantity INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (tenant_id) REFERENCES tenants(id))`
     ).run()
     await c.env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS shopify_stores (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, shopify_domain TEXT UNIQUE NOT NULL, access_token TEXT NOT NULL, webhook_secret TEXT, sync_enabled BOOLEAN DEFAULT true, last_sync_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (tenant_id) REFERENCES tenants(id))`
+      `CREATE TABLE IF NOT EXISTS shopify_stores (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, shopify_domain TEXT UNIQUE NOT NULL, access_token TEXT NOT NULL, webhook_secret TEXT, sync_enabled BOOLEAN DEFAULT true, last_sync_at TEXT, settings TEXT DEFAULT '{}', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (tenant_id) REFERENCES tenants(id))`
     ).run()
     
     // Add tables from migrations
@@ -2815,6 +2815,26 @@ app.get('*', async (c) => {
   }
   
   return c.notFound()
+})
+
+// --- Database Migration Route ---
+app.post("/api/migrate/add-settings-to-stores", async (c) => {
+  try {
+    // Check if settings column exists
+    const { results } = await c.env.DB.prepare("PRAGMA table_info(shopify_stores)").all()
+    const hasSettingsColumn = results.some((col: any) => col.name === 'settings')
+    
+    if (!hasSettingsColumn) {
+      // Add settings column to existing table
+      await c.env.DB.prepare("ALTER TABLE shopify_stores ADD COLUMN settings TEXT DEFAULT '{}'").run()
+      return c.json({ success: true, message: "Settings column added to shopify_stores table" })
+    } else {
+      return c.json({ success: true, message: "Settings column already exists" })
+    }
+  } catch (error) {
+    console.error("Migration error:", error)
+    return c.json({ error: "Failed to migrate database" }, 500)
+  }
 })
 
 export default app

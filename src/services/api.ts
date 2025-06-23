@@ -19,10 +19,8 @@ import {
 } from "../types/orderCardFields"
 import { getStoredToken, removeStoredToken } from "./auth"
 
-const API_BASE_URL =
-  typeof window !== "undefined" && window.location.hostname.includes(".workers.dev")
-    ? `https://${window.location.hostname}`
-    : "http://localhost:8787"
+// API configuration
+const API_BASE_URL = "https://order-to-do.stanleytan92.workers.dev"
 
 class ApiError extends Error {
   constructor(
@@ -34,70 +32,91 @@ class ApiError extends Error {
   }
 }
 
+// Base API request function with enhanced error handling
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // Validate endpoint format
+  if (!endpoint.startsWith('/')) {
+    throw new Error(`Invalid endpoint format: ${endpoint}. Endpoint must start with '/'`)
+  }
+
+  // Check for missing tenant ID in tenant-specific endpoints
+  if (endpoint.includes('/api/tenants/') && endpoint.includes('/undefined/')) {
+    throw new Error(`Missing tenant ID in endpoint: ${endpoint}. Please ensure tenant context is loaded.`)
+  }
+
   const url = `${API_BASE_URL}${endpoint}`
-  const response = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-    ...options,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new ApiError(response.status, errorText)
-  }
-
-  return response.json()
-}
-
-// This function is intended for internal use within this service
-async function authenticatedRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getStoredToken()
-  if (!token) {
-    // On the client-side, we can redirect to login
-    if (typeof window !== "undefined") {
-      // To prevent redirect loops, only redirect if not already on the login page
-      if (window.location.pathname !== "/login") {
-        console.log("No token found, redirecting to login.")
-        // Clear any lingering auth state
-        removeStoredToken()
-        localStorage.removeItem("auth_user")
-        localStorage.removeItem("auth_tenant")
-        // Redirect to login
-        window.location.href = "/login"
-      }
-      // Throw an error to stop the current request process
-      throw new Error("Redirecting to login.")
-    } else {
-      // In a non-window environment (like server-side rendering, though not our case),
-      // just throw the error.
-      throw new Error("No authentication token found")
-    }
-  }
-
+  
   try {
-    return await apiRequest<T>(endpoint, {
+    const response = await fetch(url, {
       ...options,
       headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...options.headers,
       },
     })
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      // Token is invalid, clear storage and redirect to login
-      console.log("401 Unauthorized - clearing auth data")
-      removeStoredToken()
-      localStorage.removeItem("auth_user")
-      localStorage.removeItem("auth_tenant")
-      localStorage.removeItem("refresh_token")
-      
-      // Redirect to login page
-      window.location.href = '/login'
+
+    // Handle non-JSON responses (like HTML error pages)
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error(`Expected JSON response but received ${contentType}. URL: ${url}`)
     }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+      throw new Error(`API Error ${response.status}: ${errorData.error || errorData.message || 'Unknown error'}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error(`API Request failed for ${url}:`, error)
+    throw error
+  }
+}
+
+// Authenticated request function with enhanced validation
+async function authenticatedRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getStoredToken()
+  
+  if (!token) {
+    throw new Error('Authentication token not found. Please log in again.')
+  }
+
+  // Validate endpoint format
+  if (!endpoint.startsWith('/')) {
+    throw new Error(`Invalid endpoint format: ${endpoint}. Endpoint must start with '/'`)
+  }
+
+  // Check for missing tenant ID in tenant-specific endpoints
+  if (endpoint.includes('/api/tenants/') && endpoint.includes('/undefined/')) {
+    throw new Error(`Missing tenant ID in endpoint: ${endpoint}. Please ensure tenant context is loaded.`)
+  }
+
+  const url = `${API_BASE_URL}${endpoint}`
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        ...options.headers,
+      },
+    })
+
+    // Handle non-JSON responses (like HTML error pages)
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error(`Expected JSON response but received ${contentType}. URL: ${url}`)
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+      throw new Error(`API Error ${response.status}: ${errorData.error || errorData.message || 'Unknown error'}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error(`Authenticated API Request failed for ${url}:`, error)
     throw error
   }
 }
@@ -187,7 +206,7 @@ export async function getOrdersByDate(tenantId: string, date: string): Promise<a
   console.log(`Calling getOrdersByDate with tenantId: ${tenantId}, date: ${date}, formattedDate: ${formattedDate}`)
   
   try {
-    const result = await authenticatedRequest<any[]>(`/api/tenants/${tenantId}/orders-by-date?date=${formattedDate}`)
+    const result = await apiRequest<any[]>(`/api/tenants/${tenantId}/orders-by-date?date=${formattedDate}`)
     console.log(`getOrdersByDate response:`, result)
     return result
   } catch (error) {

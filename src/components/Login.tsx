@@ -23,7 +23,7 @@ export function Login() {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
-      navigate("/dashboard")
+      navigate("/orders")
     }
   }, [isAuthenticated, navigate])
 
@@ -52,7 +52,7 @@ export function Login() {
           })
 
           if (loginResult.success) {
-            navigate("/dashboard")
+            navigate("/orders")
           } else {
             setError("Registration successful but login failed. Please try logging in.")
           }
@@ -68,7 +68,7 @@ export function Login() {
         })
 
         if (result.success) {
-          navigate("/dashboard")
+          navigate("/orders")
         } else {
           setError("Login failed. Please check your credentials.")
         }

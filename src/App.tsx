@@ -12,6 +12,7 @@ import CustomerAIFlorist from "./components/CustomerAIFlorist"
 import AIFlorist from "./components/AIFlorist"
 import MobileCameraWidget from "./components/MobileCameraWidget"
 import { Toaster } from "./components/ui/sonner"
+import { ProductsManagementRoute } from "./components/ProtectedRoute"
 import "./index.css"
 import { getTenantSettings } from "./services/api"
 import { useMobileView } from "./components/Dashboard"
@@ -67,7 +68,7 @@ function AppContent() {
             <Route index element={<OrdersView />} />
             <Route path="orders" element={<OrdersView />} />
             <Route path="analytics" element={<Analytics />} />
-            <Route path="products" element={<ProductManagement />} />
+            <Route path="products" element={<ProductsManagementRoute><ProductManagement /></ProductsManagementRoute>} />
             <Route path="ai-integration" element={<AIIntegration />} />
             <Route path="settings/:tab?" element={<Settings />} />
           </Route>

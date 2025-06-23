@@ -4,6 +4,9 @@
 
 This roadmap provides a detailed, week-by-week plan for implementing multi-tenant architecture in the Order To-Do App, specifically designed for Shopify multi-store compatibility.
 
+**📚 Related Documentation:**
+- [AI Florist Shopify Integration](./AI_FLORIST_SHOPIFY_INTEGRATION.md) - Comprehensive plan for integrating AI Florist with Shopify stores and customer personalization
+
 ---
 
 ## 🎯 **Current State Assessment**
