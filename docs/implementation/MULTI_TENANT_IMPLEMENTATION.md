@@ -949,4 +949,50 @@ CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
 - **Error Rate**: < 1% system errors
 - **Performance**: No degradation in user experience
 
-This implementation plan provides a comprehensive roadmap for transitioning to a multi-tenant architecture that's fully compatible with Shopify's multi-store requirements and ready for app store deployment. 
+This implementation plan provides a comprehensive roadmap for transitioning to a multi-tenant architecture that's fully compatible with Shopify's multi-store requirements and ready for app store deployment.
+
+# Multi-Tenant Implementation Guidelines
+
+## Ensuring Tenant Compatibility for All Features
+
+To maintain a robust multi-tenant architecture, all new features, endpoints, and database queries **must** be tenant-compatible. This ensures data isolation, security, and correct functionality for each tenant.
+
+### 1. **API Design**
+- **Always include `tenantId` in API routes** for any resource that is tenant-specific.
+  - Example: `/api/tenants/:tenantId/orders`, `/api/tenants/:tenantId/ai/knowledge-base`
+- Avoid global endpoints unless the data is truly shared across all tenants.
+- Validate the `tenantId` parameter in every handler and return an error if missing or invalid.
+
+### 2. **Database Access**
+- **All queries must filter by `tenant_id`** (or equivalent) in the WHERE clause.
+- Never fetch or mutate data without scoping to the current tenant.
+- When creating new tables, always include a `tenant_id` column if the data is tenant-specific.
+- Use parameterized queries to prevent SQL injection and ensure correct tenant scoping.
+
+### 3. **Frontend Usage**
+- Always pass the current `tenantId` when making API calls.
+- Store and manage the active tenant context in global state (e.g., React context or Redux).
+- Never display or allow access to data from other tenants.
+
+### 4. **Testing for Tenant Isolation**
+- Create test tenants and verify that data from one tenant is never visible to another.
+- Use automated tests to check for tenant leaks in API responses and UI.
+- Regularly audit endpoints and queries for missing tenant checks.
+
+### 5. **Common Pitfalls**
+- Forgetting to add `tenantId` to new API routes or database queries.
+- Accidentally using global state or cache for tenant-specific data.
+- Hardcoding tenant IDs in code or tests.
+
+### 6. **Checklist for New Features**
+- [ ] All new API endpoints include `tenantId` in the route.
+- [ ] All database queries filter by `tenant_id`.
+- [ ] Frontend passes `tenantId` in all relevant API calls.
+- [ ] UI only shows data for the current tenant.
+- [ ] Tests verify tenant isolation.
+
+---
+
+**Always review this checklist before merging or deploying new features.**
+
+_Last updated: 2025-06-23_ 

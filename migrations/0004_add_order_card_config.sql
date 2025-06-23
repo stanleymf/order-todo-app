@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS order_card_configs (
 );
 
 -- Index for faster queries
-CREATE INDEX idx_order_card_configs_tenant_id ON order_card_configs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_order_card_configs_tenant_id ON order_card_configs(tenant_id);
 CREATE INDEX idx_order_card_configs_display_order ON order_card_configs(display_order); 

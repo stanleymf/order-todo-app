@@ -209,3 +209,130 @@ A major feature and UI enhancement release focused on improving product manageme
 ### 🐛 Bug Fixes
 
 -   **SPA Routing Fix for /products**: Removed the explicit `/products` route from the worker. This allows the SPA catch-all to handle `/products` and resolves the persistent 404 error on that route. Now all non-API routes are handled consistently by the SPA router. 
+
+## [1.4.0] - 2025-06-23
+
+### 🎉 Major Features
+- **AI Florist Chat Integration**: Integrated real OpenAI GPT-3.5-turbo for dynamic chat responses
+- **DALL-E Image Generation**: Full integration with OpenAI DALL-E 3 for bouquet image generation
+- **AI Training Data Manager**: Complete rating and feedback system for generated designs
+- **Database Schema Enhancement**: Added missing columns for AI-generated designs tracking
+
+### ✨ New Features
+- **Real-time AI Chat**: AI Florist now uses OpenAI GPT for intelligent, contextual responses
+- **Image Rating System**: Users can rate generated designs (1-5 stars) with feedback
+- **Design History**: All generated designs are saved and trackable in the database
+- **Training Data Analytics**: Comprehensive stats and analytics for AI training data
+- **Model Version Tracking**: Track which AI model version generated each design
+- **Cost Tracking**: Monitor AI generation costs per design
+
+### 🔧 Technical Improvements
+- **Database Schema Updates**:
+  - Added `model_version` column to `ai_generated_designs` table
+  - Added `cost` column to track generation expenses
+  - Added `status` column for design processing states
+- **API Endpoints**:
+  - `/api/ai/chat` - Real OpenAI integration for chat responses
+  - `/api/ai/generate-bouquet-image` - Enhanced with database saving
+  - `/api/tenants/:tenantId/ai/generated-designs` - List all generated designs
+  - `/api/tenants/:tenantId/ai/generated-designs/:designId` - Update design ratings
+- **Frontend Enhancements**:
+  - Console logging for debugging image generation responses
+  - Improved error handling for rating submissions
+  - Real-time feedback for user actions
+
+### 🐛 Bug Fixes
+- **Database Migration Conflicts**: Fixed conflicting index creation in migration files
+- **Missing Database Columns**: Resolved SQLite errors for missing schema columns
+- **Rating System**: Fixed 404 errors when rating fallback images
+- **API Integration**: Corrected OpenAI API key usage and error handling
+
+### 📊 Analytics & Monitoring
+- **Generation Tracking**: Monitor success/failure rates of AI image generation
+- **Cost Analytics**: Track spending on AI generation per tenant
+- **Quality Metrics**: User ratings and feedback collection for AI improvement
+- **Performance Monitoring**: Generation time tracking and optimization
+
+### 🔒 Security & Stability
+- **Tenant Isolation**: All AI operations properly scoped to tenant context
+- **Error Handling**: Graceful fallbacks for API failures and database errors
+- **Data Integrity**: Proper foreign key relationships and data validation
+
+### 📚 Documentation
+- **API Documentation**: Updated with new AI endpoints and parameters
+- **Database Schema**: Documented new columns and their purposes
+- **Implementation Guide**: Added AI Florist integration documentation
+
+### 🚀 Deployment
+- **Production Ready**: All changes deployed to production environment
+- **Database Migration**: Safe migration of existing data with new schema
+- **Backward Compatibility**: Maintained compatibility with existing features
+
+---
+
+## [1.3.0] - 2025-06-22
+
+### ✨ New Features
+- **AI Training Data Manager**: Comprehensive interface for managing AI training data
+- **Product Labeling System**: Enhanced product categorization and labeling
+- **Order Card Configuration**: Customizable order card layouts and fields
+- **Mobile Camera Widget**: Photo capture and upload functionality
+
+### 🔧 Technical Improvements
+- **Multi-tenant Architecture**: Improved tenant isolation and data management
+- **Database Optimization**: Enhanced query performance and indexing
+- **API Enhancements**: New endpoints for AI training and product management
+
+### 🐛 Bug Fixes
+- **Authentication Issues**: Fixed JWT token validation problems
+- **Data Synchronization**: Resolved Shopify webhook synchronization issues
+- **UI Responsiveness**: Improved mobile and tablet interface compatibility
+
+---
+
+## [1.2.0] - 2025-06-21
+
+### ✨ New Features
+- **Shopify Integration**: Complete order synchronization and product management
+- **Analytics Dashboard**: Comprehensive business metrics and reporting
+- **Order Management**: Enhanced order processing and status tracking
+- **Customer Management**: Customer data and order history tracking
+
+### 🔧 Technical Improvements
+- **Real-time Updates**: WebSocket integration for live data updates
+- **Performance Optimization**: Reduced loading times and improved responsiveness
+- **Error Handling**: Enhanced error recovery and user feedback
+
+### 🐛 Bug Fixes
+- **Data Consistency**: Fixed order status synchronization issues
+- **UI Glitches**: Resolved interface rendering problems
+- **API Reliability**: Improved API endpoint stability
+
+---
+
+## [1.1.0] - 2025-06-20
+
+### ✨ New Features
+- **User Authentication**: Secure login and user management system
+- **Multi-tenant Support**: Isolated data and settings per tenant
+- **Basic Order Management**: Order creation, editing, and status tracking
+- **Product Catalog**: Product management and inventory tracking
+
+### 🔧 Technical Improvements
+- **Database Design**: Optimized schema for multi-tenant architecture
+- **API Foundation**: RESTful API endpoints for core functionality
+- **Frontend Framework**: React-based user interface with modern UI components
+
+### 🐛 Bug Fixes
+- **Initial Setup**: Resolved database initialization issues
+- **User Permissions**: Fixed access control and authorization problems
+
+---
+
+## [1.0.0] - 2025-06-19
+
+### 🎉 Initial Release
+- **Core Order Management**: Basic order creation and management
+- **User Interface**: Modern, responsive web application
+- **Database Foundation**: SQLite-based data storage
+- **Cloudflare Workers**: Serverless backend deployment 

@@ -16,6 +16,6 @@ CREATE TABLE IF NOT EXISTS tenant_users (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_tenant_users_tenant_id ON tenant_users(tenant_id);
-CREATE INDEX idx_tenant_users_email ON tenant_users(email);
-CREATE INDEX idx_tenant_users_role ON tenant_users(role); 
+CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant_id ON tenant_users(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_users_email ON tenant_users(email);
+CREATE INDEX IF NOT EXISTS idx_tenant_users_role ON tenant_users(role); 

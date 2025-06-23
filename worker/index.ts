@@ -8,6 +8,7 @@ import type { D1Database, ScheduledEvent, ExecutionContext } from "@cloudflare/w
 import { etag } from "hono/etag"
 import { serveStatic } from 'hono/cloudflare-pages'
 import { WebhookConfig } from "../src/types"
+import crypto from 'crypto'
 
 // @ts-ignore
 // import manifest from '__STATIC_CONTENT_MANIFEST';
@@ -1605,6 +1606,8 @@ app.post('/api/ai/generate-bouquet-image', async (c) => {
     if (!openaiApiKey) {
       return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
     }
+    
+    const startTime = Date.now();
 
     // 1. Create a system prompt for image generation based on conversation
     const conversationSummary = messages
@@ -1650,17 +1653,51 @@ app.post('/api/ai/generate-bouquet-image', async (c) => {
     }
 
     const data = await response.json();
-    const generationTime = Date.now();
+    const generationTime = new Date();
+    const designId = `design_${crypto.randomUUID()}`;
+
+    const designToSave = {
+        id: designId,
+        tenant_id: tenantId,
+        prompt: imagePrompt,
+        generated_image_url: data.data[0].url,
+        style_parameters: JSON.stringify(extractedSpecs),
+        model_version: 'v1.0-dalle3',
+        cost: 0.040,
+        status: 'completed',
+        created_at: generationTime.toISOString(),
+        updated_at: generationTime.toISOString(),
+        generation_metadata: JSON.stringify({ confidence: 0.9, generationTime: (Date.now() - startTime) / 1000 }),
+    };
+
+    // 4. Save the generated design to the database
+    await c.env.DB.prepare(
+      `INSERT INTO ai_generated_designs (id, tenant_id, prompt, generated_image_url, style_parameters, model_version, cost, status, created_at, updated_at, generation_metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      designToSave.id,
+      designToSave.tenant_id,
+      designToSave.prompt,
+      designToSave.generated_image_url,
+      designToSave.style_parameters,
+      designToSave.model_version,
+      designToSave.cost,
+      designToSave.status,
+      designToSave.created_at,
+      designToSave.updated_at,
+      designToSave.generation_metadata
+    ).run();
     
+    // 5. Return the response to the frontend
     return c.json({
-      id: `bouquet-${Date.now()}`,
+      id: designToSave.id,
       prompt: imagePrompt,
       generatedImage: data.data[0].url,
       confidence: 0.90 + Math.random() * 0.05,
       designSpecs: extractedSpecs,
-      generationTime: generationTime,
+      generationTime: (Date.now() - startTime) / 1000,
       modelVersion: 'v1.0-dalle3',
-      cost: 0.040, // DALL-E 3 pricing
+      cost: 0.040,
       status: 'completed',
       conversationSummary: conversationSummary
     });
@@ -2053,7 +2090,7 @@ app.get("/api/tenants/:tenantId/shopify/analytics", async (c) => {
     console.error("Error fetching Shopify analytics:", error)
     return c.json({ error: "Failed to fetch Shopify analytics" }, 500)
   }
-});
+})
 
 app.post("/api/tenants/:tenantId/shopify/analytics/training-session", async (c) => {
   const tenantId = c.req.param("tenantId");
@@ -2780,6 +2817,167 @@ app.get("/api/tenants/:tenantId/photos", async (c) => {
   }
 })
 
+// --- AI Florist Widget Endpoints ---
+
+// Get AI Knowledge Base (tenant-specific)
+app.get("/api/tenants/:tenantId/ai/knowledge-base", async (c) => {
+  try {
+    // In the future, fetch tenant-specific knowledge base
+    const knowledgeBase = {
+      styles: [
+        { name: "romantic", description: "Soft, dreamy, and intimate arrangements" },
+        { name: "modern", description: "Clean, minimalist, and contemporary designs" },
+        { name: "rustic", description: "Natural, earthy, and charming bouquets" },
+        { name: "elegant", description: "Sophisticated and refined arrangements" },
+        { name: "wild", description: "Free-flowing and natural designs" }
+      ],
+      flowers: [
+        { name: "roses", colors: ["red", "pink", "white", "yellow"] },
+        { name: "lilies", colors: ["white", "pink", "orange"] },
+        { name: "peonies", colors: ["pink", "white", "red"] },
+        { name: "tulips", colors: ["red", "yellow", "pink", "purple"] },
+        { name: "orchids", colors: ["white", "purple", "pink"] }
+      ],
+      occasions: [
+        { name: "wedding", description: "Elegant arrangements for special ceremonies" },
+        { name: "birthday", description: "Celebratory and colorful designs" },
+        { name: "anniversary", description: "Romantic and meaningful bouquets" },
+        { name: "sympathy", description: "Respectful and comforting arrangements" },
+        { name: "celebration", description: "Joyful and festive designs" }
+      ],
+      budgetTiers: [
+        { name: "budget", range: "$25-50", description: "Affordable options" },
+        { name: "mid-range", range: "$50-100", description: "Quality designs" },
+        { name: "premium", range: "$100-200", description: "Luxury arrangements" },
+        { name: "luxury", range: "$200+", description: "Ultimate premium designs" }
+      ]
+    }
+    return c.json(knowledgeBase)
+  } catch (error) {
+    console.error("Error fetching AI knowledge base (tenant):", error)
+    return c.json({ error: "Failed to fetch AI knowledge base" }, 500)
+  }
+})
+
+// AI Chat Endpoint
+app.post("/api/ai/chat", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { messages, knowledgeBase, tenantId, designSpecs } = body;
+
+    // --- Fetch Tenant-Specific OpenAI API Key ---
+    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
+    if (!tenantSettingsRaw?.settings) {
+      return c.json({ error: 'Could not find settings for this tenant.' }, 404);
+    }
+    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
+    const openaiApiKey = tenantSettings.openaiApiKey;
+    if (!openaiApiKey) {
+      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
+    }
+
+    // --- Prepare messages for OpenAI Chat API ---
+    // Add a system prompt to guide the AI's behavior
+    const systemPrompt = {
+      role: 'system',
+      content: `You are an expert florist assistant. Be creative, helpful, and friendly. Use the provided knowledge base to suggest beautiful, personalized bouquets. Ask clarifying questions if needed. Always keep the conversation focused on flowers, bouquets, and customer preferences. If the user mentions a specific flower, style, or occasion, incorporate it into your suggestions.`,
+    };
+    const openaiMessages = [
+      systemPrompt,
+      ...messages.map((msg: any) => ({
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: msg.text,
+      })),
+    ];
+
+    // --- Call OpenAI Chat API ---
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: openaiMessages,
+        temperature: 0.8,
+        max_tokens: 300,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      console.error('OpenAI Chat API Error:', error);
+      throw new Error(`OpenAI Chat API error: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    const aiReply = data.choices?.[0]?.message?.content || "I'm sorry, I couldn't generate a response right now.";
+
+    return c.json({
+      response: aiReply,
+      designSpecs: designSpecs || {
+        style: "romantic",
+        occasion: "general",
+        budget: "mid-range",
+        size: "medium"
+      }
+    });
+  } catch (error) {
+    console.error("Error in AI chat:", error);
+    // Declare designSpecs with a default value if not defined
+    let designSpecs = undefined;
+    try {
+      const body = await c.req.json();
+      designSpecs = body?.designSpecs;
+    } catch {}
+    const fallbackSpecs = designSpecs ? designSpecs : {
+      style: "romantic",
+      occasion: "general",
+      budget: "mid-range",
+      size: "medium"
+    };
+    return c.json({
+      response: "I'm sorry, I'm having trouble connecting to the AI service right now. Please try again later!",
+      designSpecs: fallbackSpecs
+    }, 200);
+  }
+});
+
+// Generate Bouquet Image Endpoint
+app.post("/api/ai/generate-bouquet-image", async (c) => {
+  try {
+    const body = await c.req.json()
+    const { messages, knowledgeBase, tenantId, designSpecs } = body
+    
+    // For now, return a mock generated image
+    // In the future, this should integrate with DALL-E or another image generation service
+    const mockImageUrl = "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=800&h=800&fit=crop&crop=center"
+    
+    const generatedImage = {
+      id: `generated-${Date.now()}`,
+      prompt: messages[messages.length - 1]?.text || "Beautiful bouquet",
+      generatedImage: mockImageUrl,
+      designSpecs: designSpecs || {
+        style: "romantic",
+        occasion: "general",
+        budget: "mid-range",
+        size: "medium"
+      },
+      cost: 0.04,
+      generationTime: 3.2,
+      modelVersion: "v1.0-mock",
+      confidence: 0.85,
+      status: "completed"
+    }
+    
+    return c.json(generatedImage)
+  } catch (error) {
+    console.error("Error generating bouquet image:", error)
+    return c.json({ error: "Failed to generate bouquet image" }, 500)
+  }
+})
+
 // SPA routing - handle all non-API routes
 app.get('*', async (c) => {
   const path = c.req.path
@@ -2836,5 +3034,68 @@ app.post("/api/migrate/add-settings-to-stores", async (c) => {
     return c.json({ error: "Failed to migrate database" }, 500)
   }
 })
+
+// GET all generated designs for a tenant
+app.get('/api/tenants/:tenantId/ai/generated-designs', async (c) => {
+    try {
+        const { tenantId } = c.req.param();
+        if (!tenantId) {
+            return c.json({ error: 'Tenant ID is required.' }, 400);
+        }
+        const db = c.env.DB;
+        const { results } = await db.prepare("SELECT * FROM ai_generated_designs WHERE tenant_id = ? ORDER BY created_at DESC").bind(tenantId).all();
+        return c.json(results || []);
+    } catch (error) {
+        console.error('Error fetching generated designs:', error);
+        return c.json({ error: 'Failed to fetch generated designs.' }, 500);
+    }
+});
+
+// PUT (update) a generated design, e.g., for rating
+app.put('/api/tenants/:tenantId/ai/generated-designs/:designId', async (c) => {
+    try {
+        const { tenantId, designId } = c.req.param();
+        const updates = await c.req.json();
+
+        if (!tenantId || !designId) {
+            return c.json({ error: 'Tenant ID and Design ID are required.' }, 400);
+        }
+
+        const db = c.env.DB;
+
+        const allowedFields = ['quality_rating', 'feedback', 'is_favorite', 'is_approved'];
+        const updateFields = Object.keys(updates).filter(key => allowedFields.includes(key));
+
+        if (updateFields.length === 0) {
+            return c.json({ error: 'No valid fields provided for update.' }, 400);
+        }
+
+        if (updates.quality_rating && (typeof updates.quality_rating !== 'number' || updates.quality_rating < 1 || updates.quality_rating > 5)) {
+            return c.json({ error: 'Rating must be a number between 1 and 5.' }, 400);
+        }
+
+        const setClause = updateFields.map(field => `${field} = ?`).join(', ');
+        const values = updateFields.map(field => updates[field]);
+
+        const finalSetClause = setClause + ', updated_at = ?';
+        const finalValues = [...values, new Date().toISOString(), designId, tenantId];
+
+        const stmt = `UPDATE ai_generated_designs SET ${finalSetClause} WHERE id = ? AND tenant_id = ?`;
+
+        const info = await db.prepare(stmt).bind(...finalValues).run();
+
+        if (info.meta.changes === 0) {
+            return c.json({ error: 'Design not found or update failed.' }, 404);
+        }
+
+        const updatedDesign = await db.prepare("SELECT * FROM ai_generated_designs WHERE id = ?").bind(designId).first();
+
+        return c.json(updatedDesign);
+    } catch (error) {
+        console.error('Error updating generated design:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+        return c.json({ error: 'Failed to update design.', details: errorMessage }, 500);
+    }
+});
 
 export default app

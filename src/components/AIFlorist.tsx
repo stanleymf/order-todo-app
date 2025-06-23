@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Send, Loader2, CheckCircle, Image, Download, Star } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
+import { ScrollArea } from './ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { DesignRatingModal } from './DesignRatingModal';
+import { updateAIGeneratedDesign } from '../services/api';
+import { toast } from 'sonner';
 
 // Define the types for our chat messages and conversation state
 type Message = {
@@ -139,7 +143,7 @@ const AIFlorist = () => {
       
       const aiMessage: Message = {
         sender: 'ai',
-        text: aiResponseData.content,
+        text: aiResponseData.response,
       };
       
       addMessage(aiMessage);
@@ -187,6 +191,8 @@ const AIFlorist = () => {
       }
 
       const imageData: GeneratedImage = await response.json();
+      
+      console.log("Full response from /api/ai/generate-bouquet-image:", imageData);
       
       setGeneratedImages(prev => [...prev, imageData]);
       setCurrentImage(imageData);
@@ -241,11 +247,19 @@ const AIFlorist = () => {
   };
 
   const handleRatingSubmit = async (rating: number, feedback: string) => {
+    if (!currentImage?.id) {
+      toast.error("No image selected for rating.");
+      return;
+    }
+    
+    const tenantId = "84caf0bf-b8a7-448f-9a33-8697cb8d6918";
+
     try {
-      // TODO: Implement API call to save rating
-      console.log('Rating submitted:', { designId: currentImage?.id, rating, feedback });
+      await updateAIGeneratedDesign(tenantId, currentImage.id, {
+        rating,
+        feedback,
+      });
       
-      // Update the current image with rating
       if (currentImage) {
         setCurrentImage({
           ...currentImage,
@@ -258,8 +272,13 @@ const AIFlorist = () => {
         sender: 'ai',
         text: `Thank you for your feedback! Your rating of ${rating}/5 stars helps us improve our AI.`,
       });
+      
+      toast.success("Rating submitted successfully!");
+      setShowRatingModal(false);
+
     } catch (error) {
       console.error('Error submitting rating:', error);
+      toast.error("Sorry, there was an issue saving your rating. Please try again.");
       addMessage({
         sender: 'ai',
         text: "Sorry, there was an issue saving your rating. Please try again.",

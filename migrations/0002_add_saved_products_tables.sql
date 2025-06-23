@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS product_label_mappings (
 );
 
 -- Indexes for the new tables
-CREATE INDEX idx_saved_products_tenant_id ON saved_products(tenant_id);
-CREATE INDEX idx_saved_products_shopify_ids ON saved_products(shopify_product_id, shopify_variant_id);
-CREATE INDEX idx_product_label_mappings_product_id ON product_label_mappings(saved_product_id);
-CREATE INDEX idx_product_label_mappings_label_id ON product_label_mappings(label_id); 
+CREATE INDEX IF NOT EXISTS idx_saved_products_tenant_id ON saved_products(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_saved_products_shopify_ids ON saved_products(shopify_product_id, shopify_variant_id);
+CREATE INDEX IF NOT EXISTS idx_product_label_mappings_product_id ON product_label_mappings(saved_product_id);
+CREATE INDEX IF NOT EXISTS idx_product_label_mappings_label_id ON product_label_mappings(label_id); 

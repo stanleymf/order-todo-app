@@ -706,16 +706,18 @@ export async function createAITrainingSession(tenantId: string, session: any): P
   })
 }
 
-export async function getAIGeneratedDesigns(tenantId: string, filters?: any): Promise<any[]> {
-  const queryParams = filters ? `?${new URLSearchParams(filters).toString()}` : ""
-  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/generated-designs${queryParams}`)
+export async function getAIGeneratedDesigns(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/generated-designs`);
 }
 
-export async function saveAIGeneratedDesign(tenantId: string, design: any): Promise<any> {
-  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/generated-designs`, {
-    method: "POST",
-    body: JSON.stringify(design),
-  })
+export async function updateAIGeneratedDesign(tenantId: string, designId: string, updates: { rating: number, feedback: string }): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/generated-designs/${designId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      quality_rating: updates.rating,
+      feedback: updates.feedback,
+    }),
+  });
 }
 
 export async function getAIStyleTemplates(tenantId: string): Promise<any[]> {

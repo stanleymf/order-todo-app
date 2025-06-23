@@ -12,7 +12,6 @@ import {
   getAITrainingSessions,
   createAITrainingSession,
   getAIGeneratedDesigns,
-  saveAIGeneratedDesign,
   getAIStyleTemplates,
   createAIStyleTemplate,
   getAIPromptTemplates,
@@ -21,7 +20,8 @@ import {
   recordAIGeneration,
   getFlowers,
   createFlower,
-  deleteFlower
+  deleteFlower,
+  updateAIGeneratedDesign
 } from './api';
 
 export interface AIModelConfig {
@@ -207,16 +207,8 @@ class AITrainingService {
 
   // ===== GENERATED DESIGNS =====
 
-  async getGeneratedDesigns(filters?: {
-    session_id?: string;
-    is_favorite?: boolean;
-    is_approved?: boolean;
-  }): Promise<AIGeneratedDesign[]> {
-    return await getAIGeneratedDesigns(this.tenantId, filters);
-  }
-
-  async saveGeneratedDesign(design: Omit<AIGeneratedDesign, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>): Promise<AIGeneratedDesign> {
-    return await saveAIGeneratedDesign(this.tenantId, design);
+  async getGeneratedDesigns(): Promise<AIGeneratedDesign[]> {
+    return await getAIGeneratedDesigns(this.tenantId);
   }
 
   async updateDesignRating(designId: string, rating: number, feedback?: string): Promise<void> {
