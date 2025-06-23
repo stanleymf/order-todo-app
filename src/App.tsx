@@ -9,6 +9,7 @@ import { Settings } from "./components/Settings"
 import { AIIntegration } from "./components/AIIntegration"
 import { Analytics } from "./components/Analytics"
 import CustomerAIFlorist from "./components/CustomerAIFlorist"
+import AIFlorist from "./components/AIFlorist"
 import MobileCameraWidget from "./components/MobileCameraWidget"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
@@ -61,6 +62,7 @@ function AppContent() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/ai-florist" element={<CustomerAIFlorist />} />
+          <Route path="/ai-florist-widget" element={<AIFlorist />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
             <Route index element={<OrdersView />} />
             <Route path="orders" element={<OrdersView />} />

@@ -56,6 +56,147 @@ app.get("/api/debug/database", async (c) => {
   }
 });
 
+// --- AI Florist - Get Saved Products for Grounding (PUBLIC) ---
+app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
+  try {
+    const { tenantId } = c.req.param();
+    const db = c.env.DB;
+
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required.' }, 400);
+    }
+
+    const { results } = await db
+      .prepare(
+        `SELECT id, title, variant_title, description, price, tags, product_type
+         FROM saved_products
+         WHERE tenant_id = ?
+         LIMIT 200` // Limit to 200 products to avoid overwhelming the context
+      )
+      .bind(tenantId)
+      .all();
+
+    if (!results) {
+      return c.json([]); // Return empty array if no products found
+    }
+
+    return c.json(results);
+
+  } catch (error) {
+    console.error('Error fetching saved products:', error);
+    return c.json({ error: 'Failed to fetch saved products.' }, 500);
+  }
+});
+
+// --- AI Florist - Get Knowledge Base for Grounding (PUBLIC) ---
+app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
+  try {
+    const { tenantId } = c.req.param();
+    const db = c.env.DB;
+
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required.' }, 400);
+    }
+
+    // Fetch all data in parallel
+    const [
+      productsPromise,
+      stylesPromise,
+      occasionsPromise,
+      arrangementTypesPromise,
+      budgetTiersPromise,
+      flowersPromise,
+      configPromise,
+      promptsPromise
+    ] = [
+      db.prepare(`SELECT id, title, description, price, tags, product_type FROM saved_products WHERE tenant_id = ? LIMIT 200`).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, themes FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, related_holidays FROM ai_occasions WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, recommended_flowers FROM ai_arrangement_types WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, min_price, max_price, description FROM ai_budget_tiers WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, variety, color, seasonality, availability, price_range FROM ai_flowers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT name, model_type, config_data FROM ai_model_configs WHERE tenant_id = ? AND is_active = true LIMIT 1`).bind(tenantId).first(),
+      db.prepare(`SELECT name, template, variables, category FROM ai_prompt_templates WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+    ];
+
+    const [
+      productsResult,
+      stylesResult,
+      occasionsResult,
+      arrangementTypesResult,
+      budgetTiersResult,
+      flowersResult,
+      configResult,
+      promptsResult
+    ] = await Promise.all([
+      productsPromise,
+      stylesPromise,
+      occasionsPromise,
+      arrangementTypesPromise,
+      budgetTiersPromise,
+      flowersPromise,
+      configPromise,
+      promptsPromise
+    ]);
+
+    const knowledgeBase = {
+      products: productsResult.results || [],
+      styles: stylesResult.results || [],
+      occasions: occasionsResult.results || [],
+      arrangementTypes: arrangementTypesResult.results || [],
+      budgetTiers: budgetTiersResult.results || [],
+      flowers: flowersResult.results || [],
+      aiConfig: configResult || null, // The config itself, or null if none is active
+      promptTemplates: promptsResult.results || [],
+    };
+    
+    return c.json(knowledgeBase);
+
+  } catch (error) {
+    console.error('Error fetching AI knowledge base:', error);
+    return c.json({ error: 'Failed to fetch AI knowledge base.' }, 500);
+  }
+});
+
+// --- AI Florist - Conversational Chat Endpoint (PUBLIC) ---
+app.post('/api/ai/chat', async (c) => {
+  try {
+    const { messages, knowledgeBase } = await c.req.json();
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return c.json({ error: 'Invalid chat history provided.' }, 400);
+    }
+    if (!knowledgeBase) {
+      return c.json({ error: 'Knowledge base is required for context.' }, 400);
+    }
+
+    // --- Placeholder for OpenAI API Call ---
+    // In the next step, we will use the OpenAI API here.
+    // We'll construct a prompt using the knowledgeBase and messages.
+    
+    console.log("Received data for AI chat generation:");
+    console.log("Messages:", JSON.stringify(messages, null, 2));
+    console.log("Knowledge Base (summary):", {
+      productCount: knowledgeBase.products?.length,
+      styleCount: knowledgeBase.styles?.length,
+      occasionCount: knowledgeBase.occasions?.length,
+      aiConfig: knowledgeBase.aiConfig,
+    });
+    
+    // For now, return a mock response to test the connection.
+    const mockResponse = {
+      role: 'assistant',
+      content: "This is a placeholder response from the new AI chat endpoint. I see you've sent the conversation history and the knowledge base. I'm ready to be connected to a real AI!"
+    };
+
+    return c.json(mockResponse);
+
+  } catch (error) {
+    console.error('Error in AI chat endpoint:', error);
+    return c.json({ error: 'Failed to process chat message.' }, 500);
+  }
+});
+
 // JWT middleware for protected routes
 app.use("/api/tenants/:tenantId/*", async (c, next) => {
   try {
@@ -2510,6 +2651,81 @@ app.get("*", async (c) => {
     })
   }
 })
+
+// --- AI Florist Product Creation ---
+app.post("/api/ai/create-bouquet-product", async (c) => {
+  try {
+    const { occasion, style, budget } = await c.req.json();
+
+    if (!occasion || !style || !budget) {
+      return c.json({ error: "Missing required design parameters: occasion, style, and budget are required." }, 400);
+    }
+
+    // 1. Generate Product Details
+    const productName = `Custom ${style} ${occasion} Bouquet`;
+    const productDescription = `A beautiful, AI-designed bouquet perfect for a ${occasion.toLowerCase()}. This arrangement captures a ${style.toLowerCase()} aesthetic and is customized to your preferences.`;
+    const price = budget === 'budget' ? '49.99' : budget === 'mid-range' ? '89.99' : '149.99';
+    
+    // In a real implementation, you would generate an image here using DALL-E or another service
+    const mockImageUrl = "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=800";
+
+    // 2. Placeholder for Shopify Product Creation
+    // In a real implementation, you would use the Shopify API service to create the product.
+    // const shopifyProduct = await ShopifyApiService.createProduct(c.env, tenantId, {
+    //   title: productName,
+    //   body_html: productDescription,
+    //   variants: [{ price: price }],
+    //   images: [{ src: mockImageUrl }],
+    // });
+    
+    console.log("SIMULATING SHOPIFY PRODUCT CREATION:", { productName, productDescription, price, mockImageUrl });
+
+    // 3. Return a mock Shopify product URL for now
+    const mockShopifyProductUrl = `https://your-shopify-store.myshopify.com/products/mock-custom-bouquet-${Date.now()}`;
+
+    return c.json({
+      success: true,
+      message: "Shopify product created successfully (simulated).",
+      shopifyProductUrl: mockShopifyProductUrl,
+    });
+
+  } catch (error) {
+    console.error("Failed to create bouquet product:", error);
+    return c.json({ error: "Internal server error while creating bouquet product." }, 500);
+  }
+});
+
+// --- AI Florist - Get Saved Products for Grounding ---
+app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
+  try {
+    const { tenantId } = c.req.param();
+    const db = c.env.DB;
+
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required.' }, 400);
+    }
+
+    const { results } = await db
+      .prepare(
+        `SELECT id, title, variant_title, description, price, tags, product_type
+         FROM saved_products
+         WHERE tenant_id = ?
+         LIMIT 200` // Limit to 200 products to avoid overwhelming the context
+      )
+      .bind(tenantId)
+      .all();
+
+    if (!results) {
+      return c.json([]); // Return empty array if no products found
+    }
+
+    return c.json(results);
+
+  } catch (error) {
+    console.error('Error fetching saved products:', error);
+    return c.json({ error: 'Failed to fetch saved products.' }, 500);
+  }
+});
 
 export default {
   fetch: app.fetch,
