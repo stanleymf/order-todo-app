@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Send, Loader2, CheckCircle } from 'lucide-react';
+import { Sparkles, Send, Loader2, CheckCircle, Image, Download } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,23 @@ type DesignDetails = {
   occasion: string;
   style: string;
   budget: string;
+  colorPalette?: string[];
+  flowerTypes?: string[];
+  arrangement?: string;
+  size?: string;
+};
+
+type GeneratedImage = {
+  id: string;
+  prompt: string;
+  generatedImage: string;
+  confidence: number;
+  designSpecs: DesignDetails;
+  generationTime: number;
+  modelVersion: string;
+  cost: number;
+  status: string;
+  conversationSummary?: string;
 };
 
 // Define the type for the product data we'll fetch
@@ -43,13 +60,16 @@ type KnowledgeBase = {
   promptTemplates: any[];
 };
 
-// Main component for the AI Florist Widget - v2
+// Main component for the AI Florist Widget - v3 with Image Generation
 const AIFlorist = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [stage, setStage] = useState<ConversationStage>('occasion');
   const [designDetails, setDesignDetails] = useState<Partial<DesignDetails>>({});
   const [knowledgeBase, setKnowledgeBase] = useState<Partial<KnowledgeBase>>({});
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
+  const [currentImage, setCurrentImage] = useState<GeneratedImage | null>(null);
   const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
 
   // Initial welcome message & Fetch knowledge base
@@ -103,6 +123,7 @@ const AIFlorist = () => {
         body: JSON.stringify({
           messages: newMessages,
           knowledgeBase,
+          tenantId: "84caf0bf-b8a7-448f-9a33-8697cb8d6918",
         }),
       });
 
@@ -130,49 +151,217 @@ const AIFlorist = () => {
     }
   };
 
+  const handleGenerateImage = async () => {
+    if (messages.length < 2) {
+      addMessage({
+        sender: 'ai',
+        text: "Let's chat a bit more about your bouquet preferences before I generate an image for you!",
+      });
+      return;
+    }
+
+    setIsGeneratingImage(true);
+
+    try {
+      // Extract design details from conversation
+      const userMessages = messages.filter(msg => msg.sender === 'user');
+      const extractedSpecs = extractDesignSpecs(userMessages, designDetails);
+
+      const response = await fetch('/api/ai/generate-bouquet-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          knowledgeBase,
+          tenantId: "84caf0bf-b8a7-448f-9a33-8697cb8d6918",
+          designSpecs: extractedSpecs,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Image generation request failed.');
+      }
+
+      const imageData: GeneratedImage = await response.json();
+      
+      setGeneratedImages(prev => [...prev, imageData]);
+      setCurrentImage(imageData);
+      
+      addMessage({
+        sender: 'ai',
+        text: `Perfect! I've generated a beautiful bouquet image based on our conversation. Take a look at the image below! 💐`,
+      });
+
+    } catch (error) {
+      console.error("Error generating image:", error);
+      addMessage({
+        sender: 'ai',
+        text: "I'm having trouble generating an image right now. Let's continue our conversation and try again later!",
+      });
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const extractDesignSpecs = (userMessages: Message[], currentDetails: Partial<DesignDetails>): DesignDetails => {
+    // Simple extraction logic - in a real app, you'd use NLP to extract more details
+    const text = userMessages.map(msg => msg.text.toLowerCase()).join(' ');
+    
+    return {
+      occasion: currentDetails.occasion || (text.includes('wedding') ? 'wedding' : 
+                                          text.includes('anniversary') ? 'anniversary' : 
+                                          text.includes('birthday') ? 'birthday' : 'general'),
+      style: currentDetails.style || (text.includes('romantic') ? 'romantic' : 
+                                    text.includes('modern') ? 'modern' : 
+                                    text.includes('rustic') ? 'rustic' : 'romantic'),
+      budget: currentDetails.budget || (text.includes('premium') ? 'premium' : 
+                                      text.includes('budget') ? 'budget' : 'mid-range'),
+      colorPalette: currentDetails.colorPalette || (text.includes('pink') ? ['pink', 'white'] : 
+                                                  text.includes('red') ? ['red', 'white'] : 
+                                                  text.includes('white') ? ['white', 'green'] : ['pink', 'white']),
+      flowerTypes: currentDetails.flowerTypes || (text.includes('rose') ? ['roses'] : 
+                                                text.includes('lily') ? ['lilies'] : 
+                                                text.includes('tulip') ? ['tulips'] : ['roses']),
+      arrangement: currentDetails.arrangement || 'round',
+      size: currentDetails.size || 'medium',
+    };
+  };
+
+  const downloadImage = (imageUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = imageUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex flex-col items-center justify-center w-full min-h-screen bg-[#E2E5DA] p-4 font-sans">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col h-[80vh]">
+      <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col h-[90vh]">
         {/* Header */}
         <div className="p-6 border-b rounded-t-2xl bg-[#616B53] text-white">
           <div className="flex items-center gap-4">
             <Sparkles className="h-8 w-8" />
             <div>
               <h1 className="text-2xl font-bold">AI Florist</h1>
-              <p className="text-sm opacity-90">Design your perfect bouquet</p>
+              <p className="text-sm opacity-90">Design your perfect bouquet with AI</p>
             </div>
           </div>
         </div>
 
-        {/* Message Area */}
-        <div className="flex-1 p-6 overflow-y-auto">
-          <div className="flex flex-col gap-4">
-            {messages.map((msg, index) => (
-              <div key={index} className={cn('flex items-end gap-3', msg.sender === 'user' ? 'justify-end' : 'justify-start')}>
-                {msg.sender === 'ai' && <div className="w-10 h-10 rounded-full bg-[#616B53] flex items-center justify-center text-white flex-shrink-0"><Sparkles size={20}/></div>}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Chat Area */}
+          <div className="flex-1 flex flex-col">
+            {/* Message Area */}
+            <div className="flex-1 p-6 overflow-y-auto">
+              <div className="flex flex-col gap-4">
+                {messages.map((msg, index) => (
+                  <div key={index} className={cn('flex items-end gap-3', msg.sender === 'user' ? 'justify-end' : 'justify-start')}>
+                    {msg.sender === 'ai' && <div className="w-10 h-10 rounded-full bg-[#616B53] flex items-center justify-center text-white flex-shrink-0"><Sparkles size={20}/></div>}
+                    
+                    <div className={cn('p-4 rounded-2xl max-w-md break-words', msg.sender === 'user' ? 'bg-[#E2E5DA] text-gray-800 rounded-br-none' : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none')}>
+                      <p dangerouslySetInnerHTML={{ __html: msg.text }} />
+                    </div>
+
+                     {msg.sender === 'user' && <div className="w-10 h-10 rounded-full bg-[#E2E5DA] flex items-center justify-center text-gray-600 font-bold flex-shrink-0">You</div>}
+                  </div>
+                ))}
+                {isLoading && (
+                  <div className="flex items-end gap-3 justify-start">
+                     <div className="w-10 h-10 rounded-full bg-[#616B53] flex items-center justify-center text-white flex-shrink-0"><Sparkles size={20}/></div>
+                     <div className="p-4 rounded-2xl max-w-md bg-white border border-gray-200 rounded-bl-none">
+                        <Loader2 className="animate-spin text-gray-500" />
+                     </div>
+                  </div>
+                )}
+                <div ref={endOfMessagesRef} />
+              </div>
+            </div>
+            
+            {/* Input Area */}
+            <div className="p-4 border-t bg-white rounded-b-2xl">
+              <div className="flex items-center gap-4">
+                <InputBar onSend={handleSendMessage} isLoading={isLoading} />
+                <Button 
+                  onClick={handleGenerateImage}
+                  disabled={isGeneratingImage || isLoading || messages.length < 2}
+                  className="bg-[#616B53] hover:bg-[#495140] text-white px-4 py-2 rounded-lg flex items-center gap-2"
+                >
+                  {isGeneratingImage ? (
+                    <Loader2 className="animate-spin h-4 w-4" />
+                  ) : (
+                    <Image className="h-4 w-4" />
+                  )}
+                  {isGeneratingImage ? 'Generating...' : 'Generate Image'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Image Display Area */}
+          {currentImage && (
+            <div className="w-80 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+              <div className="space-y-4">
+                <h3 className="font-semibold text-lg text-gray-800">Generated Bouquet</h3>
                 
-                <div className={cn('p-4 rounded-2xl max-w-md break-words', msg.sender === 'user' ? 'bg-[#E2E5DA] text-gray-800 rounded-br-none' : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none')}>
-                  <p dangerouslySetInnerHTML={{ __html: msg.text }} />
+                {/* Current Image */}
+                <div className="bg-white rounded-lg p-4 shadow-sm">
+                  <img 
+                    src={currentImage.generatedImage} 
+                    alt="Generated bouquet"
+                    className="w-full h-64 object-cover rounded-lg mb-3"
+                  />
+                  
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Style:</span>
+                      <span className="text-sm font-medium">{currentImage.designSpecs.style}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Occasion:</span>
+                      <span className="text-sm font-medium">{currentImage.designSpecs.occasion}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Cost:</span>
+                      <span className="text-sm font-medium">${currentImage.cost}</span>
+                    </div>
+                  </div>
+                  
+                  <Button 
+                    onClick={() => downloadImage(currentImage.generatedImage, `bouquet-${currentImage.id}.png`)}
+                    className="w-full mt-3 bg-[#616B53] hover:bg-[#495140] text-white"
+                    size="sm"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download
+                  </Button>
                 </div>
 
-                 {msg.sender === 'user' && <div className="w-10 h-10 rounded-full bg-[#E2E5DA] flex items-center justify-center text-gray-600 font-bold flex-shrink-0">You</div>}
+                {/* Previous Images */}
+                {generatedImages.length > 1 && (
+                  <div>
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">Previous Designs</h4>
+                    <div className="space-y-2">
+                      {generatedImages.slice(0, -1).reverse().map((image, index) => (
+                        <div 
+                          key={image.id}
+                          className="bg-white rounded-lg p-2 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                          onClick={() => setCurrentImage(image)}
+                        >
+                          <img 
+                            src={image.generatedImage} 
+                            alt={`Previous design ${index + 1}`}
+                            className="w-full h-20 object-cover rounded"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
-            {isLoading && (
-              <div className="flex items-end gap-3 justify-start">
-                 <div className="w-10 h-10 rounded-full bg-[#616B53] flex items-center justify-center text-white flex-shrink-0"><Sparkles size={20}/></div>
-                 <div className="p-4 rounded-2xl max-w-md bg-white border border-gray-200 rounded-bl-none">
-                    <Loader2 className="animate-spin text-gray-500" />
-                 </div>
-              </div>
-            )}
-            <div ref={endOfMessagesRef} />
-          </div>
-        </div>
-        
-        {/* Input Area */}
-        <div className="p-4 border-t bg-white rounded-b-2xl">
-          <InputBar onSend={handleSendMessage} isLoading={isLoading} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -197,7 +386,7 @@ const InputBar: React.FC<InputBarProps> = ({ onSend, isLoading }) => {
   };
   
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-4">
+    <form onSubmit={handleSubmit} className="flex items-center gap-4 flex-1">
       <Input
         placeholder="Describe your ideal bouquet..."
         className="flex-1"

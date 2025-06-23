@@ -75,6 +75,7 @@ export const AIIntegration: React.FC = () => {
   const [activeTab, setActiveTab] = useState("training")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setLoading] = useState(true)
+  const [settings, setSettings] = useState<any>({})
 
   // OpenAI API state
   const [apiKey, setApiKey] = useState("")
@@ -211,6 +212,7 @@ export const AIIntegration: React.FC = () => {
     setLoading(true)
     try {
       const settingsData = await getTenantSettings(tenant.id)
+      setSettings(settingsData || {})
       
       // Load mobile camera widget setting
       if (settingsData?.mobileCameraWidget !== undefined) {
@@ -322,10 +324,17 @@ export const AIIntegration: React.FC = () => {
 
   const handleSaveApiKey = () => {
     if (!tenant?.id) return
-    
-    localStorage.setItem('OPENAI_API_KEY', apiKey)
-    updateTenantSettings(tenant.id, { openaiApiKey: apiKey })
+
+    localStorage.setItem("OPENAI_API_KEY", apiKey)
+
+    const newSettings = {
+      ...settings,
+      openaiApiKey: apiKey,
+    }
+
+    updateTenantSettings(tenant.id, newSettings)
       .then(() => {
+        setSettings(newSettings)
         toast.success("API key saved successfully")
       })
       .catch((error) => {
@@ -336,10 +345,14 @@ export const AIIntegration: React.FC = () => {
 
   const removeApiKey = () => {
     setApiKey("")
-    localStorage.removeItem('OPENAI_API_KEY')
+    localStorage.removeItem("OPENAI_API_KEY")
     if (tenant?.id) {
-      updateTenantSettings(tenant.id, { openaiApiKey: "" })
+      const newSettings = { ...settings }
+      delete newSettings.openaiApiKey
+
+      updateTenantSettings(tenant.id, newSettings)
         .then(() => {
+          setSettings(newSettings)
           toast.success("API key removed")
         })
         .catch((error) => {
@@ -365,13 +378,17 @@ export const AIIntegration: React.FC = () => {
     setIsUpdatingMobileCamera(true)
     
     try {
-      await updateTenantSettings(tenant.id, {
+      const newSettings = {
+        ...settings,
         mobileCameraWidget: {
+          ...(settings.mobileCameraWidget || {}),
           enabled: newValue,
-          fields: cameraWidgetFields
-        }
-      })
+          fields: cameraWidgetFields,
+        },
+      }
+      await updateTenantSettings(tenant.id, newSettings)
       
+      setSettings(newSettings)
       setCameraWidgetEnabled(newValue)
       toast.success(`Mobile Camera Widget ${newValue ? "enabled" : "disabled"}`)
     } catch (error) {
@@ -389,13 +406,17 @@ export const AIIntegration: React.FC = () => {
     newFields[field as keyof typeof cameraWidgetFields] = !newFields[field as keyof typeof cameraWidgetFields]
     
     try {
-      await updateTenantSettings(tenant.id, {
+      const newSettings = {
+        ...settings,
         mobileCameraWidget: {
+          ...(settings.mobileCameraWidget || {}),
           enabled: cameraWidgetEnabled,
-          fields: newFields
-        }
-      })
+          fields: newFields,
+        },
+      }
+      await updateTenantSettings(tenant.id, newSettings)
       
+      setSettings(newSettings)
       setCameraWidgetFields(newFields)
       toast.success(`${field.replace(/_/g, " ")} field ${newFields[field as keyof typeof cameraWidgetFields] ? "enabled" : "disabled"}`)
     } catch (error) {

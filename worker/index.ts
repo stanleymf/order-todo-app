@@ -109,10 +109,23 @@ app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
       configPromise,
       promptsPromise
     ] = [
-      db.prepare(`SELECT id, title, description, price, tags, product_type FROM saved_products WHERE tenant_id = ? LIMIT 200`).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, themes FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, related_holidays FROM ai_occasions WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, recommended_flowers FROM ai_arrangement_types WHERE tenant_id = ?`).bind(tenantId).all(),
+      // Get more products but with smart selection strategy
+      db.prepare(`
+        SELECT id, title, description, price, tags, product_type, created_at 
+        FROM saved_products 
+        WHERE tenant_id = ? 
+        ORDER BY 
+          CASE 
+            WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
+            WHEN description IS NOT NULL AND description != '' THEN 2 
+            ELSE 3 
+          END,
+          created_at DESC
+        LIMIT 500
+      `).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, color_palette, mood, arrangement_style FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, typical_flowers, typical_colors FROM ai_occasions WHERE tenant_id = ?`).bind(tenantId).all(),
+      db.prepare(`SELECT name, description, typical_flowers, category FROM ai_arrangement_types WHERE tenant_id = ?`).bind(tenantId).all(),
       db.prepare(`SELECT name, min_price, max_price, description FROM ai_budget_tiers WHERE tenant_id = ?`).bind(tenantId).all(),
       db.prepare(`SELECT name, variety, color, seasonality, availability, price_range FROM ai_flowers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
       db.prepare(`SELECT name, model_type, config_data FROM ai_model_configs WHERE tenant_id = ? AND is_active = true LIMIT 1`).bind(tenantId).first(),
@@ -150,6 +163,76 @@ app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
       promptTemplates: promptsResult.results || [],
     };
     
+    // 2. Optimize knowledge base to fit within token limits
+    // Use intelligent product selection and compression
+    const intelligentProductSelection = (products: any[], maxTokens: number = 8000): any[] => {
+      if (!products || products.length === 0) return [];
+      
+      // Priority scoring: products with tags and descriptions get higher priority
+      const scoredProducts = products.map((product: any) => {
+        let score = 0;
+        if (product.tags && product.tags !== '[]') score += 3;
+        if (product.description && product.description.trim()) score += 2;
+        if (product.price) score += 1;
+        return { ...product, score };
+      }).sort((a: any, b: any) => b.score - a.score);
+      
+      // Start with high-priority products and add more until we approach token limit
+      const selectedProducts: any[] = [];
+      let estimatedTokens = 0;
+      const tokenPerProduct = 50; // Rough estimate
+      
+      for (const product of scoredProducts) {
+        const productTokens = tokenPerProduct + (product.description?.length || 0) / 4;
+        
+        if (estimatedTokens + productTokens > maxTokens) {
+          break;
+        }
+        
+        selectedProducts.push(product);
+        estimatedTokens += productTokens;
+      }
+      
+      return selectedProducts;
+    };
+    
+    // Intelligent compression of knowledge base
+    const intelligentCompression = (knowledgeBase: any) => {
+      const maxProductTokens = 6000; // Reserve space for system message and conversation
+      const selectedProducts = intelligentProductSelection(knowledgeBase.products || [], maxProductTokens);
+      
+      // Compress product data to essential fields only
+      const compressedProducts = selectedProducts.map((p: any) => ({
+        title: p.title,
+        price: p.price,
+        tags: p.tags,
+        product_type: p.product_type,
+        // Only include description if it's short and meaningful
+        description: p.description && p.description.length < 100 ? p.description : null
+      }));
+      
+      // Compress other data
+      const compressedStyles = (knowledgeBase.styles || []).slice(0, 15).map((s: any) => ({
+        name: s.name,
+        description: s.description?.substring(0, 100) || null
+      }));
+      
+      const compressedOccasions = (knowledgeBase.occasions || []).slice(0, 10).map((o: any) => ({
+        name: o.name,
+        description: o.description?.substring(0, 100) || null
+      }));
+      
+      return {
+        products: compressedProducts,
+        styles: compressedStyles,
+        occasions: compressedOccasions,
+        totalProducts: knowledgeBase.products?.length || 0,
+        selectedProducts: compressedProducts.length
+      };
+    };
+
+    const compactKnowledgeBase = intelligentCompression(knowledgeBase);
+    
     return c.json(knowledgeBase);
 
   } catch (error) {
@@ -161,7 +244,7 @@ app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
 // --- AI Florist - Conversational Chat Endpoint (PUBLIC) ---
 app.post('/api/ai/chat', async (c) => {
   try {
-    const { messages, knowledgeBase } = await c.req.json();
+    const { messages, knowledgeBase, tenantId } = await c.req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return c.json({ error: 'Invalid chat history provided.' }, 400);
@@ -169,27 +252,99 @@ app.post('/api/ai/chat', async (c) => {
     if (!knowledgeBase) {
       return c.json({ error: 'Knowledge base is required for context.' }, 400);
     }
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required to use the AI service.' }, 400);
+    }
 
-    // --- Placeholder for OpenAI API Call ---
-    // In the next step, we will use the OpenAI API here.
-    // We'll construct a prompt using the knowledgeBase and messages.
+    // --- Fetch Tenant-Specific OpenAI API Key ---
+    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
+    if (!tenantSettingsRaw?.settings) {
+        return c.json({ error: 'Could not find settings for this tenant.' }, 404);
+    }
+
+    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
+    const openaiApiKey = tenantSettings.openaiApiKey;
+
+    if (!openaiApiKey) {
+      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
+    }
     
-    console.log("Received data for AI chat generation:");
-    console.log("Messages:", JSON.stringify(messages, null, 2));
-    console.log("Knowledge Base (summary):", {
-      productCount: knowledgeBase.products?.length,
-      styleCount: knowledgeBase.styles?.length,
-      occasionCount: knowledgeBase.occasions?.length,
-      aiConfig: knowledgeBase.aiConfig,
-    });
+    // 1. Construct the System Prompt
+    // Find the main chat prompt from the templates, or use a robust fallback.
+    const chatPromptTemplate = 
+      knowledgeBase.promptTemplates?.find(p => p.category === 'bouquet' && p.name === 'Basic Bouquet')?.template ||
+      "You are an expert florist AI assistant for {florist_name}. Your goal is to have a friendly, natural conversation to help a customer design their perfect flower bouquet. You have been provided with the shop's inventory and style guide as context. Ask clarifying questions one at a time. Guide the conversation towards understanding the occasion, desired style, and budget to help create a final product.";
+
+    const systemMessageContent = chatPromptTemplate.replace('{florist_name}', 'Windflower Florist'); // Replace with dynamic name later
+
+    // 2. Optimize knowledge base to fit within token limits
+    // Limit products to first 20 to stay within context limits
+    const limitedProducts = knowledgeBase.products?.slice(0, 20) || [];
+    const limitedStyles = knowledgeBase.styles?.slice(0, 10) || [];
+    const limitedOccasions = knowledgeBase.occasions?.slice(0, 10) || [];
     
-    // For now, return a mock response to test the connection.
-    const mockResponse = {
-      role: 'assistant',
-      content: "This is a placeholder response from the new AI chat endpoint. I see you've sent the conversation history and the knowledge base. I'm ready to be connected to a real AI!"
+    // Create a more compact knowledge base representation
+    const compactKnowledgeBase = {
+      products: limitedProducts.map(p => ({
+        title: p.title,
+        price: p.price,
+        tags: p.tags,
+        product_type: p.product_type
+      })),
+      styles: limitedStyles.map(s => ({
+        name: s.name,
+        description: s.description
+      })),
+      occasions: limitedOccasions.map(o => ({
+        name: o.name,
+        description: o.description
+      }))
     };
 
-    return c.json(mockResponse);
+    const systemMessage = {
+      role: 'system',
+      content: `${systemMessageContent}\n\nHere is a curated selection of the shop's inventory and style guide (showing ${compactKnowledgeBase.selectedProducts} of ${compactKnowledgeBase.totalProducts} total products):\nPRODUCTS: ${JSON.stringify(compactKnowledgeBase.products)}\nSTYLES: ${JSON.stringify(compactKnowledgeBase.styles)}\nOCCASIONS: ${JSON.stringify(compactKnowledgeBase.occasions)}`
+    };
+
+    // 2. Prepare the messages for the API
+    const messagesForAPI = messages.map(({ sender, text }) => ({
+      role: sender === 'ai' ? 'assistant' : 'user',
+      content: text,
+    }));
+
+
+    // 3. Call the OpenAI API
+    const apiRequestBody = {
+      model: "gpt-3.5-turbo", // Use the model from aiConfig in the future
+      messages: [systemMessage, ...messagesForAPI],
+    };
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(apiRequestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API Error:', errorText);
+      return c.json({ error: 'Failed to get a response from the AI.' }, 502);
+    }
+
+    const responseData = await response.json();
+    const aiResponseContent = responseData.choices[0]?.message?.content;
+
+    if (!aiResponseContent) {
+      return c.json({ error: 'Received an empty response from the AI.' }, 500);
+    }
+    
+    return c.json({
+      role: 'assistant',
+      content: aiResponseContent,
+    });
 
   } catch (error) {
     console.error('Error in AI chat endpoint:', error);
@@ -1774,31 +1929,55 @@ app.post("/api/tenants/:tenantId/sample-products", async (c) => {
   }, 201)
 })
 
-// AI Generation endpoint
-app.post('/api/tenants/:tenantId/ai/generate', async (c) => {
-  let body: any;
+// --- AI Florist - Generate Image from Conversation (PUBLIC) ---
+app.post('/api/ai/generate-bouquet-image', async (c) => {
   try {
-    const tenantId = c.req.param('tenantId');
-    body = await c.req.json();
-    
-    // Validate request
-    if (!body.prompt || !body.style) {
-      return c.json({ error: 'Missing required fields: prompt and style' }, 400);
+    const { messages, knowledgeBase, tenantId, designSpecs } = await c.req.json();
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return c.json({ error: 'Invalid chat history provided.' }, 400);
+    }
+    if (!knowledgeBase) {
+      return c.json({ error: 'Knowledge base is required for context.' }, 400);
+    }
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required to use the AI service.' }, 400);
     }
 
-    // Check if OpenAI API key is configured
-    const openaiApiKey = c.env.OPENAI_API_KEY;
+    // --- Fetch Tenant-Specific OpenAI API Key ---
+    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
+    if (!tenantSettingsRaw?.settings) {
+        return c.json({ error: 'Could not find settings for this tenant.' }, 404);
+    }
+
+    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
+    const openaiApiKey = tenantSettings.openaiApiKey;
+
     if (!openaiApiKey) {
-      return c.json({ 
-        error: 'OpenAI API key not configured',
-        fallback: true 
-      }, 503);
+      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
     }
 
-    // Create optimized prompt
-    const prompt = createOptimizedPrompt(body);
+    // 1. Create a system prompt for image generation based on conversation
+    const conversationSummary = messages
+      .filter(msg => msg.sender === 'user')
+      .map(msg => msg.text)
+      .join(' ');
     
-    // Call OpenAI API
+    // Extract key design elements from conversation and design specs
+    const extractedSpecs = {
+      style: designSpecs?.style || 'romantic',
+      occasion: designSpecs?.occasion || 'general',
+      colorPalette: designSpecs?.colorPalette || ['pink', 'white'],
+      flowerTypes: designSpecs?.flowerTypes || ['roses'],
+      arrangement: designSpecs?.arrangement || 'round',
+      size: designSpecs?.size || 'medium',
+      budget: designSpecs?.budget || 'mid-range'
+    };
+
+    // 2. Create an optimized DALL-E prompt based on conversation and specs
+    const imagePrompt = createBouquetImagePrompt(conversationSummary, extractedSpecs, knowledgeBase);
+    
+    // 3. Call DALL-E 3 API
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
@@ -1807,7 +1986,7 @@ app.post('/api/tenants/:tenantId/ai/generate', async (c) => {
       },
       body: JSON.stringify({
         model: 'dall-e-3',
-        prompt: prompt,
+        prompt: imagePrompt,
         n: 1,
         size: '1024x1024',
         quality: 'standard',
@@ -1817,49 +1996,43 @@ app.post('/api/tenants/:tenantId/ai/generate', async (c) => {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+      console.error('DALL-E API Error:', error);
+      throw new Error(`DALL-E API error: ${error.error?.message || 'Unknown error'}`);
     }
 
     const data = await response.json();
-    const generationTime = Date.now(); // Track generation time
+    const generationTime = Date.now();
     
     return c.json({
-      id: `dalle-${Date.now()}`,
-      prompt: body.prompt,
+      id: `bouquet-${Date.now()}`,
+      prompt: imagePrompt,
       generatedImage: data.data[0].url,
       confidence: 0.90 + Math.random() * 0.05,
-      designSpecs: {
-        style: body.style,
-        colorPalette: body.colorPalette || ['#FF6B6B', '#FFE5E5', '#FFB3B3'],
-        flowerTypes: body.flowerTypes || ['Roses'],
-        arrangement: 'round',
-        size: body.size || 'medium',
-        occasion: body.occasion || 'celebration',
-        budget: body.budget || 'mid-range'
-      },
+      designSpecs: extractedSpecs,
       generationTime: generationTime,
       modelVersion: 'v1.0-dalle3',
       cost: 0.040, // DALL-E 3 pricing
-      status: 'completed'
+      status: 'completed',
+      conversationSummary: conversationSummary
     });
 
   } catch (error) {
-    console.error('AI Generation error:', error);
+    console.error('Error in bouquet image generation:', error);
     
     // Return fallback response
     return c.json({
       id: `fallback-${Date.now()}`,
-      prompt: body?.prompt || 'Unknown prompt',
-      generatedImage: getFallbackImage(body?.style || 'romantic'),
+      prompt: 'Fallback bouquet image',
+      generatedImage: getFallbackImage('romantic'),
       confidence: 0.70,
       designSpecs: {
-        style: body?.style || 'romantic',
-        colorPalette: body?.colorPalette || ['#FF6B6B', '#FFE5E5', '#FFB3B3'],
-        flowerTypes: body?.flowerTypes || ['Roses'],
+        style: 'romantic',
+        colorPalette: ['pink', 'white'],
+        flowerTypes: ['roses'],
         arrangement: 'round',
-        size: body?.size || 'medium',
-        occasion: body?.occasion || 'celebration',
-        budget: body?.budget || 'mid-range'
+        size: 'medium',
+        occasion: 'general',
+        budget: 'mid-range'
       },
       generationTime: 0,
       modelVersion: 'v1.0-fallback',
@@ -1870,28 +2043,36 @@ app.post('/api/tenants/:tenantId/ai/generate', async (c) => {
   }
 });
 
-// Helper function to create optimized prompts
-function createOptimizedPrompt(request: any): string {
-  const {
-    style,
-    arrangement_type,
-    occasion,
-    color_palette,
-    florist_choice,
-    inspiration_photos,
-    special_requests,
-  } = request;
-
-  let prompt = `As an expert florist AI, design a flower arrangement with the following specifications:\n`;
-
-  if (style) prompt += `- Style: ${style}\n`;
-  if (arrangement_type) prompt += `- Arrangement Type: ${arrangement_type}\n`;
-  if (occasion) prompt += `- Occasion: ${occasion}\n`;
-  if (color_palette) prompt += `- Color Palette: ${color_palette.join(', ')}\n`;
-  if (florist_choice) prompt += `- Florist Choice: ${florist_choice}\n`;
-  if (inspiration_photos) prompt += `- Inspiration Photos: ${inspiration_photos.join(', ')}\n`;
-  if (special_requests) prompt += `- Special Requests: ${special_requests}\n`;
-
+// Helper function to create optimized DALL-E prompts for bouquets
+function createBouquetImagePrompt(conversationSummary: string, designSpecs: any, knowledgeBase: any): string {
+  const { style, occasion, colorPalette, flowerTypes, arrangement, size } = designSpecs;
+  
+  // Get relevant product examples from knowledge base
+  const relevantProducts = knowledgeBase.products?.slice(0, 5) || [];
+  const productExamples = relevantProducts.map(p => p.title).join(', ');
+  
+  let prompt = `Create a beautiful, professional photograph of a flower bouquet with the following specifications:\n`;
+  prompt += `- Style: ${style} and elegant\n`;
+  prompt += `- Occasion: ${occasion}\n`;
+  prompt += `- Colors: ${colorPalette.join(', ')}\n`;
+  prompt += `- Flowers: ${flowerTypes.join(', ')}\n`;
+  prompt += `- Arrangement: ${arrangement} bouquet\n`;
+  prompt += `- Size: ${size}\n`;
+  
+  if (productExamples) {
+    prompt += `- Similar to these styles: ${productExamples}\n`;
+  }
+  
+  prompt += `- High-quality, professional floral photography\n`;
+  prompt += `- Soft, natural lighting\n`;
+  prompt += `- Clean, minimalist background\n`;
+  prompt += `- Perfect for a florist's portfolio\n`;
+  
+  // Add context from conversation if available
+  if (conversationSummary.length > 0) {
+    prompt += `- Customer preferences: ${conversationSummary.substring(0, 200)}...\n`;
+  }
+  
   return prompt;
 }
 
