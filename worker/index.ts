@@ -2,10 +2,11 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { jwt, sign } from "hono/jwt"
 import bcrypt from "bcryptjs"
-import { d1DatabaseService } from "../src/services/database-d1"
+import { d1DatabaseService, getFloristPhotos } from "../src/services/database-d1"
 import { ShopifyApiService } from "../src/services/shopify/shopifyApi"
 import type { D1Database, ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types"
 import { etag } from "hono/etag"
+import { serveStatic } from 'hono/cloudflare-pages'
 import { WebhookConfig } from "../src/types"
 
 // @ts-ignore
@@ -24,40 +25,8 @@ const app = new Hono<{ Bindings: Bindings }>()
 // CORS middleware
 app.use("/api/*", cors())
 
-// Debug endpoint to check database state (no auth required)
-app.get("/api/debug/database", async (c) => {
-  try {
-    // Check what tables exist
-    const { results: tables } = await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { results: { name: string }[] };
-    
-    // Check what tenants exist
-    const { results: tenants } = await c.env.DB.prepare("SELECT id, name FROM tenants").all() as { results: { id: string; name: string }[] };
-    
-    // Check if ai_flowers table exists
-    let flowersCount = 0;
-    try {
-      const { results: flowers } = await c.env.DB.prepare("SELECT COUNT(*) as count FROM ai_flowers").all() as { results: { count: number }[] };
-      flowersCount = flowers[0]?.count || 0;
-    } catch (e) {
-      // Table doesn't exist
-    }
-    
-    return c.json({
-      tables: tables.map((t: any) => t.name),
-      tenants: tenants,
-      flowersCount: flowersCount,
-      message: "Database debug info"
-    });
-  } catch (error) {
-    return c.json({
-      error: error.message,
-      message: "Database debug failed"
-    }, 500);
-  }
-});
-
-// --- AI Florist - Get Saved Products for Grounding (PUBLIC) ---
-app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
+// --- AI Florist - Get Knowledge Base Analytics (PUBLIC) ---
+app.get('/api/tenants/:tenantId/ai/knowledge-base-analytics', async (c) => {
   try {
     const { tenantId } = c.req.param();
     const db = c.env.DB;
@@ -66,393 +35,36 @@ app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
       return c.json({ error: 'Tenant ID is required.' }, 400);
     }
 
-    const { results } = await db
-      .prepare(
-        `SELECT id, title, variant_title, description, price, tags, product_type
-         FROM saved_products
-         WHERE tenant_id = ?
-         LIMIT 200` // Limit to 200 products to avoid overwhelming the context
-      )
-      .bind(tenantId)
-      .all();
-
-    if (!results) {
-      return c.json([]); // Return empty array if no products found
-    }
-
-    return c.json(results);
-
-  } catch (error) {
-    console.error('Error fetching saved products:', error);
-    return c.json({ error: 'Failed to fetch saved products.' }, 500);
-  }
-});
-
-// --- AI Florist - Get Knowledge Base for Grounding (PUBLIC) ---
-app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
-  try {
-    const { tenantId } = c.req.param();
-    const db = c.env.DB;
-
-    if (!tenantId) {
-      return c.json({ error: 'Tenant ID is required.' }, 400);
-    }
-
-    // Fetch all data in parallel
+    // Fetch analytics data
     const [
-      productsPromise,
-      stylesPromise,
-      occasionsPromise,
-      arrangementTypesPromise,
-      budgetTiersPromise,
-      flowersPromise,
-      configPromise,
-      promptsPromise
-    ] = [
-      // Get more products with dynamic category-based rotation
-      db.prepare(`
-        WITH CategoryProducts AS (
-          SELECT 
-            id, title, description, price, tags, product_type, created_at,
-            CASE 
-              WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
-              WHEN description IS NOT NULL AND description != '' THEN 2 
-              ELSE 3 
-            END as priority_score,
-            ROW_NUMBER() OVER (
-              PARTITION BY 
-                CASE 
-                  WHEN product_type IS NOT NULL THEN product_type 
-                  ELSE 'unknown' 
-                END
-              ORDER BY 
-                CASE 
-                  WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
-                  WHEN description IS NOT NULL AND description != '' THEN 2 
-                  ELSE 3 
-                END,
-                created_at DESC
-            ) as category_rank
-          FROM saved_products 
-          WHERE tenant_id = ?
-        )
-        SELECT 
-          id, title, description, price, tags, product_type, created_at, priority_score
-        FROM CategoryProducts 
-        WHERE category_rank <= 50  -- Take top 50 from each category
-        ORDER BY priority_score, created_at DESC
-        LIMIT 500
-      `).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, color_palette, mood, arrangement_style FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, typical_flowers, typical_colors FROM ai_occasions WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, description, typical_flowers, category FROM ai_arrangement_types WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, min_price, max_price, description FROM ai_budget_tiers WHERE tenant_id = ?`).bind(tenantId).all(),
-      db.prepare(`SELECT name, variety, color, seasonality, availability, price_range FROM ai_flowers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
-      db.prepare(`SELECT name, model_type, config_data FROM ai_model_configs WHERE tenant_id = ? AND is_active = true LIMIT 1`).bind(tenantId).first(),
-      db.prepare(`SELECT name, template, variables, category FROM ai_prompt_templates WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
-    ];
-
-    const [
-      productsResult,
-      stylesResult,
-      occasionsResult,
-      arrangementTypesResult,
-      budgetTiersResult,
-      flowersResult,
-      configResult,
-      promptsResult
+      productsCount,
+      stylesCount,
+      occasionsCount,
+      arrangementTypesCount,
+      budgetTiersCount,
+      flowersCount,
+      configCount,
+      promptsCount
     ] = await Promise.all([
-      productsPromise,
-      stylesPromise,
-      occasionsPromise,
-      arrangementTypesPromise,
-      budgetTiersPromise,
-      flowersPromise,
-      configPromise,
-      promptsPromise
-    ]);
-
-    const knowledgeBase = {
-      products: productsResult.results || [],
-      styles: stylesResult.results || [],
-      occasions: occasionsResult.results || [],
-      arrangementTypes: arrangementTypesResult.results || [],
-      budgetTiers: budgetTiersResult.results || [],
-      flowers: flowersResult.results || [],
-      aiConfig: configResult || null, // The config itself, or null if none is active
-      promptTemplates: promptsResult.results || [],
-    };
-    
-    // 2. Optimize knowledge base to fit within token limits
-    // Use intelligent product selection and compression
-    const intelligentProductSelection = (products: any[], maxTokens: number = 8000): any[] => {
-      if (!products || products.length === 0) return [];
-      
-      // Priority scoring: products with tags and descriptions get higher priority
-      const scoredProducts = products.map((product: any) => {
-        let score = 0;
-        if (product.tags && product.tags !== '[]') score += 3;
-        if (product.description && product.description.trim()) score += 2;
-        if (product.price) score += 1;
-        return { ...product, score };
-      }).sort((a: any, b: any) => b.score - a.score);
-      
-      // Start with high-priority products and add more until we approach token limit
-      const selectedProducts: any[] = [];
-      let estimatedTokens = 0;
-      const tokenPerProduct = 50; // Rough estimate
-      
-      for (const product of scoredProducts) {
-        const productTokens = tokenPerProduct + (product.description?.length || 0) / 4;
-        
-        if (estimatedTokens + productTokens > maxTokens) {
-          break;
-        }
-        
-        selectedProducts.push(product);
-        estimatedTokens += productTokens;
-      }
-      
-      return selectedProducts;
-    };
-    
-    // Intelligent compression of knowledge base
-    const intelligentCompression = (knowledgeBase: any) => {
-      const maxProductTokens = 6000; // Reserve space for system message and conversation
-      const selectedProducts = intelligentProductSelection(knowledgeBase.products || [], maxProductTokens);
-      
-      // Compress product data to essential fields only
-      const compressedProducts = selectedProducts.map((p: any) => ({
-        title: p.title,
-        price: p.price,
-        tags: p.tags,
-        product_type: p.product_type,
-        // Only include description if it's short and meaningful
-        description: p.description && p.description.length < 100 ? p.description : null
-      }));
-      
-      // Compress other data
-      const compressedStyles = (knowledgeBase.styles || []).slice(0, 15).map((s: any) => ({
-        name: s.name,
-        description: s.description?.substring(0, 100) || null
-      }));
-      
-      const compressedOccasions = (knowledgeBase.occasions || []).slice(0, 10).map((o: any) => ({
-        name: o.name,
-        description: o.description?.substring(0, 100) || null
-      }));
-      
-      return {
-        products: compressedProducts,
-        styles: compressedStyles,
-        occasions: compressedOccasions,
-        totalProducts: knowledgeBase.products?.length || 0,
-        selectedProducts: compressedProducts.length
-      };
-    };
-
-    const compactKnowledgeBase = intelligentCompression(knowledgeBase);
-    
-    return c.json(knowledgeBase);
-
-  } catch (error) {
-    console.error('Error fetching AI knowledge base:', error);
-    return c.json({ error: 'Failed to fetch AI knowledge base.' }, 500);
-  }
-});
-
-// --- AI Florist - Conversational Chat Endpoint (PUBLIC) ---
-app.post('/api/ai/chat', async (c) => {
-  try {
-    const { messages, knowledgeBase, tenantId } = await c.req.json();
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return c.json({ error: 'Invalid chat history provided.' }, 400);
-    }
-    if (!knowledgeBase) {
-      return c.json({ error: 'Knowledge base is required for context.' }, 400);
-    }
-    if (!tenantId) {
-      return c.json({ error: 'Tenant ID is required to use the AI service.' }, 400);
-    }
-
-    // --- Fetch Tenant-Specific OpenAI API Key ---
-    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
-    if (!tenantSettingsRaw?.settings) {
-        return c.json({ error: 'Could not find settings for this tenant.' }, 404);
-    }
-
-    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
-    const openaiApiKey = tenantSettings.openaiApiKey;
-
-    if (!openaiApiKey) {
-      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
-    }
-    
-    // 1. Construct the System Prompt
-    // Find the main chat prompt from the templates, or use a robust fallback.
-    const chatPromptTemplate = 
-      knowledgeBase.promptTemplates?.find(p => p.category === 'bouquet' && p.name === 'Basic Bouquet')?.template ||
-      "You are an expert florist AI assistant for {florist_name}. Your goal is to have a friendly, natural conversation to help a customer design their perfect flower bouquet. You have been provided with the shop's inventory and style guide as context. Ask clarifying questions one at a time. Guide the conversation towards understanding the occasion, desired style, and budget to help create a final product.";
-
-    const systemMessageContent = chatPromptTemplate.replace('{florist_name}', 'Windflower Florist'); // Replace with dynamic name later
-
-    // 2. Optimize knowledge base to fit within token limits
-    // Limit products to first 20 to stay within context limits
-    const limitedProducts = knowledgeBase.products?.slice(0, 20) || [];
-    const limitedStyles = knowledgeBase.styles?.slice(0, 10) || [];
-    const limitedOccasions = knowledgeBase.occasions?.slice(0, 10) || [];
-    
-    // Create a more compact knowledge base representation
-    const compactKnowledgeBase = {
-      products: limitedProducts.map(p => ({
-        title: p.title,
-        price: p.price,
-        tags: p.tags,
-        product_type: p.product_type
-      })),
-      styles: limitedStyles.map(s => ({
-        name: s.name,
-        description: s.description
-      })),
-      occasions: limitedOccasions.map(o => ({
-        name: o.name,
-        description: o.description
-      }))
-    };
-
-    const systemMessage = {
-      role: 'system',
-      content: `${systemMessageContent}\n\nHere is a curated selection of the shop's inventory and style guide:\nPRODUCTS: ${JSON.stringify(compactKnowledgeBase.products)}\nSTYLES: ${JSON.stringify(compactKnowledgeBase.styles)}\nOCCASIONS: ${JSON.stringify(compactKnowledgeBase.occasions)}`
-    };
-
-    // 2. Prepare the messages for the API
-    const messagesForAPI = messages.map(({ sender, text }) => ({
-      role: sender === 'ai' ? 'assistant' : 'user',
-      content: text,
-    }));
-
-
-    // 3. Call the OpenAI API
-    const apiRequestBody = {
-      model: "gpt-3.5-turbo", // Use the model from aiConfig in the future
-      messages: [systemMessage, ...messagesForAPI],
-    };
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(apiRequestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API Error:', errorText);
-      return c.json({ error: 'Failed to get a response from the AI.' }, 502);
-    }
-
-    const responseData = await response.json();
-    const aiResponseContent = responseData.choices[0]?.message?.content;
-
-    if (!aiResponseContent) {
-      return c.json({ error: 'Received an empty response from the AI.' }, 500);
-    }
-    
-    return c.json({
-      role: 'assistant',
-      content: aiResponseContent,
-    });
-
-  } catch (error) {
-    console.error('Error in AI chat endpoint:', error);
-    return c.json({ error: 'Failed to process chat message.' }, 500);
-  }
-});
-
-// --- AI Knowledge Base Analytics (PUBLIC) ---
-app.get('/api/tenants/:tenantId/ai/knowledge-base/analytics', async (c) => {
-  try {
-    const { tenantId } = c.req.param();
-    const db = c.env.DB;
-
-    if (!tenantId) {
-      return c.json({ error: 'Tenant ID is required.' }, 400);
-    }
-
-    // Get comprehensive analytics about product coverage
-    const [
-      totalProductsResult,
-      categoryBreakdownResult,
-      tagCoverageResult,
-      recentProductsResult,
-      priorityDistributionResult
-    ] = await Promise.all([
-      // Total products count
-      db.prepare(`SELECT COUNT(*) as total FROM saved_products WHERE tenant_id = ?`).bind(tenantId).all(),
-      
-      // Product category breakdown
-      db.prepare(`
-        SELECT 
-          product_type,
-          COUNT(*) as count,
-          COUNT(CASE WHEN tags IS NOT NULL AND tags != '[]' THEN 1 END) as tagged_count,
-          COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) as described_count
-        FROM saved_products 
-        WHERE tenant_id = ? 
-        GROUP BY product_type 
-        ORDER BY count DESC
-      `).bind(tenantId).all(),
-      
-      // Tag coverage analysis
-      db.prepare(`
-        SELECT 
-          COUNT(*) as total_products,
-          COUNT(CASE WHEN tags IS NOT NULL AND tags != '[]' THEN 1 END) as tagged_products,
-          COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) as described_products,
-          COUNT(CASE WHEN price IS NOT NULL THEN 1 END) as priced_products
-        FROM saved_products 
-        WHERE tenant_id = ?
-      `).bind(tenantId).all(),
-      
-      // Recent products (last 30 days)
-      db.prepare(`
-        SELECT COUNT(*) as recent_count 
-        FROM saved_products 
-        WHERE tenant_id = ? 
-        AND created_at >= datetime('now', '-30 days')
-      `).bind(tenantId).all(),
-      
-      // Priority distribution
-      db.prepare(`
-        SELECT 
-          CASE 
-            WHEN tags IS NOT NULL AND tags != '[]' THEN 'high_priority'
-            WHEN description IS NOT NULL AND description != '' THEN 'medium_priority'
-            ELSE 'low_priority'
-          END as priority_level,
-          COUNT(*) as count
-        FROM saved_products 
-        WHERE tenant_id = ?
-        GROUP BY priority_level
-      `).bind(tenantId).all()
+      db.prepare(`SELECT COUNT(*) as count FROM saved_products WHERE tenant_id = ?`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_occasions WHERE tenant_id = ?`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_arrangement_types WHERE tenant_id = ?`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_budget_tiers WHERE tenant_id = ?`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_flowers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_model_configs WHERE tenant_id = ? AND is_active = true`).bind(tenantId).first(),
+      db.prepare(`SELECT COUNT(*) as count FROM ai_prompt_templates WHERE tenant_id = ? AND is_active = true`).bind(tenantId).first(),
     ]);
 
     const analytics = {
-      totalProducts: totalProductsResult.results[0]?.total || 0,
-      categoryBreakdown: categoryBreakdownResult.results || [],
-      tagCoverage: {
-        total: tagCoverageResult.results[0]?.total_products || 0,
-        tagged: tagCoverageResult.results[0]?.tagged_products || 0,
-        described: tagCoverageResult.results[0]?.described_products || 0,
-        priced: tagCoverageResult.results[0]?.priced_products || 0
-      },
-      recentProducts: recentProductsResult.results[0]?.recent_count || 0,
-      priorityDistribution: priorityDistributionResult.results || [],
-      knowledgeBaseLimit: 500,
-      coveragePercentage: Math.min(100, (500 / (Number(totalProductsResult.results[0]?.total) || 1)) * 100)
+      products: productsCount?.count || 0,
+      styles: stylesCount?.count || 0,
+      occasions: occasionsCount?.count || 0,
+      arrangementTypes: arrangementTypesCount?.count || 0,
+      budgetTiers: budgetTiersCount?.count || 0,
+      flowers: flowersCount?.count || 0,
+      aiConfig: configCount?.count || 0,
+      promptTemplates: promptsCount?.count || 0,
     };
 
     return c.json(analytics);
@@ -463,8 +75,246 @@ app.get('/api/tenants/:tenantId/ai/knowledge-base/analytics', async (c) => {
   }
 });
 
+// --- Orders by Date (PUBLIC) ---
+app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const date = c.req.query("date") // e.g., "22/06/2025"
+
+  if (!date) {
+    return c.json({ error: "Date query parameter is required" }, 400)
+  }
+
+  try {
+    // 1. Fetch all data needed for processing
+    const [savedProductsWithLabels, shopifyStores, orderCardConfig] = await Promise.all([
+      d1DatabaseService.getSavedProductsWithLabels(c.env, tenantId),
+      d1DatabaseService.getShopifyStores(c.env, tenantId),
+      d1DatabaseService.getOrderCardConfig(c.env, tenantId),
+    ])
+
+    if (!shopifyStores || shopifyStores.length === 0) {
+      return c.json({ error: "No Shopify store configured for this tenant" }, 404)
+    }
+
+    // Ensure orderCardConfig is an array
+    const configArray = Array.isArray(orderCardConfig) ? orderCardConfig : []
+
+    // 2. Create a lookup map for product labels
+    // This allows us to quickly check if a line item is an "Add-On"
+    const productLabelMap = new Map<string, any>()
+    for (const product of savedProductsWithLabels) {
+      if (product.labels && product.labels.length > 0) {
+        // Using shopify_product_id as the key
+        productLabelMap.set(product.shopify_product_id, product.labels)
+      }
+    }
+
+    // 3. Fetch Shopify orders from all configured stores
+    // For now, we'll fetch from the first store. A more robust solution would iterate
+    // over all stores or have the UI specify which store to use.
+    const store = shopifyStores[0]
+    
+    console.log("Shopify store data:", {
+      id: store.id,
+      domain: store.shopifyDomain,
+      hasAccessToken: !!store.accessToken,
+      accessTokenLength: store.accessToken?.length,
+    })
+    
+    // Construct the store object in the format expected by ShopifyApiService
+    const storeForApi = {
+      id: store.id,
+      tenantId: tenantId,
+      name: store.shopifyDomain,
+      type: "shopify" as const,
+      status: "active" as const,
+      settings: {
+        domain: store.shopifyDomain,
+        accessToken: store.accessToken,
+        timezone: "UTC",
+        currency: "USD",
+        businessHours: { start: "09:00", end: "17:00" },
+        webhooks: [],
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    
+    console.log("Constructed store for API:", {
+      domain: storeForApi.settings.domain,
+      hasAccessToken: !!storeForApi.settings.accessToken,
+    })
+    
+    const shopifyApi = new ShopifyApiService(storeForApi, store.accessToken)
+    const shopifyOrders = await shopifyApi.getOrders()
+
+    // 4. Filter Shopify orders by date tag
+    const dateTag = date.replace(/-/g, "/") // Ensure format is dd/mm/yyyy
+    const filteredOrders = shopifyOrders.filter((order: any) => {
+      return order.tags.split(", ").includes(dateTag)
+    })
+
+    // 5. Helper function to apply field transformations
+    const applyFieldTransformation = (value: any, transformation: string | null, transformationRule: string | null): any => {
+      console.log(`Applying transformation: ${transformation}, rule: ${transformationRule}, value: ${value}`)
+      
+      if (!transformation || !transformationRule || !value) {
+        console.log(`No transformation needed, returning original value: ${value}`)
+        return value
+      }
+
+      try {
+        switch (transformation) {
+          case "extract":
+            console.log(`Applying regex extraction with pattern: ${transformationRule}`)
+            const regex = new RegExp(transformationRule, "g")
+            const matches = value.match(regex)
+            console.log(`Regex matches:`, matches)
+            return matches ? matches[0] : null
+          case "transform":
+            // Add more transformation types here as needed
+            return value
+          default:
+            return value
+        }
+      } catch (error) {
+        console.error(`Error applying transformation ${transformation}:`, error)
+        return value
+      }
+    }
+
+    // 6. Helper function to extract field value from Shopify order
+    const extractFieldValue = (order: any, shopifyFields: string[]): any => {
+      if (!shopifyFields || shopifyFields.length === 0) {
+        return null
+      }
+
+      // For now, we'll use the first field. In the future, we can support combining multiple fields
+      const fieldPath = shopifyFields[0]
+      
+      // Handle nested field paths like "line_items.title"
+      const pathParts = fieldPath.split(".")
+      let value = order
+      
+      for (const part of pathParts) {
+        if (value && typeof value === "object") {
+          // Handle arrays - if we encounter an array, take the first item
+          if (Array.isArray(value)) {
+            if (value.length === 0) {
+              value = null
+              break
+            }
+            value = value[0]
+          }
+          
+          value = value[part]
+        } else {
+          value = null
+          break
+        }
+      }
+
+      return value
+    }
+
+    // 7. Process filtered orders into "To-Do" cards with field transformations
+    const todoCards: any[] = []
+    for (const order of filteredOrders) {
+      const primaryItems: any[] = []
+      const addOnItems: any[] = []
+
+      // Classify line items
+      for (const item of order.line_items) {
+        if (!item.product_id) {
+          console.warn("Skipping line item with null product_id", item)
+          continue
+        }
+        const labels = productLabelMap.get(item.product_id.toString())
+        const isAddOn = labels?.some((label: any) => label.name === "Add-On" && label.category === "productType")
+
+        if (isAddOn) {
+          addOnItems.push(item)
+        } else {
+          primaryItems.push(item)
+        }
+      }
+
+      // Create cards from primary items
+      for (const primaryItem of primaryItems) {
+        for (let i = 0; i < primaryItem.quantity; i++) {
+          // Create a card object with all configured fields
+          const card: any = {
+            cardId: `${order.id}-${primaryItem.id}-${i}`,
+            shopifyOrderId: order.id,
+            orderNumber: order.name,
+            productTitle: primaryItem.title,
+            variantTitle: primaryItem.variant_title,
+            quantity: 1, // Each card represents one item
+            addOns: addOnItems.map((addOn) => addOn.title),
+            deliveryDate: date,
+            customerName: `${order.customer.first_name} ${order.customer.last_name}`,
+          }
+
+          // Apply field transformations based on order card configuration
+          for (const fieldConfig of configArray) {
+            if (fieldConfig.is_visible) {
+              console.log(`Processing field: ${fieldConfig.field_id}`)
+              console.log(`Field config:`, fieldConfig)
+              
+              const fieldValue = extractFieldValue(order, fieldConfig.shopifyFields)
+              console.log(`Extracted value for ${fieldConfig.field_id}:`, fieldValue)
+              
+              const transformedValue = applyFieldTransformation(
+                fieldValue, 
+                fieldConfig.transformation, 
+                fieldConfig.transformationRule
+              )
+              console.log(`Transformed value for ${fieldConfig.field_id}:`, transformedValue)
+              
+              // Map the field to the card using the field_id
+              card[fieldConfig.field_id] = transformedValue
+            }
+          }
+
+          todoCards.push(card)
+        }
+      }
+    }
+
+    console.log(`Processed ${todoCards.length} todo cards for date ${date}`)
+    return c.json(todoCards)
+  } catch (error: any) {
+    console.error("Error fetching or processing orders:", error)
+    return c.json({ error: "Failed to process orders", details: error.message }, 500)
+  }
+})
+
+// --- Products (PUBLIC) ---
+// Let the SPA catch-all handle /products.
+
 // JWT middleware for protected routes
 app.use("/api/tenants/:tenantId/*", async (c, next) => {
+  // Skip JWT verification for public endpoints
+  const path = c.req.path
+  const publicEndpoints = [
+    '/api/tenants/:tenantId/orders-by-date',
+    '/api/tenants/:tenantId/analytics',
+    '/api/tenants/:tenantId/analytics/florist-stats',
+    '/api/tenants/:tenantId/ai/saved-products',
+    '/api/tenants/:tenantId/ai/knowledge-base',
+    '/api/tenants/:tenantId/ai/knowledge-base-analytics'
+  ]
+  
+  // Check if this is a public endpoint
+  const isPublicEndpoint = publicEndpoints.some(endpoint => {
+    const pattern = endpoint.replace(':tenantId', c.req.param('tenantId'))
+    return path === pattern || path.startsWith(pattern + '/')
+  })
+  
+  if (isPublicEndpoint) {
+    return next()
+  }
+  
   try {
     const auth = jwt({ secret: c.env.JWT_SECRET })
     return await auth(c, next)
@@ -656,414 +506,6 @@ app.delete("/api/tenants/:tenantId/camera-widget-templates/:templateId", async (
   await d1DatabaseService.deleteCameraWidgetTemplate(c.env, tenantId, templateId);
   return c.json({ success: true });
 });
-
-// New endpoint to get orders by date and process them
-app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const date = c.req.query("date") // e.g., "22/06/2025"
-
-  if (!date) {
-    return c.json({ error: "Date query parameter is required" }, 400)
-  }
-
-  try {
-    // 1. Fetch all data needed for processing
-    const [savedProductsWithLabels, shopifyStores, orderCardConfig] = await Promise.all([
-      d1DatabaseService.getSavedProductsWithLabels(c.env, tenantId),
-      d1DatabaseService.getShopifyStores(c.env, tenantId),
-      d1DatabaseService.getOrderCardConfig(c.env, tenantId),
-    ])
-
-    if (!shopifyStores || shopifyStores.length === 0) {
-      return c.json({ error: "No Shopify store configured for this tenant" }, 404)
-    }
-
-    // 2. Create a lookup map for product labels
-    // This allows us to quickly check if a line item is an "Add-On"
-    const productLabelMap = new Map<string, any>()
-    for (const product of savedProductsWithLabels) {
-      if (product.labels && product.labels.length > 0) {
-        // Using shopify_product_id as the key
-        productLabelMap.set(product.shopify_product_id, product.labels)
-      }
-    }
-
-    // 3. Fetch Shopify orders from all configured stores
-    // For now, we'll fetch from the first store. A more robust solution would iterate
-    // over all stores or have the UI specify which store to use.
-    const store = shopifyStores[0]
-    
-    console.log("Shopify store data:", {
-      id: store.id,
-      domain: store.shopifyDomain,
-      hasAccessToken: !!store.accessToken,
-      accessTokenLength: store.accessToken?.length,
-    })
-    
-    // Construct the store object in the format expected by ShopifyApiService
-    const storeForApi = {
-      id: store.id,
-      tenantId: tenantId,
-      name: store.shopifyDomain,
-      type: "shopify" as const,
-      status: "active" as const,
-      settings: {
-        domain: store.shopifyDomain,
-        accessToken: store.accessToken,
-        timezone: "UTC",
-        currency: "USD",
-        businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [],
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-    
-    console.log("Constructed store for API:", {
-      domain: storeForApi.settings.domain,
-      hasAccessToken: !!storeForApi.settings.accessToken,
-    })
-    
-    const shopifyApi = new ShopifyApiService(storeForApi, store.accessToken)
-    const shopifyOrders = await shopifyApi.getOrders()
-
-    // 4. Filter Shopify orders by date tag
-    const dateTag = date.replace(/-/g, "/") // Ensure format is dd/mm/yyyy
-    const filteredOrders = shopifyOrders.filter((order: any) => {
-      return order.tags.split(", ").includes(dateTag)
-    })
-
-    // 5. Helper function to apply field transformations
-    const applyFieldTransformation = (value: any, transformation: string | null, transformationRule: string | null): any => {
-      console.log(`Applying transformation: ${transformation}, rule: ${transformationRule}, value: ${value}`)
-      
-      if (!transformation || !transformationRule || !value) {
-        console.log(`No transformation needed, returning original value: ${value}`)
-        return value
-      }
-
-      try {
-        switch (transformation) {
-          case "extract":
-            console.log(`Applying regex extraction with pattern: ${transformationRule}`)
-            const regex = new RegExp(transformationRule, "g")
-            const matches = value.match(regex)
-            console.log(`Regex matches:`, matches)
-            return matches ? matches[0] : null
-          case "transform":
-            // Add more transformation types here as needed
-            return value
-          default:
-            return value
-        }
-      } catch (error) {
-        console.error(`Error applying transformation ${transformation}:`, error)
-        return value
-      }
-    }
-
-    // 6. Helper function to extract field value from Shopify order
-    const extractFieldValue = (order: any, shopifyFields: string[]): any => {
-      if (!shopifyFields || shopifyFields.length === 0) {
-        return null
-      }
-
-      // For now, we'll use the first field. In the future, we can support combining multiple fields
-      const fieldPath = shopifyFields[0]
-      
-      // Handle nested field paths like "line_items.title"
-      const pathParts = fieldPath.split(".")
-      let value = order
-      
-      for (const part of pathParts) {
-        if (value && typeof value === "object") {
-          // Handle arrays - if we encounter an array, take the first item
-          if (Array.isArray(value)) {
-            if (value.length === 0) {
-              value = null
-              break
-            }
-            value = value[0]
-          }
-          
-          value = value[part]
-        } else {
-          value = null
-          break
-        }
-      }
-
-      return value
-    }
-
-    // 7. Process filtered orders into "To-Do" cards with field transformations
-    const todoCards: any[] = []
-    for (const order of filteredOrders) {
-      const primaryItems: any[] = []
-      const addOnItems: any[] = []
-
-      // Classify line items
-      for (const item of order.line_items) {
-        if (!item.product_id) {
-          console.warn("Skipping line item with null product_id", item)
-          continue
-        }
-        const labels = productLabelMap.get(item.product_id.toString())
-        const isAddOn = labels?.some((label: any) => label.name === "Add-On" && label.category === "productType")
-
-        if (isAddOn) {
-          addOnItems.push(item)
-        } else {
-          primaryItems.push(item)
-        }
-      }
-
-      // Create cards from primary items
-      for (const primaryItem of primaryItems) {
-        for (let i = 0; i < primaryItem.quantity; i++) {
-          // Create a card object with all configured fields
-          const card: any = {
-            cardId: `${order.id}-${primaryItem.id}-${i}`,
-            shopifyOrderId: order.id,
-            orderNumber: order.name,
-            productTitle: primaryItem.title,
-            variantTitle: primaryItem.variant_title,
-            quantity: 1, // Each card represents one item
-            addOns: addOnItems.map((addOn) => addOn.title),
-            deliveryDate: date,
-            customerName: `${order.customer.first_name} ${order.customer.last_name}`,
-          }
-
-          // Apply field transformations based on order card configuration
-          for (const fieldConfig of orderCardConfig) {
-            if (fieldConfig.is_visible) {
-              console.log(`Processing field: ${fieldConfig.field_id}`)
-              console.log(`Field config:`, fieldConfig)
-              
-              const fieldValue = extractFieldValue(order, fieldConfig.shopifyFields)
-              console.log(`Extracted value for ${fieldConfig.field_id}:`, fieldValue)
-              
-              const transformedValue = applyFieldTransformation(
-                fieldValue, 
-                fieldConfig.transformation, 
-                fieldConfig.transformationRule
-              )
-              console.log(`Transformed value for ${fieldConfig.field_id}:`, transformedValue)
-              
-              // Map the field to the card using the field_id
-              card[fieldConfig.field_id] = transformedValue
-            }
-          }
-
-          todoCards.push(card)
-        }
-      }
-    }
-
-    console.log(`Processed ${todoCards.length} todo cards for date ${date}`)
-    return c.json(todoCards)
-  } catch (error: any) {
-    console.error("Error fetching or processing orders:", error)
-    return c.json({ error: "Failed to process orders", details: error.message }, 500)
-  }
-})
-
-// --- Products ---
-app.get("/api/tenants/:tenantId/products", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const products = await d1DatabaseService.getProducts(c.env, tenantId)
-  return c.json(products)
-})
-app.post("/api/tenants/:tenantId/products", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productData = await c.req.json()
-  const newProduct = await d1DatabaseService.createProduct(c.env, tenantId, productData)
-  return c.json(newProduct, 201)
-})
-app.get("/api/tenants/:tenantId/products/:productId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const product = await d1DatabaseService.getProduct(c.env, tenantId, productId)
-  return product ? c.json(product) : c.json({ error: "Not Found" }, 404)
-})
-app.put("/api/tenants/:tenantId/products/:productId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const updateData = await c.req.json()
-  const updatedProduct = await d1DatabaseService.updateProduct(
-    c.env,
-    tenantId,
-    productId,
-    updateData
-  )
-  return updatedProduct ? c.json(updatedProduct) : c.json({ error: "Not Found" }, 404)
-})
-app.delete("/api/tenants/:tenantId/products/:productId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const success = await d1DatabaseService.deleteProduct(c.env, tenantId, productId)
-  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
-})
-
-// --- Saved Products ---
-app.post("/api/tenants/:tenantId/saved-products", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const { products } = await c.req.json()
-  const savedProducts = await d1DatabaseService.saveProducts(c.env, tenantId, products)
-  return c.json(savedProducts, 201)
-})
-
-app.get("/api/tenants/:tenantId/saved-products", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const search = c.req.query("search")
-  const productType = c.req.query("productType")
-  const vendor = c.req.query("vendor")
-  const hasLabels = c.req.query("hasLabels")
-
-  const filters: any = {}
-  if (search) filters.search = search
-  if (productType) filters.productType = productType
-  if (vendor) filters.vendor = vendor
-  if (hasLabels) filters.hasLabels = hasLabels === "true"
-
-  const savedProducts = await d1DatabaseService.getSavedProducts(c.env, tenantId, filters)
-  return c.json(savedProducts)
-})
-
-app.get("/api/tenants/:tenantId/saved-products/:productId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const savedProduct = await d1DatabaseService.getSavedProduct(c.env, tenantId, productId)
-  return savedProduct ? c.json(savedProduct) : c.json({ error: "Not Found" }, 404)
-})
-
-app.delete("/api/tenants/:tenantId/saved-products/:productId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const success = await d1DatabaseService.deleteSavedProduct(c.env, tenantId, productId)
-  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
-})
-
-app.post("/api/tenants/:tenantId/saved-products/:productId/labels/:labelId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const labelId = c.req.param("labelId")
-  const success = await d1DatabaseService.addProductLabel(c.env, tenantId, productId, labelId)
-  return c.json({ success })
-})
-
-app.delete("/api/tenants/:tenantId/saved-products/:productId/labels/:labelId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.param("productId")
-  const labelId = c.req.param("labelId")
-  const success = await d1DatabaseService.removeProductLabel(c.env, tenantId, productId, labelId)
-  return c.json({ success })
-})
-
-app.get("/api/tenants/:tenantId/saved-products/by-shopify-ids", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const productId = c.req.query("productId")
-  const variantId = c.req.query("variantId")
-
-  if (!productId || !variantId) {
-    return c.json({ error: "Product ID and variant ID are required" }, 400)
-  }
-
-  const savedProduct = await d1DatabaseService.getProductByShopifyIds(
-    c.env,
-    tenantId,
-    productId,
-    variantId
-  )
-  return savedProduct ? c.json(savedProduct) : c.json({ error: "Not Found" }, 404)
-})
-
-// --- Product Image Lookup Endpoint ---
-app.get("/api/tenants/:tenantId/saved-products/image/:shopifyProductId/:shopifyVariantId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const shopifyProductId = c.req.param("shopifyProductId")
-  const shopifyVariantId = c.req.param("shopifyVariantId")
-  
-  // Extract numeric IDs from GIDs, handling both formats
-  const numericProductId = shopifyProductId.split('/').pop()
-  const numericVariantId = shopifyVariantId.split('/').pop()
-
-  try {
-    // Direct database query to get product with image data
-    const { results } = await c.env.DB.prepare(`
-      SELECT * FROM saved_products 
-      WHERE tenant_id = ? AND shopify_product_id = ? AND shopify_variant_id = ?
-    `)
-      .bind(tenantId, numericProductId, numericVariantId)
-      .all()
-    
-    const product = results[0]
-    if (!product) {
-      return c.json({ error: "Product not found" }, 404)
-    }
-    
-    // Return only the image-related data
-    const imageData = {
-      imageUrl: product.image_url,
-      imageAlt: product.image_alt,
-      title: product.title,
-      variantTitle: product.variant_title,
-      description: product.description,
-      price: product.price,
-      tags: JSON.parse(String(product.tags || "[]")),
-      productType: product.product_type,
-      vendor: product.vendor,
-    }
-    
-    return c.json(imageData)
-  } catch (error) {
-    console.error("Error fetching product image:", error)
-    return c.json({ error: "Failed to fetch product image" }, 500)
-  }
-})
-
-// Alternative endpoint for when we only have product ID
-app.get("/api/tenants/:tenantId/saved-products/image/:shopifyProductId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const shopifyProductId = c.req.param("shopifyProductId")
-
-  // Extract numeric ID from GID, handling both formats
-  const numericProductId = shopifyProductId.split('/').pop()
-  
-  try {
-    // Get the first variant of the product
-    const { results } = await c.env.DB.prepare(`
-      SELECT * FROM saved_products 
-      WHERE tenant_id = ? AND shopify_product_id = ?
-      ORDER BY created_at ASC 
-      LIMIT 1
-    `)
-      .bind(tenantId, numericProductId)
-      .all()
-    
-    const product = results[0]
-    if (!product) {
-      return c.json({ error: "Product not found" }, 404)
-    }
-    
-    const imageData = {
-      imageUrl: product.image_url,
-      imageAlt: product.image_alt,
-      title: product.title,
-      variantTitle: product.variant_title,
-      description: product.description,
-      price: product.price,
-      tags: JSON.parse(String(product.tags || "[]")),
-      productType: product.product_type,
-      vendor: product.vendor,
-    }
-    
-    return c.json(imageData)
-  } catch (error) {
-    console.error("Error fetching product image:", error)
-    return c.json({ error: "Failed to fetch product image" }, 500)
-  }
-})
 
 // --- Product Sync ---
 app.post("/api/tenants/:tenantId/stores/:storeId/sync-products", async (c) => {
@@ -1458,6 +900,42 @@ app.delete("/api/tenants/:tenantId/users/:userId", async (c) => {
   return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
 })
 
+// --- Products ---
+app.get("/api/tenants/:tenantId/products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const products = await d1DatabaseService.getProducts(c.env, tenantId)
+  return c.json(products)
+})
+
+app.post("/api/tenants/:tenantId/products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productData = await c.req.json()
+  const newProduct = await d1DatabaseService.createProduct(c.env, tenantId, productData)
+  return c.json(newProduct, 201)
+})
+
+app.get("/api/tenants/:tenantId/products/:productId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  const product = await d1DatabaseService.getProduct(c.env, tenantId, productId)
+  return product ? c.json(product) : c.json({ error: "Not Found" }, 404)
+})
+
+app.put("/api/tenants/:tenantId/products/:productId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  const updateData = await c.req.json()
+  const updatedProduct = await d1DatabaseService.updateProduct(c.env, tenantId, productId, updateData)
+  return updatedProduct ? c.json(updatedProduct) : c.json({ error: "Not Found" }, 404)
+})
+
+app.delete("/api/tenants/:tenantId/products/:productId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  const success = await d1DatabaseService.deleteProduct(c.env, tenantId, productId)
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
+})
+
 // --- Tenants (Public Routes) ---
 app.get("/api/tenants", async (c) => {
   const tenants = await d1DatabaseService.listTenants(c.env)
@@ -1567,6 +1045,66 @@ app.put("/api/tenants/:tenantId/settings", async (c) => {
 
 // --- Health & Test Routes ---
 app.get("/api/health", (c) => c.json({ status: "healthy" }))
+
+// --- Token Validation ---
+app.get("/api/auth/validate", async (c) => {
+  try {
+    const authHeader = c.req.header("Authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return c.json({ valid: false, error: "No token provided" }, 401)
+    }
+
+    // Use the same JWT middleware pattern as other endpoints
+    const auth = jwt({ secret: c.env.JWT_SECRET })
+    let isValid = false
+    let userData: any = null
+    let tenantData: any = null
+
+    await auth(c, async () => {
+      // This will only execute if the token is valid
+      const payload = c.get('jwtPayload')
+      
+      if (payload && payload.tenantId) {
+        // Verify user and tenant still exist in database
+        const user = await d1DatabaseService.getUser(c.env, payload.tenantId, payload.sub)
+        if (user) {
+          const tenant = await d1DatabaseService.getTenant(c.env, payload.tenantId)
+          if (tenant) {
+            isValid = true
+            userData = {
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              role: user.role,
+              permissions: user.permissions
+            }
+            tenantData = {
+              id: tenant.id,
+              name: tenant.name,
+              domain: tenant.domain,
+              subscriptionPlan: tenant.subscriptionPlan,
+              status: tenant.status
+            }
+          }
+        }
+      }
+    })
+
+    if (isValid && userData && tenantData) {
+      return c.json({ 
+        valid: true, 
+        user: userData,
+        tenant: tenantData
+      })
+    } else {
+      return c.json({ valid: false, error: "Invalid token or user/tenant not found" }, 401)
+    }
+  } catch (error) {
+    console.error("Token validation error:", error)
+    return c.json({ valid: false, error: "Invalid token" }, 401)
+  }
+})
+
 app.get("/api/test-d1", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT COUNT(*) as count FROM tenants").all()
   return c.json({ message: "D1 connection successful", tenantCount: results[0].count })
@@ -2284,16 +1822,25 @@ app.post("/api/tenants/:tenantId/ai/training-data/extract-products", async (c) =
 });
 
 app.get("/api/tenants/:tenantId/ai/training-data/stats", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const stats = await d1DatabaseService.getAITrainingDataStats(c.env, tenantId);
-  return c.json(stats);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const stats = await d1DatabaseService.getAITrainingDataStats(c.env, tenantId)
+    return c.json(stats)
+  } catch (error) {
+    console.error("Error fetching training data stats:", error)
+    return c.json({ error: "Failed to fetch training data stats" }, 500)
+  }
 });
 
-// --- AI Training Sessions Endpoints ---
 app.get("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const sessions = await d1DatabaseService.getAITrainingSessions(c.env, tenantId);
-  return c.json(sessions);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const sessions = await d1DatabaseService.getAITrainingSessions(c.env, tenantId)
+    return c.json(sessions)
+  } catch (error) {
+    console.error("Error fetching training sessions:", error)
+    return c.json({ error: "Failed to fetch training sessions" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
@@ -2305,9 +1852,14 @@ app.post("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
 
 // --- AI Generated Designs Endpoints ---
 app.get("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const designs = await d1DatabaseService.getAIGeneratedDesigns(c.env, tenantId);
-  return c.json(designs);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const designs = await d1DatabaseService.getAIGeneratedDesigns(c.env, tenantId)
+    return c.json(designs)
+  } catch (error) {
+    console.error("Error fetching generated designs:", error)
+    return c.json({ error: "Failed to fetch generated designs" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
@@ -2319,9 +1871,14 @@ app.post("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
 
 // --- AI Style Templates Endpoints ---
 app.get("/api/tenants/:tenantId/ai/style-templates", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const templates = await d1DatabaseService.getAIStyleTemplates(c.env, tenantId);
-  return c.json(templates);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const templates = await d1DatabaseService.getAIStyleTemplates(c.env, tenantId)
+    return c.json(templates)
+  } catch (error) {
+    console.error("Error fetching style templates:", error)
+    return c.json({ error: "Failed to fetch style templates" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/style-templates", async (c) => {
@@ -2333,9 +1890,14 @@ app.post("/api/tenants/:tenantId/ai/style-templates", async (c) => {
 
 // --- AI Usage Analytics Endpoints ---
 app.get("/api/tenants/:tenantId/ai/usage-analytics", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const analytics = await d1DatabaseService.getAIUsageAnalytics(c.env, tenantId);
-  return c.json(analytics);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const analytics = await d1DatabaseService.getAIUsageAnalytics(c.env, tenantId)
+    return c.json(analytics)
+  } catch (error) {
+    console.error("Error fetching usage analytics:", error)
+    return c.json({ error: "Failed to fetch usage analytics" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/usage", async (c) => {
@@ -2347,9 +1909,14 @@ app.post("/api/tenants/:tenantId/ai/usage", async (c) => {
 
 // --- AI Styles Endpoints ---
 app.get("/api/tenants/:tenantId/ai/styles", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const styles = await d1DatabaseService.getAIStyles(c.env, tenantId);
-  return c.json(styles);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const styles = await d1DatabaseService.getAIStyles(c.env, tenantId)
+    return c.json(styles)
+  } catch (error) {
+    console.error("Error fetching AI styles:", error)
+    return c.json({ error: "Failed to fetch AI styles" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/styles", async (c) => {
@@ -2368,9 +1935,14 @@ app.delete("/api/tenants/:tenantId/ai/styles/:styleId", async (c) => {
 
 // --- AI Arrangement Types Endpoints ---
 app.get("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const types = await d1DatabaseService.getAIArrangementTypes(c.env, tenantId);
-  return c.json(types);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const types = await d1DatabaseService.getAIArrangementTypes(c.env, tenantId)
+    return c.json(types)
+  } catch (error) {
+    console.error("Error fetching arrangement types:", error)
+    return c.json({ error: "Failed to fetch arrangement types" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
@@ -2389,9 +1961,14 @@ app.delete("/api/tenants/:tenantId/ai/arrangement-types/:typeId", async (c) => {
 
 // --- AI Occasions Endpoints ---
 app.get("/api/tenants/:tenantId/ai/occasions", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const occasions = await d1DatabaseService.getAIOccasions(c.env, tenantId);
-  return c.json(occasions);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const occasions = await d1DatabaseService.getAIOccasions(c.env, tenantId)
+    return c.json(occasions)
+  } catch (error) {
+    console.error("Error fetching occasions:", error)
+    return c.json({ error: "Failed to fetch occasions" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/occasions", async (c) => {
@@ -2410,9 +1987,14 @@ app.delete("/api/tenants/:tenantId/ai/occasions/:occasionId", async (c) => {
 
 // --- AI Budget Tiers Endpoints ---
 app.get("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const budgetTiers = await d1DatabaseService.getAIBudgetTiers(c.env, tenantId);
-  return c.json(budgetTiers);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const tiers = await d1DatabaseService.getAIBudgetTiers(c.env, tenantId)
+    return c.json(tiers)
+  } catch (error) {
+    console.error("Error fetching budget tiers:", error)
+    return c.json({ error: "Failed to fetch budget tiers" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
@@ -2431,9 +2013,14 @@ app.delete("/api/tenants/:tenantId/ai/budget-tiers/:budgetTierId", async (c) => 
 
 // --- AI Customer Data Endpoints ---
 app.get("/api/tenants/:tenantId/ai/customer-data", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const customerData = await d1DatabaseService.getAICustomerData(c.env, tenantId);
-  return c.json(customerData);
+  const tenantId = c.req.param("tenantId")
+  try {
+    const data = await d1DatabaseService.getAICustomerData(c.env, tenantId)
+    return c.json(data)
+  } catch (error) {
+    console.error("Error fetching customer data:", error)
+    return c.json({ error: "Failed to fetch customer data" }, 500)
+  }
 });
 
 app.post("/api/tenants/:tenantId/ai/customer-data", async (c) => {
@@ -2452,27 +2039,19 @@ app.delete("/api/tenants/:tenantId/ai/customer-data/:customerDataId", async (c) 
 
 // --- Shopify Analytics Endpoints ---
 app.get("/api/tenants/:tenantId/shopify/analytics", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const dateRange = c.req.query("dateRange");
-  const compareWith = c.req.query("compareWith");
-  const productType = c.req.query("productType");
-  const storeId = c.req.query("storeId");
-
-  if (!dateRange || !compareWith) {
-    return c.json({ error: "Missing required query parameters: dateRange and compareWith" }, 400);
-  }
-
+  const tenantId = c.req.param("tenantId")
+  const { dateRange, compareWith, productType, storeId } = c.req.query()
   try {
-    const analyticsData = await d1DatabaseService.getShopifyAnalytics(c.env, tenantId, {
-      dateRange,
-      compareWith,
-      productType: productType ?? undefined,
-      storeId: storeId ?? undefined,
-    });
-    return c.json(analyticsData);
-  } catch (error: any) {
-    console.error(`Analytics Error: ${error.message}`);
-    return c.json({ error: "Failed to fetch Shopify analytics", details: error.message }, 500);
+    const analytics = await d1DatabaseService.getShopifyAnalytics(c.env, tenantId, {
+      dateRange: dateRange || "last_30_days",
+      compareWith: compareWith || "previous_period",
+      productType,
+      storeId
+    })
+    return c.json(analytics)
+  } catch (error) {
+    console.error("Error fetching Shopify analytics:", error)
+    return c.json({ error: "Failed to fetch Shopify analytics" }, 500)
   }
 });
 
@@ -2581,47 +2160,18 @@ app.post("/api/tenants/:tenantId/photos/upload", async (c) => {
 
 app.get("/api/tenants/:tenantId/photos", async (c) => {
   const tenantId = c.req.param("tenantId")
-  const userId = c.get("jwtPayload").sub
-  
   const { photo_id, status, date_range, user_id } = c.req.query()
-  
   try {
-    let query = `
-      SELECT fpu.*, pd.title, pd.description, pd.style, pd.occasion, pd.arrangement_type
-      FROM florist_photo_uploads fpu
-      LEFT JOIN photo_descriptions pd ON fpu.id = pd.photo_id
-      WHERE fpu.tenant_id = ?
-    `
-    const params = [tenantId]
+    const filters: any = {}
+    if (photo_id) filters.photo_id = photo_id
+    if (status) filters.status = status
+    if (date_range) filters.date_range = JSON.parse(date_range)
+    if (user_id) filters.user_id = user_id
     
-    if (photo_id) {
-      query += " AND fpu.id = ?"
-      params.push(photo_id)
-    }
-    
-    if (status) {
-      query += " AND fpu.upload_status = ?"
-      params.push(status)
-    }
-    
-    if (user_id) {
-      query += " AND fpu.user_id = ?"
-      params.push(user_id)
-    }
-    
-    if (date_range) {
-      const [start, end] = date_range.split(',')
-      query += " AND fpu.created_at BETWEEN ? AND ?"
-      params.push(start, end)
-    }
-    
-    query += " ORDER BY fpu.created_at DESC"
-    
-    const { results } = await c.env.DB.prepare(query).bind(...params).all()
-    
-    return c.json(results)
+    const photos = await getFloristPhotos(c.env, tenantId, filters)
+    return c.json(photos)
   } catch (error) {
-    console.error("Get photos error:", error)
+    console.error("Error fetching photos:", error)
     return c.json({ error: "Failed to fetch photos" }, 500)
   }
 })
@@ -2928,22 +2478,6 @@ app.get("/api/tenants/:tenantId/photos/statistics", async (c) => {
   }
 })
 
-// Catch-all route for static assets and SPA routing (must be last, after all API routes)
-app.get("*", async (c) => {
-  try {
-    // Let the Assets module handle the request
-    return await c.env.ASSETS.fetch(c.req)
-  } catch (e) {
-    // If the asset is not found, serve the index.html for SPA routing
-    const a = await c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url)))
-    return new Response(a.body, {
-      headers: {
-        "Content-Type": "text/html",
-      },
-    })
-  }
-})
-
 // --- AI Florist Product Creation ---
 app.post("/api/ai/create-bouquet-product", async (c) => {
   try {
@@ -3019,10 +2553,268 @@ app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
   }
 });
 
-export default {
-  fetch: app.fetch,
-  // The scheduled handler is optional
-  async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
-    ctx.waitUntil(Promise.resolve())
-  },
-}
+// --- Saved Products ---
+app.get("/api/tenants/:tenantId/saved-products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const products = await d1DatabaseService.getSavedProducts(c.env, tenantId, c.req.query())
+    return c.json(products)
+  } catch (error) {
+    console.error("Error fetching saved products:", error)
+    return c.json({ error: "Failed to fetch saved products" }, 500)
+  }
+})
+
+// --- Missing endpoints that frontend expects ---
+app.get("/api/tenants/:tenantId/order-card-config", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const config = await d1DatabaseService.getOrderCardConfig(c.env, tenantId)
+    return c.json({ config: config || [] })
+  } catch (error) {
+    console.error("Error fetching order card config:", error)
+    return c.json({ error: "Failed to fetch order card config" }, 500)
+  }
+})
+
+app.post("/api/tenants/:tenantId/order-card-config", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const configData = await c.req.json()
+  try {
+    await d1DatabaseService.saveOrderCardConfig(c.env, tenantId, configData)
+    return c.json({ success: true, message: "Configuration saved successfully" })
+  } catch (error) {
+    console.error("Error saving order card config:", error)
+    return c.json({ error: "Failed to save order card config" }, 500)
+  }
+})
+
+// --- Missing AI endpoints ---
+app.get("/api/tenants/:tenantId/ai/flowers", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const flowers = await d1DatabaseService.getFlowers(c.env, tenantId)
+    return c.json(flowers)
+  } catch (error) {
+    console.error("Error fetching flowers:", error)
+    return c.json({ error: "Failed to fetch flowers" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/prompt-templates", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const templates = await d1DatabaseService.getPromptTemplates(c.env, tenantId)
+    return c.json(templates)
+  } catch (error) {
+    console.error("Error fetching prompt templates:", error)
+    return c.json({ error: "Failed to fetch prompt templates" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/model-configs", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const configs = await d1DatabaseService.getModelConfigs(c.env, tenantId)
+    return c.json(configs)
+  } catch (error) {
+    console.error("Error fetching model configs:", error)
+    return c.json({ error: "Failed to fetch model configs" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/training-data", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const data = await d1DatabaseService.getAITrainingData(c.env, tenantId)
+    return c.json(data)
+  } catch (error) {
+    console.error("Error fetching training data:", error)
+    return c.json({ error: "Failed to fetch training data" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/training-data/stats", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const stats = await d1DatabaseService.getAITrainingDataStats(c.env, tenantId)
+    return c.json(stats)
+  } catch (error) {
+    console.error("Error fetching training data stats:", error)
+    return c.json({ error: "Failed to fetch training data stats" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const sessions = await d1DatabaseService.getAITrainingSessions(c.env, tenantId)
+    return c.json(sessions)
+  } catch (error) {
+    console.error("Error fetching training sessions:", error)
+    return c.json({ error: "Failed to fetch training sessions" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const designs = await d1DatabaseService.getAIGeneratedDesigns(c.env, tenantId)
+    return c.json(designs)
+  } catch (error) {
+    console.error("Error fetching generated designs:", error)
+    return c.json({ error: "Failed to fetch generated designs" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/style-templates", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const templates = await d1DatabaseService.getAIStyleTemplates(c.env, tenantId)
+    return c.json(templates)
+  } catch (error) {
+    console.error("Error fetching style templates:", error)
+    return c.json({ error: "Failed to fetch style templates" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/usage-analytics", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const analytics = await d1DatabaseService.getAIUsageAnalytics(c.env, tenantId)
+    return c.json(analytics)
+  } catch (error) {
+    console.error("Error fetching usage analytics:", error)
+    return c.json({ error: "Failed to fetch usage analytics" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/styles", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const styles = await d1DatabaseService.getAIStyles(c.env, tenantId)
+    return c.json(styles)
+  } catch (error) {
+    console.error("Error fetching AI styles:", error)
+    return c.json({ error: "Failed to fetch AI styles" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const types = await d1DatabaseService.getAIArrangementTypes(c.env, tenantId)
+    return c.json(types)
+  } catch (error) {
+    console.error("Error fetching arrangement types:", error)
+    return c.json({ error: "Failed to fetch arrangement types" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/occasions", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const occasions = await d1DatabaseService.getAIOccasions(c.env, tenantId)
+    return c.json(occasions)
+  } catch (error) {
+    console.error("Error fetching occasions:", error)
+    return c.json({ error: "Failed to fetch occasions" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const tiers = await d1DatabaseService.getAIBudgetTiers(c.env, tenantId)
+    return c.json(tiers)
+  } catch (error) {
+    console.error("Error fetching budget tiers:", error)
+    return c.json({ error: "Failed to fetch budget tiers" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/ai/customer-data", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  try {
+    const data = await d1DatabaseService.getAICustomerData(c.env, tenantId)
+    return c.json(data)
+  } catch (error) {
+    console.error("Error fetching customer data:", error)
+    return c.json({ error: "Failed to fetch customer data" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/shopify/analytics", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const { dateRange, compareWith, productType, storeId } = c.req.query()
+  try {
+    const analytics = await d1DatabaseService.getShopifyAnalytics(c.env, tenantId, {
+      dateRange: dateRange || "last_30_days",
+      compareWith: compareWith || "previous_period",
+      productType,
+      storeId
+    })
+    return c.json(analytics)
+  } catch (error) {
+    console.error("Error fetching Shopify analytics:", error)
+    return c.json({ error: "Failed to fetch Shopify analytics" }, 500)
+  }
+})
+
+// --- Missing photo endpoints ---
+app.get("/api/tenants/:tenantId/photos", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const { photo_id, status, date_range, user_id } = c.req.query()
+  try {
+    const filters: any = {}
+    if (photo_id) filters.photo_id = photo_id
+    if (status) filters.status = status
+    if (date_range) filters.date_range = JSON.parse(date_range)
+    if (user_id) filters.user_id = user_id
+    
+    const photos = await getFloristPhotos(c.env, tenantId, filters)
+    return c.json(photos)
+  } catch (error) {
+    console.error("Error fetching photos:", error)
+    return c.json({ error: "Failed to fetch photos" }, 500)
+  }
+})
+
+// SPA routing - handle all non-API routes
+app.get('*', async (c) => {
+  const path = c.req.path
+  
+  // Skip API routes
+  if (path.startsWith('/api/')) {
+    return c.notFound()
+  }
+  
+  // Try to serve static assets first
+  try {
+    const asset = await c.env.ASSETS.fetch(c.req.url)
+    if (asset.status === 200) {
+      return asset
+    }
+  } catch (error) {
+    // Asset not found, continue to serve index.html
+  }
+  
+  // Serve index.html for SPA routing
+  try {
+    const indexHtml = await c.env.ASSETS.fetch(new URL('/', c.req.url))
+    if (indexHtml.status === 200) {
+      return new Response(indexHtml.body, {
+        headers: {
+          'Content-Type': 'text/html',
+          ...Object.fromEntries(indexHtml.headers.entries())
+        }
+      })
+    }
+  } catch (error) {
+    console.error('Error serving index.html:', error)
+  }
+  
+  return c.notFound()
+})
+
+export default app
