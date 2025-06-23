@@ -608,3 +608,394 @@ export async function syncShopifyProduct(
     }
   )
 }
+
+export async function createSampleProducts(tenantId: string): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/sample-products`,
+    {
+      method: "POST",
+    }
+  )
+}
+
+// AI Generation
+export async function generateAIDesign(tenantId: string, request: {
+  prompt: string;
+  style: string;
+  size: string;
+  occasion: string;
+  budget: string;
+  flowerTypes: string[];
+  colorPalette: string[];
+}): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/generate`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  })
+}
+
+// AI Training API Functions
+
+export async function getAIModelConfigs(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/model-configs`)
+}
+
+export async function createAIModelConfig(tenantId: string, config: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/model-configs`, {
+    method: "POST",
+    body: JSON.stringify(config),
+  })
+}
+
+export async function updateAIModelConfig(tenantId: string, configId: string, config: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/model-configs/${configId}`, {
+    method: "PUT",
+    body: JSON.stringify(config),
+  })
+}
+
+export async function getAITrainingData(tenantId: string, filters?: any): Promise<any[]> {
+  const queryParams = filters ? `?${new URLSearchParams(filters).toString()}` : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/training-data${queryParams}`)
+}
+
+export async function createAITrainingData(tenantId: string, data: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/training-data`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export async function extractAITrainingDataFromProducts(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/training-data/extract-products`, {
+    method: "POST",
+  })
+}
+
+export async function getAITrainingDataStats(tenantId: string): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/training-data/stats`)
+}
+
+export async function getAITrainingSessions(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/training-sessions`)
+}
+
+export async function createAITrainingSession(tenantId: string, session: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/training-sessions`, {
+    method: "POST",
+    body: JSON.stringify(session),
+  })
+}
+
+export async function getAIGeneratedDesigns(tenantId: string, filters?: any): Promise<any[]> {
+  const queryParams = filters ? `?${new URLSearchParams(filters).toString()}` : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/generated-designs${queryParams}`)
+}
+
+export async function saveAIGeneratedDesign(tenantId: string, design: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/generated-designs`, {
+    method: "POST",
+    body: JSON.stringify(design),
+  })
+}
+
+export async function getAIStyleTemplates(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/style-templates`)
+}
+
+export async function createAIStyleTemplate(tenantId: string, template: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/style-templates`, {
+    method: "POST",
+    body: JSON.stringify(template),
+  })
+}
+
+export async function getAIPromptTemplates(tenantId: string, category?: string): Promise<any[]> {
+  const queryParams = category ? `?category=${category}` : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/prompt-templates${queryParams}`)
+}
+
+export async function createAIPromptTemplate(tenantId: string, template: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/prompt-templates`, {
+    method: "POST",
+    body: JSON.stringify(template),
+  })
+}
+
+export async function getAIUsageAnalytics(tenantId: string, dateRange?: { start: string; end: string }): Promise<any[]> {
+  const params = new URLSearchParams()
+  if (dateRange) {
+    params.append('start_date', dateRange.start)
+    params.append('end_date', dateRange.end)
+  }
+  const queryParams = params.toString() ? `?${params.toString()}` : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/usage-analytics${queryParams}`)
+}
+
+export async function recordAIGeneration(tenantId: string, metadata: any): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/usage`, {
+    method: "POST",
+    body: JSON.stringify(metadata),
+  })
+}
+
+// ===== PHOTO UPLOAD API ENDPOINTS =====
+
+export async function uploadFloristPhoto(tenantId: string, formData: FormData): Promise<any> {
+  const token = getStoredToken()
+  if (!token) {
+    throw new Error("No authentication token found")
+  }
+
+  const url = `${API_BASE_URL}/api/tenants/${tenantId}/photos/upload`
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      // Don't set Content-Type for FormData, let browser set it with boundary
+    },
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new ApiError(response.status, errorText)
+  }
+
+  return response.json()
+}
+
+export async function getFloristPhotos(
+  tenantId: string, 
+  filters?: {
+    photo_id?: string
+    status?: string
+    date_range?: { start: string; end: string }
+    user_id?: string
+  }
+): Promise<any[]> {
+  const queryParams = filters
+    ? `?${new URLSearchParams(filters as Record<string, string>).toString()}`
+    : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/photos${queryParams}`)
+}
+
+export async function updatePhotoDescription(
+  tenantId: string, 
+  photoId: string, 
+  description: any
+): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/photos/${photoId}/description`, {
+    method: "POST",
+    body: JSON.stringify(description),
+  })
+}
+
+export async function assessPhotoQuality(
+  tenantId: string, 
+  photoId: string, 
+  assessment: any
+): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/photos/${photoId}/quality`, {
+    method: "POST",
+    body: JSON.stringify(assessment),
+  })
+}
+
+export async function getDailyUploadGoals(
+  tenantId: string, 
+  date: string
+): Promise<any | null> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/photos/goals?date=${date}`)
+}
+
+export async function getUploadStatistics(
+  tenantId: string, 
+  dateRange?: { start: string; end: string }
+): Promise<any[]> {
+  const queryParams = dateRange
+    ? `?start=${dateRange.start}&end=${dateRange.end}`
+    : ""
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/photos/statistics${queryParams}`)
+}
+
+export async function createTrainingDataFromPhoto(
+  tenantId: string, 
+  photoId: string, 
+  extraction: any
+): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/photos/${photoId}/training-data`, {
+    method: "POST",
+    body: JSON.stringify(extraction),
+  })
+}
+
+export async function getFlowers(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/flowers`);
+}
+
+export async function createFlower(tenantId: string, flower: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/flowers`, {
+    method: "POST",
+    body: JSON.stringify(flower),
+  });
+}
+
+export async function deleteFlower(tenantId: string, flowerId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/flowers/${flowerId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getPromptTemplates(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/prompt-templates`);
+}
+
+export async function createPromptTemplate(tenantId: string, prompt: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/prompt-templates`, {
+    method: "POST",
+    body: JSON.stringify(prompt),
+  });
+}
+
+export async function deletePromptTemplate(tenantId: string, promptId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/prompt-templates/${promptId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getModelConfigs(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/model-configs`);
+}
+
+export async function createModelConfig(tenantId: string, config: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/model-configs`, {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
+export async function deleteModelConfig(tenantId: string, configId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/model-configs/${configId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getAIStyles(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/styles`);
+}
+
+export async function createAIStyle(tenantId: string, style: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/styles`, {
+    method: "POST",
+    body: JSON.stringify(style),
+  });
+}
+
+export async function deleteAIStyle(tenantId: string, styleId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/styles/${styleId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getAIArrangementTypes(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/arrangement-types`);
+}
+
+export async function createAIArrangementType(tenantId: string, type: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/arrangement-types`, {
+    method: "POST",
+    body: JSON.stringify(type),
+  });
+}
+
+export async function deleteAIArrangementType(tenantId: string, typeId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/arrangement-types/${typeId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function getAIOccasions(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/occasions`);
+}
+
+export async function createAIOccasion(tenantId: string, occasion: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/occasions`, {
+    method: "POST",
+    body: JSON.stringify(occasion),
+  });
+}
+
+export async function deleteAIOccasion(tenantId: string, occasionId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/occasions/${occasionId}`, {
+    method: "DELETE"
+  });
+}
+
+// --- AI Budget Tiers API Endpoints ---
+export async function getAIBudgetTiers(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/budget-tiers`);
+}
+
+export async function createAIBudgetTier(tenantId: string, budgetTier: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/budget-tiers`, {
+    method: "POST",
+    body: JSON.stringify(budgetTier),
+  });
+}
+
+export async function deleteAIBudgetTier(tenantId: string, budgetTierId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/budget-tiers/${budgetTierId}`, {
+    method: "DELETE"
+  });
+}
+
+// --- AI Customer Data API Endpoints ---
+export async function getAICustomerData(tenantId: string): Promise<any[]> {
+  return authenticatedRequest<any[]>(`/api/tenants/${tenantId}/ai/customer-data`);
+}
+
+export async function createAICustomerData(tenantId: string, customerData: any): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/customer-data`, {
+    method: "POST",
+    body: JSON.stringify(customerData),
+  });
+}
+
+export async function deleteAICustomerData(tenantId: string, customerDataId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/ai/customer-data/${customerDataId}`, {
+    method: "DELETE"
+  });
+}
+
+// --- Shopify Analytics API Endpoints ---
+export async function getShopifyAnalytics(tenantId: string, filters: {
+  dateRange?: string;
+  compareWith?: string;
+  productType?: string;
+  storeId?: string;
+}): Promise<any> {
+  const queryParams = new URLSearchParams();
+  if (filters.dateRange) queryParams.append('dateRange', filters.dateRange);
+  if (filters.compareWith) queryParams.append('compareWith', filters.compareWith);
+  if (filters.productType) queryParams.append('productType', filters.productType);
+  if (filters.storeId) queryParams.append('storeId', filters.storeId);
+  
+  const queryString = queryParams.toString();
+  const url = queryString ? `/api/tenants/${tenantId}/shopify/analytics?${queryString}` : `/api/tenants/${tenantId}/shopify/analytics`;
+  
+  return authenticatedRequest<any>(url);
+}
+
+export async function createTrainingSessionFromAnalytics(tenantId: string, sessionData: {
+  selectedProducts: string[];
+  selectedOccasions: string[];
+  selectedStyles: string[];
+  sessionName: string;
+  priority: 'high' | 'medium' | 'low';
+}): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/shopify/analytics/training-session`, {
+    method: "POST",
+    body: JSON.stringify(sessionData),
+  });
+}

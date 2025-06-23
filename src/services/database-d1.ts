@@ -78,7 +78,7 @@ export const d1DatabaseService = {
   // List tenants (optionally filter by domain)
   async listTenants(env: any, filters?: { domain?: string }): Promise<Tenant[]> {
     let query = "SELECT * FROM tenants"
-    let params: any[] = []
+    const params: any[] = []
     if (filters?.domain) {
       query += " WHERE domain = ?"
       params.push(filters.domain)
@@ -212,7 +212,7 @@ export const d1DatabaseService = {
     filters?: { status?: string; assignedTo?: string; deliveryDate?: string; storeId?: string }
   ): Promise<Order[]> {
     let query = "SELECT * FROM tenant_orders WHERE tenant_id = ?"
-    let params: any[] = [tenantId]
+    const params: any[] = [tenantId]
 
     if (filters?.status) {
       query += " AND status = ?"
@@ -261,30 +261,75 @@ export const d1DatabaseService = {
       notes?: string
       shopifyOrderId?: string
       product_label?: string
+      total_price?: number
+      currency?: string
+      customer_email?: string
+      line_items?: string
+      product_titles?: string
+      quantities?: string
+      session_id?: string
+      store_id?: string
+      product_type?: string
     }
   ): Promise<Order> {
-    const orderId = crypto.randomUUID()
+    const id = orderData.shopifyOrderId ? `shopify-${orderData.shopifyOrderId}` : crypto.randomUUID()
     const now = new Date().toISOString()
+    
+    // Ensure all analytics fields are present for insertion
+    const fullOrderData = {
+      ...orderData,
+      status: orderData.status || "pending",
+      priority: orderData.priority || 0,
+      assignedTo: orderData.assignedTo || null,
+      notes: orderData.notes || null,
+      product_label: orderData.product_label || null,
+      total_price: orderData.total_price || null,
+      currency: orderData.currency || null,
+      customer_email: orderData.customer_email || null,
+      line_items: orderData.line_items || null,
+      product_titles: orderData.product_titles || null,
+      quantities: orderData.quantities || null,
+      session_id: orderData.session_id || null,
+      store_id: orderData.store_id || null,
+      product_type: orderData.product_type || null,
+    };
+
     await env.DB.prepare(
-      `INSERT INTO tenant_orders (id, tenant_id, shopify_order_id, customer_name, delivery_date, status, priority, assigned_to, notes, product_label, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        orderId,
-        tenantId,
-        orderData.shopifyOrderId || null,
-        orderData.customerName,
-        orderData.deliveryDate,
-        orderData.status || "pending",
-        orderData.priority || 0,
-        orderData.assignedTo || null,
-        orderData.notes || null,
-        orderData.product_label || null,
-        now,
-        now
+      `INSERT INTO tenant_orders (
+        id, tenant_id, shopify_order_id, customer_name, delivery_date, status, priority, assigned_to, notes, product_label, 
+        total_price, currency, customer_email, line_items, product_titles, quantities, session_id, store_id, product_type,
+        created_at, updated_at
       )
-      .run()
-    return (await d1DatabaseService.getOrder(env, tenantId, orderId)) as Order
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      fullOrderData.shopifyOrderId,
+      fullOrderData.customerName,
+      fullOrderData.deliveryDate,
+      fullOrderData.status,
+      fullOrderData.priority,
+      fullOrderData.assignedTo,
+      fullOrderData.notes,
+      fullOrderData.product_label,
+      fullOrderData.total_price,
+      fullOrderData.currency,
+      fullOrderData.customer_email,
+      fullOrderData.line_items,
+      fullOrderData.product_titles,
+      fullOrderData.quantities,
+      fullOrderData.session_id,
+      fullOrderData.store_id,
+      fullOrderData.product_type,
+      now,
+      now
+    ).run()
+
+    const newOrder = await this.getOrder(env, tenantId, id)
+    if (!newOrder) {
+      throw new Error("Failed to create or retrieve order after insertion.")
+    }
+    return newOrder
   },
 
   // Get a single order by ID
@@ -370,12 +415,12 @@ export const d1DatabaseService = {
 
   // Delete an order
   async deleteOrder(env: any, tenantId: string, orderId: string): Promise<boolean> {
-    const { meta } = await env.DB.prepare(
-      "DELETE FROM tenant_orders WHERE tenant_id = ? AND id = ?"
+    const { success } = await env.DB.prepare(
+      "DELETE FROM tenant_orders WHERE id = ? AND tenant_id = ?"
     )
-      .bind(tenantId, orderId)
+      .bind(orderId, tenantId)
       .run()
-    return meta.changes > 0
+    return success
   },
 
   // Update a user
@@ -1070,7 +1115,7 @@ export const d1DatabaseService = {
       LEFT JOIN product_labels pl ON plm.label_id = pl.id
       WHERE sp.tenant_id = ?
     `
-    let params: any[] = [tenantId]
+    const params: any[] = [tenantId]
 
     if (filters?.search) {
       query += ` AND (sp.title LIKE ? OR sp.variant_title LIKE ? OR sp.description LIKE ?)`
@@ -1188,9 +1233,9 @@ export const d1DatabaseService = {
 
   async deleteSavedProduct(env: any, tenantId: string, productId: string): Promise<boolean> {
     const { success } = await env.DB.prepare(
-      "DELETE FROM saved_products WHERE tenant_id = ? AND id = ?"
+      "DELETE FROM saved_products WHERE id = ? AND tenant_id = ?"
     )
-      .bind(tenantId, productId)
+      .bind(productId, tenantId)
       .run()
 
     return success
@@ -1277,4 +1322,1402 @@ export const d1DatabaseService = {
       labelCategories: result.label_categories ? result.label_categories.split(",") : [],
     }
   },
+
+  // --- AI Flowers Management ---
+  async getFlowers(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_flowers WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createFlower(env: any, tenantId: string, flowerData: any): Promise<any> {
+    const id = flowerData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_flowers (id, tenant_id, name, variety, color, seasonality, availability, price_range, description, image_url, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      flowerData.name,
+      flowerData.variety,
+      flowerData.color,
+      flowerData.seasonality || null,
+      flowerData.availability !== undefined ? flowerData.availability : true,
+      flowerData.price_range || null,
+      flowerData.description || null,
+      flowerData.image_url || null,
+      flowerData.is_active !== undefined ? flowerData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getFlower(env, tenantId, id);
+  },
+
+  async getFlower(env: any, tenantId: string, flowerId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_flowers WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, flowerId).all();
+    return results[0] || null;
+  },
+
+  async deleteFlower(env: any, tenantId: string, flowerId: string): Promise<boolean> {
+    const { success } = await env.DB.prepare(
+      `DELETE FROM ai_flowers WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, flowerId).run();
+    return !!success;
+  },
+
+  // --- AI Prompt Templates Management ---
+  async getPromptTemplates(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_prompt_templates WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createPromptTemplate(env: any, tenantId: string, promptData: any): Promise<any> {
+    const id = promptData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_prompt_templates (id, tenant_id, name, template, variables, category, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      promptData.name,
+      promptData.template,
+      promptData.variables ? JSON.stringify(promptData.variables) : null,
+      promptData.category || 'custom',
+      promptData.is_active !== undefined ? promptData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getPromptTemplate(env, tenantId, id);
+  },
+
+  async getPromptTemplate(env: any, tenantId: string, promptId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_prompt_templates WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, promptId).all();
+    return results[0] || null;
+  },
+
+  async deletePromptTemplate(env: any, tenantId: string, promptId: string): Promise<boolean> {
+    const { success } = await env.DB.prepare(
+      `DELETE FROM ai_prompt_templates WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, promptId).run();
+    return !!success;
+  },
+
+  // --- AI Model Configs Management ---
+  async getModelConfigs(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_model_configs WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createModelConfig(env: any, tenantId: string, configData: any): Promise<any> {
+    const id = configData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_model_configs (id, tenant_id, name, model_type, config_data, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      configData.name,
+      configData.model_type || 'dalle3',
+      JSON.stringify(configData.config_data || {}),
+      configData.is_active !== undefined ? configData.is_active : false,
+      now,
+      now
+    ).run();
+    return await this.getModelConfig(env, tenantId, id);
+  },
+
+  async getModelConfig(env: any, tenantId: string, configId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_model_configs WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, configId).all();
+    return results[0] || null;
+  },
+
+  async deleteModelConfig(env: any, tenantId: string, configId: string): Promise<boolean> {
+    const { success } = await env.DB.prepare(
+      `DELETE FROM ai_model_configs WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, configId).run();
+    return !!success;
+  },
+
+  // --- AI Training Data Management ---
+  async getAITrainingData(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_training_data WHERE tenant_id = ? ORDER BY created_at DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAITrainingData(env: any, tenantId: string, data: any): Promise<any> {
+    const id = data.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_training_data (id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      data.data_type,
+      data.content,
+      data.metadata ? JSON.stringify(data.metadata) : null,
+      data.source_type || 'manual',
+      data.source_id || null,
+      data.quality_score || 0.5,
+      data.is_active !== undefined ? data.is_active : true,
+      now,
+      now
+    ).run();
+    return await this.getAITrainingDataItem(env, tenantId, id);
+  },
+
+  async getAITrainingDataItem(env: any, tenantId: string, dataId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_training_data WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, dataId).all();
+    return results[0] || null;
+  },
+
+  async extractTrainingDataFromProducts(env: any, tenantId: string): Promise<any[]> {
+    try {
+      // Get saved products and extract training data (limit to first 50 to avoid API limits)
+      const { results: products } = await env.DB.prepare(
+        `SELECT * FROM saved_products WHERE tenant_id = ? AND status = 'active' LIMIT 50`
+      ).bind(tenantId).all();
+
+      if (products.length === 0) {
+        return [];
+      }
+
+      // Check for existing training data to avoid duplicates
+      const existingSourceIds = await env.DB.prepare(
+        `SELECT source_id FROM ai_training_data WHERE tenant_id = ? AND source_type = 'shopify'`
+      ).bind(tenantId).all();
+      
+      const existingIds = new Set(existingSourceIds.results.map((row: any) => row.source_id));
+      
+      // Filter out products that already have training data
+      const newProducts = products.filter((product: any) => !existingIds.has(product.id));
+      
+      if (newProducts.length === 0) {
+        return [];
+      }
+
+      // Prepare batch insert data
+      const now = new Date().toISOString();
+      const trainingDataToInsert = newProducts.map((product: any) => {
+        const id = crypto.randomUUID();
+        
+        // Parse tags from JSON string, with fallback to empty array
+        let tags = [];
+        try {
+          tags = product.tags ? JSON.parse(product.tags) : [];
+        } catch (error) {
+          console.warn('Failed to parse tags for product:', product.id, error);
+          tags = [];
+        }
+
+        return {
+          id,
+          tenant_id: tenantId,
+          data_type: 'prompt',
+          content: `Create a beautiful ${product.product_type || 'bouquet'} with ${product.title}`,
+          metadata: JSON.stringify({
+            product_id: product.id,
+            product_type: product.product_type,
+            vendor: product.vendor,
+            tags: tags
+          }),
+          source_type: 'shopify',
+          source_id: product.id,
+          quality_score: 0.8,
+          is_active: 1,
+          created_at: now,
+          updated_at: now
+        };
+      });
+
+      // Use smaller batches (10 at a time) to avoid parameter limits
+      const batchSize = 10;
+      const insertedData = [];
+      
+      for (let i = 0; i < trainingDataToInsert.length; i += batchSize) {
+        const batch = trainingDataToInsert.slice(i, i + batchSize);
+        
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const values = batch.flatMap((data: any) => [
+          data.id,
+          data.tenant_id,
+          data.data_type,
+          data.content,
+          data.metadata,
+          data.source_type,
+          data.source_id,
+          data.quality_score,
+          data.is_active,
+          data.created_at,
+          data.updated_at
+        ]);
+
+        try {
+          await env.DB.prepare(
+            `INSERT INTO ai_training_data (id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score, is_active, created_at, updated_at)
+             VALUES ${placeholders}`
+          ).bind(...values).run();
+          
+          insertedData.push(...batch);
+        } catch (batchError) {
+          console.error(`Error inserting batch ${i / batchSize + 1}:`, batchError);
+          // Continue with next batch instead of failing completely
+        }
+      }
+
+      // Return the created training data
+      return insertedData.map((data: any) => ({
+        id: data.id,
+        tenant_id: data.tenant_id,
+        data_type: data.data_type,
+        content: data.content,
+        metadata: JSON.parse(data.metadata),
+        source_type: data.source_type,
+        source_id: data.source_id,
+        quality_score: data.quality_score,
+        is_active: data.is_active,
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      }));
+    } catch (error) {
+      console.error('Error extracting training data from products:', error);
+      throw new Error(`Failed to extract training data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  },
+
+  async getAITrainingDataStats(env: any, tenantId: string): Promise<any> {
+    // Get counts from various tables
+    const [
+      { results: products },
+      { results: prompts },
+      { results: images },
+      { results: feedback }
+    ] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) as count FROM saved_products WHERE tenant_id = ?`).bind(tenantId).all(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM ai_training_data WHERE tenant_id = ? AND data_type = 'prompt'`).bind(tenantId).all(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM ai_training_data WHERE tenant_id = ? AND data_type = 'image'`).bind(tenantId).all(),
+      env.DB.prepare(`SELECT COUNT(*) as count FROM ai_training_data WHERE tenant_id = ? AND data_type = 'feedback'`).bind(tenantId).all()
+    ]);
+
+    return {
+      total_products: products[0]?.count || 0,
+      total_prompts: prompts[0]?.count || 0,
+      total_images: images[0]?.count || 0,
+      total_feedback: feedback[0]?.count || 0,
+      quality_distribution: { high: 0, medium: 0, low: 0 },
+      source_distribution: { manual: 0, shopify: 0, generated: 0 }
+    };
+  },
+
+  // --- AI Training Sessions Management ---
+  async getAITrainingSessions(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_training_sessions WHERE tenant_id = ? ORDER BY created_at DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAITrainingSession(env: any, tenantId: string, sessionData: any): Promise<any> {
+    const id = sessionData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_training_sessions (id, tenant_id, model_config_id, session_name, status, training_data_count, training_progress, training_metrics, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      sessionData.model_config_id,
+      sessionData.session_name,
+      sessionData.status || 'pending',
+      sessionData.training_data_count || 0,
+      sessionData.training_progress || 0,
+      sessionData.training_metrics ? JSON.stringify(sessionData.training_metrics) : null,
+      now,
+      now
+    ).run();
+    return await this.getAITrainingSession(env, tenantId, id);
+  },
+
+  async getAITrainingSession(env: any, tenantId: string, sessionId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_training_sessions WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, sessionId).all();
+    return results[0] || null;
+  },
+
+  // --- AI Generated Designs Management ---
+  async getAIGeneratedDesigns(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_generated_designs WHERE tenant_id = ? ORDER BY created_at DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async saveAIGeneratedDesign(env: any, tenantId: string, designData: any): Promise<any> {
+    const id = designData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_generated_designs (id, tenant_id, session_id, prompt, generated_image_url, generated_image_data, style_parameters, generation_metadata, quality_rating, feedback, is_favorite, is_approved, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      designData.session_id || null,
+      designData.prompt,
+      designData.generated_image_url || null,
+      designData.generated_image_data || null,
+      designData.style_parameters ? JSON.stringify(designData.style_parameters) : null,
+      designData.generation_metadata ? JSON.stringify(designData.generation_metadata) : null,
+      designData.quality_rating || null,
+      designData.feedback || null,
+      designData.is_favorite !== undefined ? designData.is_favorite : false,
+      designData.is_approved !== undefined ? designData.is_approved : false,
+      now,
+      now
+    ).run();
+    return await this.getAIGeneratedDesign(env, tenantId, id);
+  },
+
+  async getAIGeneratedDesign(env: any, tenantId: string, designId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_generated_designs WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, designId).all();
+    return results[0] || null;
+  },
+
+  // --- AI Style Templates Management ---
+  async getAIStyleTemplates(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_style_templates WHERE tenant_id = ? ORDER BY created_at DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAIStyleTemplate(env: any, tenantId: string, templateData: any): Promise<any> {
+    const id = templateData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_style_templates (id, tenant_id, name, description, style_parameters, example_images, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      templateData.name,
+      templateData.description || null,
+      JSON.stringify(templateData.style_parameters || {}),
+      templateData.example_images ? JSON.stringify(templateData.example_images) : null,
+      templateData.is_active !== undefined ? templateData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getAIStyleTemplate(env, tenantId, id);
+  },
+
+  async getAIStyleTemplate(env: any, tenantId: string, templateId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_style_templates WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, templateId).all();
+    return results[0] || null;
+  },
+
+  // --- AI Usage Analytics Management ---
+  async getAIUsageAnalytics(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_usage_analytics WHERE tenant_id = ? ORDER BY date DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async recordAIGeneration(env: any, tenantId: string, metadata: any): Promise<void> {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const today = new Date().toISOString().split('T')[0];
+    
+    await env.DB.prepare(
+      `INSERT INTO ai_usage_analytics (id, tenant_id, date, model_type, generation_count, total_tokens, total_cost, average_rating, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      today,
+      metadata.model_type || 'unknown',
+      1,
+      metadata.tokens_used || 0,
+      metadata.cost || 0,
+      metadata.rating || 0,
+      now
+    ).run();
+  },
+
+  // --- AI Styles Management ---
+  async getAIStyles(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_styles WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAIStyle(env: any, tenantId: string, styleData: any): Promise<any> {
+    const id = styleData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_styles (id, tenant_id, name, description, color_palette, mood, arrangement_style, flair_elements, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      styleData.name,
+      styleData.description || null,
+      styleData.color_palette ? JSON.stringify(styleData.color_palette) : null,
+      styleData.mood || null,
+      styleData.arrangement_style || null,
+      styleData.flair_elements ? JSON.stringify(styleData.flair_elements) : null,
+      styleData.is_active !== undefined ? styleData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getAIStyle(env, tenantId, id);
+  },
+
+  async getAIStyle(env: any, tenantId: string, styleId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_styles WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, styleId).all();
+    return results[0] || null;
+  },
+
+  async deleteAIStyle(env: any, tenantId: string, styleId: string): Promise<boolean> {
+    const { success } = await env.DB.prepare(
+      `DELETE FROM ai_styles WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, styleId).run();
+    return !!success;
+  },
+
+  // --- AI Arrangement Types Management ---
+  async getAIArrangementTypes(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_arrangement_types WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAIArrangementType(env: any, tenantId: string, typeData: any): Promise<any> {
+    const id = typeData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_arrangement_types (id, tenant_id, name, description, category, typical_size, typical_flowers, price_range, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      typeData.name,
+      typeData.description || null,
+      typeData.category,
+      typeData.typical_size || null,
+      typeData.typical_flowers || null,
+      typeData.price_range || null,
+      typeData.is_active !== undefined ? typeData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getAIArrangementType(env, tenantId, id);
+  },
+
+  async getAIArrangementType(env: any, tenantId: string, typeId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_arrangement_types WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, typeId).all();
+    return results[0] || null;
+  },
+
+  async deleteAIArrangementType(env: any, tenantId: string, typeId: string): Promise<boolean> {
+    const { success } = await env.DB.prepare(
+      `DELETE FROM ai_arrangement_types WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, typeId).run();
+    return !!success;
+  },
+
+  // --- AI Occasions Management ---
+  async getAIOccasions(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_occasions WHERE tenant_id = ? ORDER BY name`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAIOccasion(env: any, tenantId: string, occasionData: any): Promise<any> {
+    const id = occasionData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_occasions (id, tenant_id, name, description, typical_flowers, typical_colors, seasonal_preferences, price_sensitivity, is_active, usage_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      occasionData.name,
+      occasionData.description || null,
+      occasionData.typical_flowers || null,
+      occasionData.typical_colors || null,
+      occasionData.seasonal_preferences || null,
+      occasionData.price_sensitivity || null,
+      occasionData.is_active !== undefined ? occasionData.is_active : true,
+      0,
+      now,
+      now
+    ).run();
+    return await this.getAIOccasion(env, tenantId, id);
+  },
+
+  async getAIOccasion(env: any, tenantId: string, occasionId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_occasions WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, occasionId).all();
+    return results[0] || null;
+  },
+
+  async deleteAIOccasion(env: any, tenantId: string, occasionId: string): Promise<boolean> {
+    const result = await env.DB.prepare(
+      `DELETE FROM ai_occasions WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, occasionId).run();
+    return result.changes > 0;
+  },
+
+  // --- AI Budget Tiers Management ---
+  async getAIBudgetTiers(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_budget_tiers WHERE tenant_id = ? ORDER BY min_price ASC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAIBudgetTier(env: any, tenantId: string, budgetTierData: any): Promise<any> {
+    const id = budgetTierData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_budget_tiers (id, tenant_id, name, min_price, max_price, description, typical_flowers, typical_arrangements, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      budgetTierData.name,
+      budgetTierData.min_price || null,
+      budgetTierData.max_price || null,
+      budgetTierData.description || null,
+      budgetTierData.typical_flowers ? JSON.stringify(budgetTierData.typical_flowers) : null,
+      budgetTierData.typical_arrangements ? JSON.stringify(budgetTierData.typical_arrangements) : null,
+      budgetTierData.is_active !== false ? 1 : 0,
+      now,
+      now
+    ).run();
+    return await this.getAIBudgetTier(env, tenantId, id);
+  },
+
+  async getAIBudgetTier(env: any, tenantId: string, budgetTierId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_budget_tiers WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, budgetTierId).all();
+    return results[0] || null;
+  },
+
+  async deleteAIBudgetTier(env: any, tenantId: string, budgetTierId: string): Promise<boolean> {
+    const result = await env.DB.prepare(
+      `DELETE FROM ai_budget_tiers WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, budgetTierId).run();
+    return result.changes > 0;
+  },
+
+  // --- AI Customer Data Management ---
+  async getAICustomerData(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_customer_data WHERE tenant_id = ? ORDER BY created_at DESC`
+    ).bind(tenantId).all();
+    return results;
+  },
+
+  async createAICustomerData(env: any, tenantId: string, customerDataData: any): Promise<any> {
+    const id = customerDataData.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO ai_customer_data (id, tenant_id, customer_id, recipient_name, birthday, anniversary, special_dates, preferences, allergies, favorite_flowers, favorite_colors, budget_preference, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      tenantId,
+      customerDataData.customer_id,
+      customerDataData.recipient_name || null,
+      customerDataData.birthday || null,
+      customerDataData.anniversary || null,
+      customerDataData.special_dates ? JSON.stringify(customerDataData.special_dates) : null,
+      customerDataData.preferences ? JSON.stringify(customerDataData.preferences) : null,
+      customerDataData.allergies ? JSON.stringify(customerDataData.allergies) : null,
+      customerDataData.favorite_flowers ? JSON.stringify(customerDataData.favorite_flowers) : null,
+      customerDataData.favorite_colors ? JSON.stringify(customerDataData.favorite_colors) : null,
+      customerDataData.budget_preference || null,
+      customerDataData.is_active !== false ? 1 : 0,
+      now,
+      now
+    ).run();
+    return await this.getAICustomerDataItem(env, tenantId, id);
+  },
+
+  async getAICustomerDataItem(env: any, tenantId: string, customerDataId: string): Promise<any | null> {
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM ai_customer_data WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, customerDataId).all();
+    return results[0] || null;
+  },
+
+  async deleteAICustomerData(env: any, tenantId: string, customerDataId: string): Promise<boolean> {
+    const result = await env.DB.prepare(
+      `DELETE FROM ai_customer_data WHERE tenant_id = ? AND id = ?`
+    ).bind(tenantId, customerDataId).run();
+    return result.changes > 0;
+  },
+
+  // --- Shopify Analytics Methods ---
+  async getShopifyAnalytics(env: any, tenantId: string, filters: { dateRange: string, compareWith: string, productType?: string, storeId?: string }): Promise<any> {
+    try {
+        // Calculate date ranges
+        const { startDate, endDate, compareStartDate, compareEndDate } = this.calculateDateRanges(filters.dateRange, filters.compareWith);
+        
+        let mainWhere = `tenant_id = ? AND created_at >= ? AND created_at <= ?`;
+        const mainParams: (string|number)[] = [tenantId, startDate, endDate];
+        
+        if (filters.productType) {
+            mainWhere += ` AND product_type = ?`;
+            mainParams.push(filters.productType);
+        }
+        
+        if (filters.storeId) {
+            mainWhere += ` AND store_id = ?`;
+            mainParams.push(filters.storeId);
+        }
+
+        const mainQuery = `
+            SELECT
+                COUNT(id) AS total_orders,
+                SUM(total_price) AS total_revenue,
+                AVG(total_price) AS average_order_value,
+                COUNT(DISTINCT customer_email) AS unique_customers
+            FROM tenant_orders
+            WHERE ${mainWhere}
+        `;
+        
+        const mainData: any = await env.DB.prepare(mainQuery).bind(...mainParams).first();
+
+        // Get top products by sales
+        const topProductsQuery = `
+            SELECT 
+                product_titles as product_title,
+                SUM(total_price) as total_sales,
+                COUNT(*) as order_count
+            FROM tenant_orders
+            WHERE ${mainWhere}
+            GROUP BY product_titles
+            ORDER BY total_sales DESC
+            LIMIT 10
+        `;
+        
+        const { results: topProducts } = await env.DB.prepare(topProductsQuery).bind(...mainParams).all();
+
+        // Get top occasions (extracted from product_titles or notes)
+        const topOccasionsQuery = `
+            SELECT 
+                CASE 
+                    WHEN notes LIKE '%wedding%' OR product_titles LIKE '%wedding%' THEN 'Wedding'
+                    WHEN notes LIKE '%birthday%' OR product_titles LIKE '%birthday%' THEN 'Birthday'
+                    WHEN notes LIKE '%anniversary%' OR product_titles LIKE '%anniversary%' THEN 'Anniversary'
+                    WHEN notes LIKE '%sympathy%' OR product_titles LIKE '%sympathy%' THEN 'Sympathy'
+                    WHEN notes LIKE '%congratulations%' OR product_titles LIKE '%congratulations%' THEN 'Congratulations'
+                    WHEN notes LIKE '%thank%' OR product_titles LIKE '%thank%' THEN 'Thank You'
+                    ELSE 'Other'
+                END as occasion,
+                COUNT(*) as order_count,
+                SUM(total_price) as total_sales
+            FROM tenant_orders
+            WHERE ${mainWhere}
+            GROUP BY occasion
+            ORDER BY total_sales DESC
+            LIMIT 10
+        `;
+        
+        const { results: topOccasions } = await env.DB.prepare(topOccasionsQuery).bind(...mainParams).all();
+
+        // Get customer segments based on spending
+        const customerSegmentsQuery = `
+            SELECT 
+                CASE 
+                    WHEN total_price >= 200 THEN 'High Value'
+                    WHEN total_price >= 100 THEN 'Medium Value'
+                    ELSE 'Budget'
+                END as segment,
+                COUNT(DISTINCT customer_email) as customer_count,
+                AVG(total_price) as avg_spent
+            FROM tenant_orders
+            WHERE ${mainWhere}
+            GROUP BY segment
+            ORDER BY avg_spent DESC
+        `;
+        
+        const { results: customerSegments } = await env.DB.prepare(customerSegmentsQuery).bind(...mainParams).all();
+
+        // Calculate additional metrics
+        const returningCustomerRate = mainData.unique_customers > 0 ? 
+            ((mainData.total_orders - mainData.unique_customers) / mainData.total_orders * 100) : 0;
+        
+        const conversionRate = mainData.total_orders > 0 ? 
+            (mainData.total_orders / (mainData.total_orders * 1.5) * 100) : 0; // Simplified calculation
+
+        // Comparison data (if requested)
+        let comparisonData = null;
+        if (filters.compareWith !== 'none' && compareStartDate && compareEndDate) {
+            let compareWhere = `tenant_id = ? AND created_at >= ? AND created_at <= ?`;
+            const compareParams: (string|number)[] = [tenantId, compareStartDate, compareEndDate];
+
+            if (filters.productType) {
+                compareWhere += ` AND product_type = ?`;
+                compareParams.push(filters.productType);
+            }
+            if (filters.storeId) {
+                compareWhere += ` AND store_id = ?`;
+                compareParams.push(filters.storeId);
+            }
+
+            const compareQuery = `
+                SELECT
+                    COUNT(id) AS total_orders,
+                    SUM(total_price) AS total_revenue,
+                    AVG(total_price) AS average_order_value
+                FROM tenant_orders
+                WHERE ${compareWhere}
+            `;
+            
+            comparisonData = await env.DB.prepare(compareQuery).bind(...compareParams).first();
+        }
+
+        return {
+            dateRange: { start: startDate, end: endDate },
+            compareDateRange: { start: compareStartDate, end: compareEndDate },
+            metrics: {
+                total_orders: mainData.total_orders || 0,
+                total_revenue: mainData.total_revenue || 0,
+                average_order_value: mainData.average_order_value || 0,
+                unique_customers: mainData.unique_customers || 0,
+                returning_customer_rate: returningCustomerRate,
+                conversion_rate: conversionRate
+            },
+            top_products_by_sales: topProducts || [],
+            top_occasions: topOccasions || [],
+            customer_segments: customerSegments || [],
+            comparison: comparisonData,
+        };
+    } catch (e: any) {
+        console.error("Error in getShopifyAnalytics:", e.message);
+        throw new Error(`D1 Analytics Error: ${e.message}`);
+    }
+  },
+
+  calculateDateRanges(dateRange: string, compareWith: string): {
+    startDate: string;
+    endDate: string;
+    compareStartDate: string;
+    compareEndDate: string;
+  } {
+    const now = new Date();
+    const endDate = now.toISOString().split('T')[0];
+    
+    let startDate: string;
+    let compareStartDate: string;
+    let compareEndDate: string;
+    
+    switch (dateRange) {
+      case '7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      case '30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      case '90d':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      case '1y':
+        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      default:
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
+    
+    const periodDays = Math.floor((new Date(endDate).getTime() - new Date(startDate).getTime()) / (24 * 60 * 60 * 1000));
+    
+    switch (compareWith) {
+      case 'previous':
+        compareEndDate = startDate;
+        compareStartDate = new Date(new Date(startDate).getTime() - periodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      case 'same_period_last_year':
+        compareEndDate = new Date(new Date(endDate).getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        compareStartDate = new Date(new Date(startDate).getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        break;
+      default:
+        compareStartDate = startDate;
+        compareEndDate = endDate;
+    }
+    
+    return { startDate, endDate, compareStartDate, compareEndDate };
+  },
+
+  async createTrainingSessionFromAnalytics(env: any, tenantId: string, sessionData: {
+    selectedProducts: string[];
+    selectedOccasions: string[];
+    selectedStyles: string[];
+    sessionName: string;
+    priority: 'high' | 'medium' | 'low';
+    model_config_id?: string;
+  }): Promise<any> {
+    try {
+      const sessionId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      
+      // Create training session
+      await env.DB.prepare(
+        `INSERT INTO ai_training_sessions (id, tenant_id, model_config_id, session_name, status, training_data_count, training_progress, training_metrics, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        sessionId,
+        tenantId,
+        sessionData.model_config_id || 'default-dalle3',
+        sessionData.sessionName,
+        'pending',
+        0,
+        0,
+        JSON.stringify({
+          source: 'shopify_analytics',
+          selectedProducts: sessionData.selectedProducts,
+          selectedOccasions: sessionData.selectedOccasions,
+          selectedStyles: sessionData.selectedStyles,
+          priority: sessionData.priority
+        }),
+        now,
+        now
+      ).run();
+      
+      // Extract training data from selected products
+      if (sessionData.selectedProducts.length > 0) {
+        const placeholders = sessionData.selectedProducts.map(() => '?').join(',');
+        const { results: products } = await env.DB.prepare(
+          `SELECT * FROM saved_products WHERE tenant_id = ? AND id IN (${placeholders})`
+        ).bind(tenantId, ...sessionData.selectedProducts).all();
+        
+        // Create training data entries
+        for (const product of products) {
+          const trainingDataId = crypto.randomUUID();
+          await env.DB.prepare(
+            `INSERT INTO ai_training_data (id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score, is_active, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            trainingDataId,
+            tenantId,
+            'prompt',
+            `Create a beautiful ${product.product_type || 'bouquet'} with ${product.title}`,
+            JSON.stringify({
+              product_id: product.id,
+              product_type: product.product_type,
+              vendor: product.vendor,
+              session_id: sessionId,
+              priority: sessionData.priority
+            }),
+            'shopify_analytics',
+            product.id,
+            0.9, // High quality score for analytics-selected data
+            1,
+            now,
+            now
+          ).run();
+        }
+        
+        // Update session with training data count
+        await env.DB.prepare(
+          `UPDATE ai_training_sessions SET training_data_count = ? WHERE id = ?`
+        ).bind(products.length, sessionId).run();
+      }
+      
+      return await this.getAITrainingSession(env, tenantId, sessionId);
+    } catch (error) {
+      console.error('Error creating training session from analytics:', error);
+      throw new Error(`Failed to create training session: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  },
+
+  // --- Camera Widget Templates ---
+  async getCameraWidgetTemplates(env: any, tenantId: string): Promise<any[]> {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM camera_widget_templates WHERE tenant_id = ?"
+    ).bind(tenantId).all();
+    return results.map((r: any) => ({ ...r, fields: JSON.parse(r.fields || '{}')}));
+  },
+
+  async createCameraWidgetTemplate(env: any, tenantId: string, template: any): Promise<any> {
+    const id = crypto.randomUUID();
+    const { name, description, fields } = template;
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO camera_widget_templates (id, tenant_id, name, description, fields, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(id, tenantId, name, description, JSON.stringify(fields), now, now).run();
+    return { id, tenant_id: tenantId, ...template };
+  },
+
+  async updateCameraWidgetTemplate(env: any, tenantId: string, templateId: string, template: any): Promise<any> {
+    const { name, description, fields } = template;
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "UPDATE camera_widget_templates SET name = ?, description = ?, fields = ?, updated_at = ? WHERE id = ? AND tenant_id = ?"
+    ).bind(name, description, JSON.stringify(fields), now, templateId, tenantId).run();
+    return { id: templateId, ...template };
+  },
+
+  async deleteCameraWidgetTemplate(env: any, tenantId: string, templateId: string): Promise<{ success: boolean }> {
+    const { success } = await env.DB.prepare(
+      "DELETE FROM camera_widget_templates WHERE id = ? AND tenant_id = ?"
+    ).bind(templateId, tenantId).run();
+    return { success };
+  },
+};
+
+// ===== PHOTO UPLOAD DATABASE METHODS =====
+
+export async function getFloristPhotos(
+  env: any,
+  tenantId: string,
+  filters?: {
+    photo_id?: string;
+    status?: string;
+    date_range?: { start: string; end: string };
+    user_id?: string;
+  }
+): Promise<any[]> {
+  let query = `
+    SELECT fpu.*, pd.title, pd.description, pd.style, pd.occasion, pd.arrangement_type
+    FROM florist_photo_uploads fpu
+    LEFT JOIN photo_descriptions pd ON fpu.id = pd.photo_id
+    WHERE fpu.tenant_id = ?
+  `
+  const params = [tenantId]
+  
+  if (filters?.photo_id) {
+    query += " AND fpu.id = ?"
+    params.push(filters.photo_id)
+  }
+  
+  if (filters?.status) {
+    query += " AND fpu.upload_status = ?"
+    params.push(filters.status)
+  }
+  
+  if (filters?.user_id) {
+    query += " AND fpu.user_id = ?"
+    params.push(filters.user_id)
+  }
+  
+  if (filters?.date_range) {
+    query += " AND fpu.created_at BETWEEN ? AND ?"
+    params.push(filters.date_range.start, filters.date_range.end)
+  }
+  
+  query += " ORDER BY fpu.created_at DESC"
+  
+  const { results } = await env.DB.prepare(query).bind(...params).all()
+  return results
+}
+
+export async function getFloristPhoto(
+  env: any,
+  tenantId: string,
+  photoId: string
+): Promise<any | null> {
+  const { results } = await env.DB.prepare(`
+    SELECT fpu.*, pd.*, pqa.*
+    FROM florist_photo_uploads fpu
+    LEFT JOIN photo_descriptions pd ON fpu.id = pd.photo_id
+    LEFT JOIN photo_quality_assessment pqa ON fpu.id = pqa.photo_id
+    WHERE fpu.id = ? AND fpu.tenant_id = ?
+  `).bind(photoId, tenantId).all()
+  
+  return results[0] || null
+}
+
+export async function createFloristPhoto(
+  env: any,
+  tenantId: string,
+  userId: string,
+  photoData: {
+    original_filename: string;
+    original_file_size: number;
+    compressed_file_size: number;
+    image_url: string;
+    thumbnail_url?: string;
+    image_metadata?: Record<string, any>;
+  }
+): Promise<any> {
+  const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  const { results } = await env.DB.prepare(`
+    INSERT INTO florist_photo_uploads (
+      id, tenant_id, user_id, original_filename, original_file_size,
+      compressed_file_size, image_url, thumbnail_url, image_metadata, upload_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `).bind(
+    photoId,
+    tenantId,
+    userId,
+    photoData.original_filename,
+    photoData.original_file_size,
+    photoData.compressed_file_size,
+    photoData.image_url,
+    photoData.thumbnail_url || null,
+    JSON.stringify(photoData.image_metadata || {}),
+    'uploaded'
+  ).all()
+  
+  return results[0]
+}
+
+export async function updatePhotoDescription(
+  env: any,
+  tenantId: string,
+  photoId: string,
+  userId: string,
+  descriptionData: {
+    title: string;
+    description: string;
+    flowers_used?: string[];
+    colors?: string[];
+    style?: string;
+    occasion?: string;
+    arrangement_type?: string;
+    difficulty_level?: string;
+    special_techniques?: string[];
+    materials_used?: string[];
+    customer_preferences?: string;
+    price_range?: string;
+    season?: string;
+    tags?: string[];
+    is_public?: boolean;
+  }
+): Promise<any> {
+  // Check if description already exists
+  const existing = await env.DB.prepare(`
+    SELECT id FROM photo_descriptions WHERE photo_id = ?
+  `).bind(photoId).first()
+  
+  if (existing) {
+    // Update existing description
+    const { results } = await env.DB.prepare(`
+      UPDATE photo_descriptions SET
+        title = ?, description = ?, flowers_used = ?, colors = ?, style = ?,
+        occasion = ?, arrangement_type = ?, difficulty_level = ?, special_techniques = ?,
+        materials_used = ?, customer_preferences = ?, price_range = ?, season = ?,
+        tags = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE photo_id = ?
+      RETURNING *
+    `).bind(
+      descriptionData.title,
+      descriptionData.description,
+      JSON.stringify(descriptionData.flowers_used || []),
+      JSON.stringify(descriptionData.colors || []),
+      descriptionData.style,
+      descriptionData.occasion,
+      descriptionData.arrangement_type,
+      descriptionData.difficulty_level,
+      JSON.stringify(descriptionData.special_techniques || []),
+      JSON.stringify(descriptionData.materials_used || []),
+      descriptionData.customer_preferences,
+      descriptionData.price_range,
+      descriptionData.season,
+      JSON.stringify(descriptionData.tags || []),
+      descriptionData.is_public ? 1 : 0,
+      photoId
+    ).all()
+    
+    return results[0]
+  } else {
+    // Create new description
+    const descId = `desc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    const { results } = await env.DB.prepare(`
+      INSERT INTO photo_descriptions (
+        id, photo_id, tenant_id, user_id, title, description, flowers_used,
+        colors, style, occasion, arrangement_type, difficulty_level,
+        special_techniques, materials_used, customer_preferences, price_range,
+        season, tags, is_public
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    `).bind(
+      descId,
+      photoId,
+      tenantId,
+      userId,
+      descriptionData.title,
+      descriptionData.description,
+      JSON.stringify(descriptionData.flowers_used || []),
+      JSON.stringify(descriptionData.colors || []),
+      descriptionData.style,
+      descriptionData.occasion,
+      descriptionData.arrangement_type,
+      descriptionData.difficulty_level,
+      JSON.stringify(descriptionData.special_techniques || []),
+      JSON.stringify(descriptionData.materials_used || []),
+      descriptionData.customer_preferences,
+      descriptionData.price_range,
+      descriptionData.season,
+      JSON.stringify(descriptionData.tags || []),
+      descriptionData.is_public ? 1 : 0
+    ).all()
+    
+    return results[0]
+  }
+}
+
+export async function assessPhotoQuality(
+  env: any,
+  tenantId: string,
+  photoId: string,
+  userId: string,
+  assessmentData: {
+    technical_quality: number;
+    composition_quality: number;
+    design_quality: number;
+    training_value: number;
+    quality_notes?: string;
+    improvement_suggestions?: string;
+    is_approved_for_training: boolean;
+  }
+): Promise<any> {
+  const overallScore = (
+    assessmentData.technical_quality +
+    assessmentData.composition_quality +
+    assessmentData.design_quality +
+    assessmentData.training_value
+  ) / 4
+  
+  const qaId = `qa_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  const { results } = await env.DB.prepare(`
+    INSERT OR REPLACE INTO photo_quality_assessment (
+      id, photo_id, tenant_id, assessed_by, technical_quality, composition_quality,
+      design_quality, training_value, overall_score, quality_notes,
+      improvement_suggestions, is_approved_for_training, assessment_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    RETURNING *
+  `).bind(
+    qaId,
+    photoId,
+    tenantId,
+    userId,
+    assessmentData.technical_quality,
+    assessmentData.composition_quality,
+    assessmentData.design_quality,
+    assessmentData.training_value,
+    overallScore,
+    assessmentData.quality_notes,
+    assessmentData.improvement_suggestions,
+    assessmentData.is_approved_for_training ? 1 : 0
+  ).all()
+  
+  // Update photo status based on approval
+  const newStatus = assessmentData.is_approved_for_training ? 'approved' : 'rejected'
+  await env.DB.prepare(`
+    UPDATE florist_photo_uploads SET upload_status = ? WHERE id = ?
+  `).bind(newStatus, photoId).run()
+  
+  return results[0]
+}
+
+export async function createTrainingDataFromPhoto(
+  env: any,
+  tenantId: string,
+  photoId: string,
+  extractionData: {
+    prompt: string;
+    style_parameters: Record<string, any>;
+    quality_score?: number;
+    confidence_score?: number;
+  }
+): Promise<any> {
+  // Get photo data
+  const photo = await getFloristPhoto(env, tenantId, photoId)
+  if (!photo) {
+    throw new Error("Photo not found")
+  }
+  
+  if (!photo.is_approved_for_training) {
+    throw new Error("Photo must be approved for training before creating training data")
+  }
+  
+  // Create training data record
+  const trainingDataId = `td_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  const { results: trainingResults } = await env.DB.prepare(`
+    INSERT INTO ai_training_data (
+      id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `).bind(
+    trainingDataId,
+    tenantId,
+    'image',
+    JSON.stringify({
+      prompt: extractionData.prompt,
+      style_parameters: extractionData.style_parameters,
+      image_url: photo.image_url
+    }),
+    JSON.stringify({
+      photo_id: photoId,
+      original_filename: photo.original_filename,
+      upload_date: photo.created_at
+    }),
+    'photo_upload',
+    photoId,
+    extractionData.quality_score || 1.0
+  ).all()
+  
+  // Create mapping between photo and training data
+  const mappingId = `mapping_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  
+  await env.DB.prepare(`
+    INSERT INTO photo_training_mapping (
+      id, photo_id, training_data_id, mapping_type, confidence_score
+    ) VALUES (?, ?, ?, ?, ?)
+  `).bind(
+    mappingId,
+    photoId,
+    trainingDataId,
+    'example',
+    extractionData.confidence_score || 1.0
+  ).run()
+  
+  return trainingResults[0]
+}
+
+export async function getDailyUploadGoal(
+  env: any,
+  tenantId: string,
+  userId: string,
+  date: string
+): Promise<any | null> {
+  const goal = await env.DB.prepare(`
+    SELECT * FROM daily_upload_goals 
+    WHERE tenant_id = ? AND user_id = ? AND date = ?
+  `).bind(tenantId, userId, date).first()
+  
+  if (!goal) {
+    // Create default goal if none exists
+    const defaultGoal = {
+      id: `goal_${tenantId}_${userId}_${date}`,
+      tenant_id: tenantId,
+      user_id: userId,
+      date: date,
+      target_count: 1,
+      actual_count: 0,
+      goal_status: 'pending',
+      streak_count: 0
+    }
+    
+    await env.DB.prepare(`
+      INSERT INTO daily_upload_goals (
+        id, tenant_id, user_id, date, target_count, actual_count, goal_status, streak_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      defaultGoal.id,
+      defaultGoal.tenant_id,
+      defaultGoal.user_id,
+      defaultGoal.date,
+      defaultGoal.target_count,
+      defaultGoal.actual_count,
+      defaultGoal.goal_status,
+      defaultGoal.streak_count
+    ).run()
+    
+    return defaultGoal
+  }
+  
+  return goal
+}
+
+export async function updateDailyUploadGoal(
+  env: any,
+  tenantId: string,
+  userId: string,
+  date: string,
+  actualCount: number
+): Promise<any> {
+  const { results } = await env.DB.prepare(`
+    INSERT OR REPLACE INTO daily_upload_goals (
+      id, tenant_id, user_id, date, actual_count, goal_status, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 
+      CASE 
+        WHEN ? >= COALESCE((SELECT target_count FROM daily_upload_goals WHERE tenant_id = ? AND user_id = ? AND date = ?), 1)
+        THEN 'completed'
+        ELSE 'in_progress'
+      END,
+      CURRENT_TIMESTAMP
+    )
+    RETURNING *
+  `).bind(
+    `goal_${tenantId}_${userId}_${date}`,
+    tenantId,
+    userId,
+    date,
+    actualCount,
+    actualCount,
+    tenantId, userId, date
+  ).all()
+  
+  return results[0]
+}
+
+export async function getUploadStatistics(
+  env: any,
+  tenantId: string,
+  userId: string,
+  dateRange?: { start: string; end: string }
+): Promise<any[]> {
+  let query = `
+    SELECT * FROM upload_statistics 
+    WHERE tenant_id = ? AND user_id = ?
+  `
+  const params = [tenantId, userId]
+  
+  if (dateRange) {
+    query += " AND date BETWEEN ? AND ?"
+    params.push(dateRange.start, dateRange.end)
+  }
+  
+  query += " ORDER BY date DESC"
+  
+  const { results } = await env.DB.prepare(query).bind(...params).all()
+  return results
 }

@@ -137,7 +137,7 @@ const applyTransformation = (value: any, field: OrderCardField): any => {
       const regex = new RegExp(field.transformationRule)
       const match = value.match(regex)
       if (match && match[0]) {
-        let extractedValue = match[0]
+        const extractedValue = match[0]
 
         if (field.type === "date") {
           const parts = extractedValue.split("/")

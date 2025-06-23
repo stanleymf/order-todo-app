@@ -18,7 +18,13 @@ import {
   DialogFooter,
 } from "./ui/dialog"
 import { Textarea } from "./ui/textarea"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "./ui/collapsible"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table"
+import { Alert, AlertDescription } from "./ui/alert"
 import {
   Settings as SettingsIcon,
   Users,
@@ -76,6 +82,13 @@ import {
   List,
   Combine,
   AlertTriangle,
+  Sparkles,
+  TrendingUp,
+  Zap,
+  Copy,
+  Camera,
+  ChevronDown,
+  Image,
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { useMobileView } from "./Dashboard"
@@ -112,6 +125,8 @@ import { cn } from "../lib/utils"
 import { ScrollArea } from "./ui/scroll-area"
 import { useParams, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import AITrainingManager from "./AITrainingManager"
+import PhotoUploadManager from "./PhotoUploadManager"
 
 const userRoles = ["admin", "florist", "owner", "viewer"] as const
 type UserRole = (typeof userRoles)[number]
@@ -433,54 +448,61 @@ interface WebhookConfig {
 export const Settings: React.FC = () => {
   const { tenant, user } = useAuth()
   const isMobile = useMobileView()
-  const { tab = "general" } = useParams<{ tab: string }>()
+  const { tenantId, tab = "general" } = useParams<{
+    tenantId: string
+    tab: string
+  }>()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState(tab)
   const [users, setUsers] = useState<User[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [productLabels, setProductLabels] = useState<ProductLabel[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
+  const [isLoading, setLoading] = useState(true)
+  const [showAddUserDialog, setShowAddUserDialog] = useState(false)
+  const [showAddStoreDialog, setShowAddStoreDialog] = useState(false)
   const [newUser, setNewUser] = useState<NewUser>({
     name: "",
     email: "",
     role: "florist",
-    password: "",
   })
-  const [showAddUserDialog, setShowAddUserDialog] = useState(false)
-
   const [newStore, setNewStore] = useState<NewStore>({
     name: "",
     type: "shopify",
-    settings: { domain: "", accessToken: "", apiSecretKey: "" },
+    settings: {
+      domain: "",
+      accessToken: "",
+      apiSecretKey: "",
+    },
   })
-  const [showAddStoreDialog, setShowAddStoreDialog] = useState(false)
 
+  // Order Card state
   const [orderCardConfig, setOrderCardConfig] = useState<{
     fields: OrderCardField[]
-    settings: {
-      showTimeAndPriority: boolean
-    }
-  }>(() => ({ fields: getAllFields(), settings: { showTimeAndPriority: true } }))
-  const [isSaving, setIsSaving] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  const [popoverOpen, setPopoverOpen] = useState<Record<string, boolean>>({})
-  const [searchTerm, setSearchTerm] = useState("")
-
-  const shopifyFieldOptions = useMemo(() => getShopifyFieldOptions(), [])
-
+    settings: { showTimeAndPriority: boolean }
+  }>(() => ({
+    fields: getAllFields(),
+    settings: { showTimeAndPriority: true },
+  }))
+  const [orderCardFields, setOrderCardFields] = useState<OrderCardField[]>([])
+  const [showAddFieldDialog, setShowAddFieldDialog] = useState(false)
   const [newCustomField, setNewCustomField] = useState({
     name: "",
     type: "text" as OrderCardFieldType,
   })
-
-  const [previewOrderData, setPreviewOrderData] = useState<any>(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [shopifyOrder, setShopifyOrder] = useState<any>(null)
+  const [isFetchingOrder, setIsFetchingOrder] = useState(false)
+  const [testOrderName, setTestOrderName] = useState("")
   const [selectedStoreId, setSelectedStoreId] = useState<string>("")
-  const [orderNameToFetch, setOrderNameToFetch] = useState<string>("")
+  const [isSaving, setIsSaving] = useState(false)
   const [isFetching, setIsFetching] = useState(false)
+  const [previewOrderData, setPreviewOrderData] = useState<any>(null)
+  const [orderNameToFetch, setOrderNameToFetch] = useState<string>("")
+  const [popoverOpen, setPopoverOpen] = useState<Record<string, boolean>>({})
+  const [searchTerm, setSearchTerm] = useState("")
+
+  const shopifyFieldOptions = useMemo(() => getShopifyFieldOptions(), [])
 
   useEffect(() => {
     fetchData()
@@ -499,21 +521,22 @@ export const Settings: React.FC = () => {
 
   const fetchData = async () => {
     if (!tenant?.id) return
-    setIsLoading(true)
+    setLoading(true)
     try {
-      const [usersData, storesData, labelsData] = await Promise.all([
+      const [usersData, storesData, labelsData, settingsData] = await Promise.all([
         getUsers(tenant.id),
         getStores(tenant.id),
         getProductLabels(tenant.id),
+        getTenantSettings(tenant.id)
       ])
       setUsers(usersData)
       setStores(storesData)
       setProductLabels(labelsData)
     } catch (err) {
+      console.error("Error fetching settings data:", err)
       setError("Failed to fetch settings data.")
-      console.error(err)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
@@ -729,8 +752,6 @@ export const Settings: React.FC = () => {
     setNewCustomField({ name: "", type: "text" })
   }
 
-  const [showAddFieldDialog, setShowAddFieldDialog] = useState(false)
-
   const handleFetchOrder = async () => {
     if (!tenant?.id || !selectedStoreId || !orderNameToFetch) {
       alert("Please select a store and enter an order name.")
@@ -750,6 +771,7 @@ export const Settings: React.FC = () => {
   }
 
   const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab)
     navigate(`/settings/${newTab}`)
   }
 
@@ -780,6 +802,10 @@ export const Settings: React.FC = () => {
             <TabsTrigger value="billing" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
               <CreditCard className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
               {isMobile ? "Billing" : "Billing"}
+            </TabsTrigger>
+            <TabsTrigger value="ai" className={isMobile ? "text-xs px-3 py-2 min-h-[40px]" : ""}>
+              <Sparkles className={`mr-2 ${isMobile ? "h-3 w-3" : "h-4 w-4"}`} />
+              {isMobile ? "AI Integration" : "AI Integration"}
             </TabsTrigger>
           </TabsList>
         </ScrollArea>
@@ -1319,6 +1345,47 @@ export const Settings: React.FC = () => {
               <p className={isMobile ? "text-sm" : ""}>Billing management is coming soon.</p>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="ai">
+          <div className="space-y-6">
+            {/* Removed OpenAI API Key management section as it is now in the AI Integration tab */}
+            <Card>
+              <CardHeader>
+                <CardTitle>AI Training</CardTitle>
+                <CardDescription>
+                  Manage AI model training, styles, and prompts.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {tenant?.id ? (
+                  <AITrainingManager tenantId={tenant.id} />
+                ) : (
+                  <p>Tenant ID not found. Cannot load AI Training Manager.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Photo Manager */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Image className="h-5 w-5" />
+                  Photo Manager
+                </CardTitle>
+                <CardDescription>
+                  Upload, manage, and organize florist photos for AI training and portfolio.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {tenant?.id ? (
+                  <PhotoUploadManager tenantId={tenant.id} />
+                ) : (
+                  <p>Tenant ID not found. Cannot load Photo Manager.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 

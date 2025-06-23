@@ -6,6 +6,66 @@ Welcome! This documentation hub is designed to get you up to speed quickly on th
 
 ---
 
+## 🛠️ **Development Guidelines**
+
+### **File Organization & Component Structure**
+
+#### **Component Extraction Rules**
+- **Large Components (>500 lines)**: Must be broken down into smaller, focused components
+- **Multiple Responsibilities**: If a component handles more than 2-3 distinct features, extract them
+- **Reusable Logic**: Extract shared functionality into custom hooks or utility functions
+- **Navigation Integration**: New major features should get their own navigation tab when appropriate
+
+#### **Component Naming & Organization**
+- **Feature Components**: Use descriptive names (e.g., `AIIntegration`, `OrderManagement`)
+- **Shared Components**: Place in `src/components/shared/` directory
+- **UI Components**: Use shadcn/ui components from `src/components/ui/`
+- **Page Components**: Place in `src/components/` with clear, descriptive names
+
+#### **File Structure Standards**
+```
+src/
+├── components/
+│   ├── ui/                    # shadcn/ui components
+│   ├── shared/                # Reusable components
+│   ├── FeatureName.tsx        # Main feature components
+│   └── FeatureName/           # Feature-specific sub-components
+│       ├── SubComponent1.tsx
+│       └── SubComponent2.tsx
+├── services/                  # API and external service integrations
+├── contexts/                  # React contexts
+├── types/                     # TypeScript type definitions
+└── lib/                       # Utility functions
+```
+
+#### **Preventing File Overwrites**
+- **Always Review**: Before making changes, review the existing file structure
+- **Incremental Changes**: Make small, focused changes rather than large rewrites
+- **Backup Strategy**: Use Git branches for major refactoring work
+- **Component Isolation**: Extract new features into separate components before integrating
+- **Testing**: Test components in isolation before integration
+
+#### **Code Quality Standards**
+- **TypeScript**: Use strict typing for all new code
+- **Error Handling**: Implement proper error boundaries and error states
+- **Loading States**: Always include loading indicators for async operations
+- **Accessibility**: Follow ARIA guidelines and keyboard navigation
+- **Mobile Responsiveness**: Test on mobile devices and implement responsive design
+
+#### **State Management**
+- **Local State**: Use React hooks for component-specific state
+- **Global State**: Use React Context for app-wide state
+- **API State**: Implement proper loading, error, and success states
+- **Persistence**: Use localStorage sparingly, prefer server-side storage
+
+#### **Performance Guidelines**
+- **Code Splitting**: Use dynamic imports for large components
+- **Memoization**: Use React.memo and useMemo for expensive operations
+- **Bundle Size**: Monitor bundle size and split large dependencies
+- **Lazy Loading**: Implement lazy loading for routes and heavy components
+
+---
+
 ## 📖 **Recommended Reading Order**
 
 ### **1. Project Overview** (5 minutes)
@@ -79,9 +139,9 @@ docs/
 ## 🚀 **Current Project Status**
 
 ### **Phase 1: Core Order Management & UI Foundation** ⭐ *Active*
-- **Status**: Beta testing phase
-- **Progress**: 85% complete
-- **Next Milestone**: Multi-tenant implementation
+- **Status**: Beta testing phase with recent improvements
+- **Progress**: 90% complete
+- **Next Milestone**: Production readiness and user testing
 
 ### **Key Achievements**
 - ✅ Multi-store Shopify integration
@@ -89,12 +149,24 @@ docs/
 - ✅ Mobile-responsive UI with shadcn/ui components
 - ✅ Real-time search and filtering
 - ✅ Analytics dashboard with performance metrics
+- ✅ AI Integration system with dedicated navigation
+- ✅ Mobile camera widget for photo uploads
+- ✅ Customer-facing AI Florist interface
+- ✅ Component architecture improvements
+
+### **Recent Improvements**
+- 🔄 **AI Integration Extraction**: Moved AI functionality to dedicated navigation tab
+- 🔄 **Settings Component Cleanup**: Reduced Settings component complexity
+- 🔄 **Mobile Camera Widget**: Enhanced with Quick Templates configuration
+- 🔄 **Photo Upload System**: Complete backend and frontend implementation
+- 🔄 **Customer AI Florist**: Public-facing AI bouquet generation interface
 
 ### **Current Focus**
 - 🔄 Multi-tenant architecture implementation
 - 🔄 Database migration from LocalStorage
 - 🔄 Enhanced authentication system
 - 🔄 Protected routes and security
+- 🔄 Component architecture optimization
 
 ---
 

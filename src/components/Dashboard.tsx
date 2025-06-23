@@ -2,7 +2,16 @@ import { useState, createContext, useContext, useEffect } from "react"
 import { useLocation, useNavigate, Outlet } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { LogOut, Calendar, BarChart3, Package, Smartphone, Monitor, Settings } from "lucide-react"
+import {
+  LogOut,
+  Calendar,
+  BarChart3,
+  Package,
+  Smartphone,
+  Monitor,
+  Settings,
+  Sparkles,
+} from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { useIsMobile } from "./hooks/use-mobile"
 
@@ -132,7 +141,7 @@ export function Dashboard() {
             className={`${isMobileView ? "space-y-4" : "space-y-6"}`}
           >
             <TabsList
-              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-4"}`}
+              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-5"}`}
             >
               <TabsTrigger
                 value="orders"
@@ -155,6 +164,17 @@ export function Dashboard() {
                 >
                   <Package className="h-4 w-4" />
                   Products
+                </TabsTrigger>
+              )}
+              {user.role === "admin" && (
+                <TabsTrigger
+                  value="ai-integration"
+                  className={`flex items-center gap-2 ${
+                    isMobile ? "flex-1 justify-center" : ""
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  AI
                 </TabsTrigger>
               )}
               {user.role === "admin" && (

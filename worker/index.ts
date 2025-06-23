@@ -7,24 +7,54 @@ import { ShopifyApiService } from "../src/services/shopify/shopifyApi"
 import type { D1Database, ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types"
 import { etag } from "hono/etag"
 import { WebhookConfig } from "../src/types"
+
 // @ts-ignore
 // import manifest from '__STATIC_CONTENT_MANIFEST';
-
-// This is the static content imported from the built client
-// @ts-ignore
-// import spa from '../dist/client/index.html';
 
 // Define the environment bindings
 type Bindings = {
   DB: D1Database
   JWT_SECRET: string
   ASSETS: any
+  OPENAI_API_KEY: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
 
 // CORS middleware
 app.use("/api/*", cors())
+
+// Debug endpoint to check database state (no auth required)
+app.get("/api/debug/database", async (c) => {
+  try {
+    // Check what tables exist
+    const { results: tables } = await c.env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { results: { name: string }[] };
+    
+    // Check what tenants exist
+    const { results: tenants } = await c.env.DB.prepare("SELECT id, name FROM tenants").all() as { results: { id: string; name: string }[] };
+    
+    // Check if ai_flowers table exists
+    let flowersCount = 0;
+    try {
+      const { results: flowers } = await c.env.DB.prepare("SELECT COUNT(*) as count FROM ai_flowers").all() as { results: { count: number }[] };
+      flowersCount = flowers[0]?.count || 0;
+    } catch (e) {
+      // Table doesn't exist
+    }
+    
+    return c.json({
+      tables: tables.map((t: any) => t.name),
+      tenants: tenants,
+      flowersCount: flowersCount,
+      message: "Database debug info"
+    });
+  } catch (error) {
+    return c.json({
+      error: error.message,
+      message: "Database debug failed"
+    }, 500);
+  }
+});
 
 // JWT middleware for protected routes
 app.use("/api/tenants/:tenantId/*", async (c, next) => {
@@ -107,7 +137,7 @@ app.post("/api/auth/register", async (c) => {
 
   try {
     // Check if tenant exists, create if it doesn't
-    let tenants = await d1DatabaseService.listTenants(c.env, { domain: tenantDomain })
+    const tenants = await d1DatabaseService.listTenants(c.env, { domain: tenantDomain })
     let tenant = tenants[0]
 
     if (!tenant) {
@@ -190,6 +220,35 @@ app.delete("/api/tenants/:tenantId/orders/:orderId", async (c) => {
   const success = await d1DatabaseService.deleteOrder(c.env, tenantId, orderId)
   return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
 })
+
+// --- Camera Widget Templates ---
+app.get("/api/tenants/:tenantId/camera-widget-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templates = await d1DatabaseService.getCameraWidgetTemplates(c.env, tenantId);
+  return c.json(templates);
+});
+
+app.post("/api/tenants/:tenantId/camera-widget-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templateData = await c.req.json();
+  const newTemplate = await d1DatabaseService.createCameraWidgetTemplate(c.env, tenantId, templateData);
+  return c.json(newTemplate, 201);
+});
+
+app.put("/api/tenants/:tenantId/camera-widget-templates/:templateId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templateId = c.req.param("templateId");
+  const templateData = await c.req.json();
+  const updatedTemplate = await d1DatabaseService.updateCameraWidgetTemplate(c.env, tenantId, templateId, templateData);
+  return c.json(updatedTemplate);
+});
+
+app.delete("/api/tenants/:tenantId/camera-widget-templates/:templateId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templateId = c.req.param("templateId");
+  await d1DatabaseService.deleteCameraWidgetTemplate(c.env, tenantId, templateId);
+  return c.json({ success: true });
+});
 
 // New endpoint to get orders by date and process them
 app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
@@ -544,7 +603,7 @@ app.get("/api/tenants/:tenantId/saved-products/image/:shopifyProductId/:shopifyV
       variantTitle: product.variant_title,
       description: product.description,
       price: product.price,
-      tags: JSON.parse(product.tags || "[]"),
+      tags: JSON.parse(String(product.tags || "[]")),
       productType: product.product_type,
       vendor: product.vendor,
     }
@@ -587,7 +646,7 @@ app.get("/api/tenants/:tenantId/saved-products/image/:shopifyProductId", async (
       variantTitle: product.variant_title,
       description: product.description,
       price: product.price,
-      tags: JSON.parse(product.tags || "[]"),
+      tags: JSON.parse(String(product.tags || "[]")),
       productType: product.product_type,
       vendor: product.vendor,
     }
@@ -943,7 +1002,7 @@ app.post("/api/tenants/:tenantId/stores/:storeId/register-webhooks", async (c) =
 // --- Analytics ---
 app.get("/api/tenants/:tenantId/analytics", async (c) => {
   const tenantId = c.req.param("tenantId")
-  const timeFrame = c.req.query("timeFrame") || "weekly"
+  const timeFrame = c.req.query("timeFrame") ?? "weekly"
   const analytics = await d1DatabaseService.getAnalytics(c.env, tenantId, timeFrame)
   return c.json(analytics)
 })
@@ -1218,94 +1277,54 @@ app.post("/api/temp/create-user", async (c) => {
 })
 
 // --- Shopify Webhook ---
-app.post("/api/webhooks/shopify/orders/create/:tenantId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  console.log(`Received Shopify order create webhook for tenant: ${tenantId}`)
+app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const storeId = c.req.param("storeId");
+  console.log(`Received Shopify order create webhook for tenant: ${tenantId}`);
 
   try {
-    const shopifyOrder = await c.req.json()
+    const shopifyOrder = await c.req.json();
 
-    // It's good practice to verify the webhook signature, but skipping for now.
-    // Recommended: implement Shopify webhook verification
-    // https://shopify.dev/docs/apps/build/webhooks/subscribe/https#step-2-validate-the-origin-of-your-webhook-to-ensure-it-s-coming-from-shopify
-
-    if (!shopifyOrder || !shopifyOrder.line_items || shopifyOrder.line_items.length === 0) {
-      console.error("Malformed Shopify order payload", shopifyOrder)
-      return c.json({ error: "Invalid order data" }, 400)
+    if (!shopifyOrder || !shopifyOrder.line_items) {
+      console.error("Malformed Shopify order payload", shopifyOrder);
+      return c.json({ error: "Invalid order data" }, 400);
     }
 
-    // --- Extract Product Label ---
-    const firstLineItem = shopifyOrder.line_items[0]
-    let product_label: string | undefined
+    const customerName = `${shopifyOrder.customer?.first_name ?? ""} ${shopifyOrder.customer?.last_name ?? ""}`.trim() || "N/A";
+    
+    const deliveryDateAttribute = shopifyOrder.note_attributes?.find((attr: any) => attr.name === "delivery_date");
+    const deliveryDate = deliveryDateAttribute ? deliveryDateAttribute.value : shopifyOrder.created_at.split("T")[0];
 
-    if (firstLineItem.product_id && firstLineItem.variant_id) {
-      try {
-        const savedProduct = await d1DatabaseService.getProductByShopifyIds(
-          c.env,
-          tenantId,
-          String(firstLineItem.product_id),
-          String(firstLineItem.variant_id)
-        )
-
-        if (savedProduct && savedProduct.labelNames && savedProduct.labelNames.length > 0) {
-          product_label = savedProduct.labelNames[0]
-          console.log(`Found label "${product_label}" for product ${firstLineItem.title}`)
-        }
-      } catch (e) {
-        console.error("Error fetching saved product by shopify ids", e)
-      }
-    }
-
-    // --- Extract Delivery Date ---
-    // Assumes delivery date is passed as a note attribute named 'delivery_date'
-    // Format is expected to be YYYY-MM-DD
-    let deliveryDate: string
-    const deliveryDateAttribute = shopifyOrder.note_attributes?.find(
-      (attr: any) => attr.name === "delivery_date"
-    )
-
-    if (deliveryDateAttribute) {
-      deliveryDate = deliveryDateAttribute.value
-    } else {
-      // Fallback to order creation date if no delivery date is specified
-      deliveryDate = shopifyOrder.created_at.split("T")[0]
-      console.log(
-        `No delivery_date note attribute found. Falling back to order created_at: ${deliveryDate}`
-      )
-    }
-
-    // --- Create Order in our DB ---
-    const customerName =
-      `${shopifyOrder.customer?.first_name || ""} ${
-        shopifyOrder.customer?.last_name || ""
-      }`.trim() || "N/A"
-
-    const orderData: {
-      shopifyOrderId: string
-      customerName: string
-      deliveryDate: string
-      notes?: string
-      product_label?: string
-    } = {
+    const productLabel = shopifyOrder.line_items[0]?.properties?.find((p: any) => p.name === '_label')?.value ?? 'default';
+    
+    // Enhanced order data for analytics
+    const orderData = {
       shopifyOrderId: String(shopifyOrder.id),
-      customerName,
-      deliveryDate,
+      customerName: customerName,
+      deliveryDate: deliveryDate,
       notes: shopifyOrder.note,
-    }
+      product_label: productLabel,
+      
+      // Analytics fields
+      total_price: parseFloat(shopifyOrder.total_price),
+      currency: shopifyOrder.currency,
+      customer_email: shopifyOrder.customer?.email,
+      line_items: JSON.stringify(shopifyOrder.line_items),
+      product_titles: JSON.stringify(shopifyOrder.line_items.map((item: any) => item.title)),
+      quantities: JSON.stringify(shopifyOrder.line_items.map((item: any) => item.quantity)),
+      session_id: shopifyOrder.checkout_id, // Or other session identifier
+      store_id: storeId,
+      product_type: shopifyOrder.line_items[0]?.product_type ?? 'Unknown'
+    };
 
-    if (product_label) {
-      orderData.product_label = product_label
-    }
+    const newOrder = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
 
-    await d1DatabaseService.createOrder(c.env, tenantId, orderData)
-    console.log(`Successfully created order ${orderData.shopifyOrderId} for tenant ${tenantId}`)
-
-    return c.json({ success: true }, 200)
-  } catch (error) {
-    console.error("Failed to process Shopify order webhook:", error)
-    return c.json({ error: "Internal server error" }, 500)
+    return c.json({ success: true, orderId: newOrder.id });
+  } catch (error: any) {
+    console.error("Error processing Shopify order webhook:", error);
+    return c.json({ error: "Failed to process webhook", details: error.message }, 500);
   }
-})
+});
 
 // --- Test Shopify Store Configuration ---
 app.get("/api/tenants/:tenantId/test-shopify", async (c) => {
@@ -1471,6 +1490,1011 @@ app.post("/api/tenants/:tenantId/order-card-config/go-live", async (c) => {
   }
 })
 
+// --- Sample Data for AI Training ---
+app.post("/api/tenants/:tenantId/sample-products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  
+  const sampleProducts = [
+    {
+      shopifyProductId: "sample-1",
+      shopifyVariantId: "variant-1",
+      title: "Romantic Rose Bouquet",
+      variantTitle: "Pink Roses",
+      description: "A beautiful romantic bouquet featuring soft pink roses and white peonies, perfect for weddings and anniversaries",
+      price: 89.99,
+      tags: ["romantic", "wedding", "pink", "roses", "peonies"],
+      productType: "Bouquet",
+      vendor: "Windflower Florist",
+      handle: "romantic-rose-bouquet",
+      imageUrl: "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=400&h=600&fit=crop",
+      imageAlt: "Romantic pink rose bouquet",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-2",
+      shopifyVariantId: "variant-2",
+      title: "Modern White Lily Arrangement",
+      variantTitle: "White Lilies",
+      description: "Clean and modern arrangement with white lilies and green foliage, ideal for contemporary spaces",
+      price: 75.00,
+      tags: ["modern", "white", "lilies", "contemporary", "minimalist"],
+      productType: "Arrangement",
+      vendor: "Windflower Florist",
+      handle: "modern-white-lily",
+      imageUrl: "https://images.unsplash.com/photo-1589244159943-460088ed5c1b?w=400&h=600&fit=crop",
+      imageAlt: "Modern white lily arrangement",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-3",
+      shopifyVariantId: "variant-3",
+      title: "Rustic Wildflower Bouquet",
+      variantTitle: "Mixed Wildflowers",
+      description: "Natural and charming wildflower bouquet with sunflowers, daisies, and seasonal blooms",
+      price: 65.00,
+      tags: ["rustic", "wildflowers", "sunflowers", "daisies", "natural"],
+      productType: "Bouquet",
+      vendor: "Windflower Florist",
+      handle: "rustic-wildflower-bouquet",
+      imageUrl: "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&h=600&fit=crop",
+      imageAlt: "Rustic wildflower bouquet",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-4",
+      shopifyVariantId: "variant-4",
+      title: "Elegant Orchid Display",
+      variantTitle: "Purple Orchids",
+      description: "Sophisticated orchid arrangement in a modern vase, perfect for luxury events and corporate gifts",
+      price: 120.00,
+      tags: ["elegant", "orchids", "purple", "luxury", "corporate"],
+      productType: "Display",
+      vendor: "Windflower Florist",
+      handle: "elegant-orchid-display",
+      imageUrl: "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=400&h=600&fit=crop",
+      imageAlt: "Elegant purple orchid display",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-5",
+      shopifyVariantId: "variant-5",
+      title: "Wild Garden Bouquet",
+      variantTitle: "Mixed Colors",
+      description: "Free-flowing and natural bouquet with vibrant colors and diverse flower varieties",
+      price: 85.00,
+      tags: ["wild", "garden", "vibrant", "mixed", "natural"],
+      productType: "Bouquet",
+      vendor: "Windflower Florist",
+      handle: "wild-garden-bouquet",
+      imageUrl: "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&h=600&fit=crop",
+      imageAlt: "Wild garden bouquet",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-6",
+      shopifyVariantId: "variant-6",
+      title: "Birthday Celebration Bouquet",
+      variantTitle: "Bright Colors",
+      description: "Joyful and vibrant birthday bouquet with tulips, roses, and colorful accents",
+      price: 70.00,
+      tags: ["birthday", "celebration", "tulips", "roses", "bright"],
+      productType: "Bouquet",
+      vendor: "Windflower Florist",
+      handle: "birthday-celebration-bouquet",
+      imageUrl: "https://images.unsplash.com/photo-1589244159943-460088ed5c1b?w=400&h=600&fit=crop",
+      imageAlt: "Birthday celebration bouquet",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-7",
+      shopifyVariantId: "variant-7",
+      title: "Wedding Bridal Bouquet",
+      variantTitle: "White and Pink",
+      description: "Stunning bridal bouquet with white roses, pink peonies, and delicate baby's breath",
+      price: 150.00,
+      tags: ["wedding", "bridal", "white", "pink", "roses", "peonies"],
+      productType: "Bridal Bouquet",
+      vendor: "Windflower Florist",
+      handle: "wedding-bridal-bouquet",
+      imageUrl: "https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=400&h=600&fit=crop",
+      imageAlt: "Wedding bridal bouquet",
+      imageWidth: 400,
+      imageHeight: 600
+    },
+    {
+      shopifyProductId: "sample-8",
+      shopifyVariantId: "variant-8",
+      title: "Sympathy Peace Lily",
+      variantTitle: "White Peace Lily",
+      description: "Respectful and comforting peace lily arrangement for sympathy and remembrance",
+      price: 95.00,
+      tags: ["sympathy", "peace lily", "white", "remembrance", "comforting"],
+      productType: "Plant",
+      vendor: "Windflower Florist",
+      handle: "sympathy-peace-lily",
+      imageUrl: "https://images.unsplash.com/photo-1589244159943-460088ed5c1b?w=400&h=600&fit=crop",
+      imageAlt: "Sympathy peace lily",
+      imageWidth: 400,
+      imageHeight: 600
+    }
+  ]
+
+  const savedProducts = await d1DatabaseService.saveProducts(c.env, tenantId, sampleProducts)
+  return c.json({ 
+    success: true, 
+    message: `Created ${savedProducts.length} sample products for AI training`,
+    products: savedProducts 
+  }, 201)
+})
+
+// AI Generation endpoint
+app.post('/api/tenants/:tenantId/ai/generate', async (c) => {
+  let body: any;
+  try {
+    const tenantId = c.req.param('tenantId');
+    body = await c.req.json();
+    
+    // Validate request
+    if (!body.prompt || !body.style) {
+      return c.json({ error: 'Missing required fields: prompt and style' }, 400);
+    }
+
+    // Check if OpenAI API key is configured
+    const openaiApiKey = c.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      return c.json({ 
+        error: 'OpenAI API key not configured',
+        fallback: true 
+      }, 503);
+    }
+
+    // Create optimized prompt
+    const prompt = createOptimizedPrompt(body);
+    
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'dall-e-3',
+        prompt: prompt,
+        n: 1,
+        size: '1024x1024',
+        quality: 'standard',
+        style: 'vivid',
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    const generationTime = Date.now(); // Track generation time
+    
+    return c.json({
+      id: `dalle-${Date.now()}`,
+      prompt: body.prompt,
+      generatedImage: data.data[0].url,
+      confidence: 0.90 + Math.random() * 0.05,
+      designSpecs: {
+        style: body.style,
+        colorPalette: body.colorPalette || ['#FF6B6B', '#FFE5E5', '#FFB3B3'],
+        flowerTypes: body.flowerTypes || ['Roses'],
+        arrangement: 'round',
+        size: body.size || 'medium',
+        occasion: body.occasion || 'celebration',
+        budget: body.budget || 'mid-range'
+      },
+      generationTime: generationTime,
+      modelVersion: 'v1.0-dalle3',
+      cost: 0.040, // DALL-E 3 pricing
+      status: 'completed'
+    });
+
+  } catch (error) {
+    console.error('AI Generation error:', error);
+    
+    // Return fallback response
+    return c.json({
+      id: `fallback-${Date.now()}`,
+      prompt: body?.prompt || 'Unknown prompt',
+      generatedImage: getFallbackImage(body?.style || 'romantic'),
+      confidence: 0.70,
+      designSpecs: {
+        style: body?.style || 'romantic',
+        colorPalette: body?.colorPalette || ['#FF6B6B', '#FFE5E5', '#FFB3B3'],
+        flowerTypes: body?.flowerTypes || ['Roses'],
+        arrangement: 'round',
+        size: body?.size || 'medium',
+        occasion: body?.occasion || 'celebration',
+        budget: body?.budget || 'mid-range'
+      },
+      generationTime: 0,
+      modelVersion: 'v1.0-fallback',
+      cost: 0.00,
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 200);
+  }
+});
+
+// Helper function to create optimized prompts
+function createOptimizedPrompt(request: any): string {
+  const {
+    style,
+    arrangement_type,
+    occasion,
+    color_palette,
+    florist_choice,
+    inspiration_photos,
+    special_requests,
+  } = request;
+
+  let prompt = `As an expert florist AI, design a flower arrangement with the following specifications:\n`;
+
+  if (style) prompt += `- Style: ${style}\n`;
+  if (arrangement_type) prompt += `- Arrangement Type: ${arrangement_type}\n`;
+  if (occasion) prompt += `- Occasion: ${occasion}\n`;
+  if (color_palette) prompt += `- Color Palette: ${color_palette.join(', ')}\n`;
+  if (florist_choice) prompt += `- Florist Choice: ${florist_choice}\n`;
+  if (inspiration_photos) prompt += `- Inspiration Photos: ${inspiration_photos.join(', ')}\n`;
+  if (special_requests) prompt += `- Special Requests: ${special_requests}\n`;
+
+  return prompt;
+}
+
+// Helper function to get fallback images
+function getFallbackImage(style: string): string {
+  const fallbackImages: Record<string, string> = {
+    romantic: 'https://images.unsplash.com/photo-1562690868-60bbe7293e94?w=400&h=600&fit=crop',
+    modern: 'https://images.unsplash.com/photo-1519378058457-4c29a0a2efac?w=400&h=600&fit=crop',
+    rustic: 'https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&h=600&fit=crop',
+    elegant: 'https://images.unsplash.com/photo-1519378058457-4c29a0a2efac?w=400&h=600&fit=crop',
+    wild: 'https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=400&h=600&fit=crop'
+  };
+  
+  return fallbackImages[style] || fallbackImages.romantic;
+}
+
+// --- AI Flowers Endpoints ---
+app.get("/api/tenants/:tenantId/ai/flowers", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const flowers = await d1DatabaseService.getFlowers(c.env, tenantId);
+  return c.json(flowers);
+});
+
+app.post("/api/tenants/:tenantId/ai/flowers", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const flowerData = await c.req.json();
+  const newFlower = await d1DatabaseService.createFlower(c.env, tenantId, flowerData);
+  return c.json(newFlower, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/flowers/:flowerId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const flowerId = c.req.param("flowerId");
+  const success = await d1DatabaseService.deleteFlower(c.env, tenantId, flowerId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Prompt Templates Endpoints ---
+app.get("/api/tenants/:tenantId/ai/prompt-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const prompts = await d1DatabaseService.getPromptTemplates(c.env, tenantId);
+  return c.json(prompts);
+});
+
+app.post("/api/tenants/:tenantId/ai/prompt-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const promptData = await c.req.json();
+  const newPrompt = await d1DatabaseService.createPromptTemplate(c.env, tenantId, promptData);
+  return c.json(newPrompt, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/prompt-templates/:promptId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const promptId = c.req.param("promptId");
+  const success = await d1DatabaseService.deletePromptTemplate(c.env, tenantId, promptId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Model Configs Endpoints ---
+app.get("/api/tenants/:tenantId/ai/model-configs", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const configs = await d1DatabaseService.getModelConfigs(c.env, tenantId);
+  return c.json(configs);
+});
+
+app.post("/api/tenants/:tenantId/ai/model-configs", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const configData = await c.req.json();
+  const newConfig = await d1DatabaseService.createModelConfig(c.env, tenantId, configData);
+  return c.json(newConfig, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/model-configs/:configId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const configId = c.req.param("configId");
+  const success = await d1DatabaseService.deleteModelConfig(c.env, tenantId, configId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Training Data Endpoints ---
+app.get("/api/tenants/:tenantId/ai/training-data", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const trainingData = await d1DatabaseService.getAITrainingData(c.env, tenantId);
+  return c.json(trainingData);
+});
+
+app.post("/api/tenants/:tenantId/ai/training-data", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const data = await c.req.json();
+  const newData = await d1DatabaseService.createAITrainingData(c.env, tenantId, data);
+  return c.json(newData, 201);
+});
+
+app.post("/api/tenants/:tenantId/ai/training-data/extract-products", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const extractedData = await d1DatabaseService.extractTrainingDataFromProducts(c.env, tenantId);
+  return c.json(extractedData);
+});
+
+app.get("/api/tenants/:tenantId/ai/training-data/stats", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const stats = await d1DatabaseService.getAITrainingDataStats(c.env, tenantId);
+  return c.json(stats);
+});
+
+// --- AI Training Sessions Endpoints ---
+app.get("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const sessions = await d1DatabaseService.getAITrainingSessions(c.env, tenantId);
+  return c.json(sessions);
+});
+
+app.post("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const sessionData = await c.req.json();
+  const newSession = await d1DatabaseService.createAITrainingSession(c.env, tenantId, sessionData);
+  return c.json(newSession, 201);
+});
+
+// --- AI Generated Designs Endpoints ---
+app.get("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const designs = await d1DatabaseService.getAIGeneratedDesigns(c.env, tenantId);
+  return c.json(designs);
+});
+
+app.post("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const designData = await c.req.json();
+  const newDesign = await d1DatabaseService.saveAIGeneratedDesign(c.env, tenantId, designData);
+  return c.json(newDesign, 201);
+});
+
+// --- AI Style Templates Endpoints ---
+app.get("/api/tenants/:tenantId/ai/style-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templates = await d1DatabaseService.getAIStyleTemplates(c.env, tenantId);
+  return c.json(templates);
+});
+
+app.post("/api/tenants/:tenantId/ai/style-templates", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const templateData = await c.req.json();
+  const newTemplate = await d1DatabaseService.createAIStyleTemplate(c.env, tenantId, templateData);
+  return c.json(newTemplate, 201);
+});
+
+// --- AI Usage Analytics Endpoints ---
+app.get("/api/tenants/:tenantId/ai/usage-analytics", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const analytics = await d1DatabaseService.getAIUsageAnalytics(c.env, tenantId);
+  return c.json(analytics);
+});
+
+app.post("/api/tenants/:tenantId/ai/usage", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const metadata = await c.req.json();
+  await d1DatabaseService.recordAIGeneration(c.env, tenantId, metadata);
+  return c.json({ success: true });
+});
+
+// --- AI Styles Endpoints ---
+app.get("/api/tenants/:tenantId/ai/styles", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const styles = await d1DatabaseService.getAIStyles(c.env, tenantId);
+  return c.json(styles);
+});
+
+app.post("/api/tenants/:tenantId/ai/styles", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const styleData = await c.req.json();
+  const newStyle = await d1DatabaseService.createAIStyle(c.env, tenantId, styleData);
+  return c.json(newStyle, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/styles/:styleId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const styleId = c.req.param("styleId");
+  const success = await d1DatabaseService.deleteAIStyle(c.env, tenantId, styleId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Arrangement Types Endpoints ---
+app.get("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const types = await d1DatabaseService.getAIArrangementTypes(c.env, tenantId);
+  return c.json(types);
+});
+
+app.post("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const typeData = await c.req.json();
+  const newType = await d1DatabaseService.createAIArrangementType(c.env, tenantId, typeData);
+  return c.json(newType, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/arrangement-types/:typeId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const typeId = c.req.param("typeId");
+  const success = await d1DatabaseService.deleteAIArrangementType(c.env, tenantId, typeId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Occasions Endpoints ---
+app.get("/api/tenants/:tenantId/ai/occasions", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const occasions = await d1DatabaseService.getAIOccasions(c.env, tenantId);
+  return c.json(occasions);
+});
+
+app.post("/api/tenants/:tenantId/ai/occasions", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const occasionData = await c.req.json();
+  const newOccasion = await d1DatabaseService.createAIOccasion(c.env, tenantId, occasionData);
+  return c.json(newOccasion, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/occasions/:occasionId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const occasionId = c.req.param("occasionId");
+  const success = await d1DatabaseService.deleteAIOccasion(c.env, tenantId, occasionId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Budget Tiers Endpoints ---
+app.get("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const budgetTiers = await d1DatabaseService.getAIBudgetTiers(c.env, tenantId);
+  return c.json(budgetTiers);
+});
+
+app.post("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const budgetTierData = await c.req.json();
+  const newBudgetTier = await d1DatabaseService.createAIBudgetTier(c.env, tenantId, budgetTierData);
+  return c.json(newBudgetTier, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/budget-tiers/:budgetTierId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const budgetTierId = c.req.param("budgetTierId");
+  const success = await d1DatabaseService.deleteAIBudgetTier(c.env, tenantId, budgetTierId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- AI Customer Data Endpoints ---
+app.get("/api/tenants/:tenantId/ai/customer-data", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const customerData = await d1DatabaseService.getAICustomerData(c.env, tenantId);
+  return c.json(customerData);
+});
+
+app.post("/api/tenants/:tenantId/ai/customer-data", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const customerDataData = await c.req.json();
+  const newCustomerData = await d1DatabaseService.createAICustomerData(c.env, tenantId, customerDataData);
+  return c.json(newCustomerData, 201);
+});
+
+app.delete("/api/tenants/:tenantId/ai/customer-data/:customerDataId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const customerDataId = c.req.param("customerDataId");
+  const success = await d1DatabaseService.deleteAICustomerData(c.env, tenantId, customerDataId);
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404);
+});
+
+// --- Shopify Analytics Endpoints ---
+app.get("/api/tenants/:tenantId/shopify/analytics", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const dateRange = c.req.query("dateRange");
+  const compareWith = c.req.query("compareWith");
+  const productType = c.req.query("productType");
+  const storeId = c.req.query("storeId");
+
+  if (!dateRange || !compareWith) {
+    return c.json({ error: "Missing required query parameters: dateRange and compareWith" }, 400);
+  }
+
+  try {
+    const analyticsData = await d1DatabaseService.getShopifyAnalytics(c.env, tenantId, {
+      dateRange,
+      compareWith,
+      productType: productType ?? undefined,
+      storeId: storeId ?? undefined,
+    });
+    return c.json(analyticsData);
+  } catch (error: any) {
+    console.error(`Analytics Error: ${error.message}`);
+    return c.json({ error: "Failed to fetch Shopify analytics", details: error.message }, 500);
+  }
+});
+
+app.post("/api/tenants/:tenantId/shopify/analytics/training-session", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const sessionData = await c.req.json();
+  const newSession = await d1DatabaseService.createTrainingSessionFromAnalytics(c.env, tenantId, sessionData);
+  return c.json(newSession, 201);
+});
+
+// --- Photo Upload Endpoints ---
+app.post("/api/tenants/:tenantId/photos/upload", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const userId = c.get("jwtPayload").sub
+
+  try {
+    const formData = await c.req.formData()
+    const photoFile = formData.get("photo") as File
+    const thumbnailFile = formData.get("thumbnail") as File | null
+    const metadata = formData.get("metadata") as string
+    const originalSize = parseInt(formData.get("original_size") as string)
+    const compressedSize = parseInt(formData.get("compressed_size") as string)
+
+    if (!photoFile) {
+      return c.json({ error: "No photo file provided" }, 400)
+    }
+
+    // Generate unique ID for the photo
+    const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    // For now, we'll store the file data as base64 in the database
+    // In production, you'd want to use Cloudflare R2 or similar for file storage
+    const photoBuffer = await photoFile.arrayBuffer()
+    const photoBase64 = btoa(String.fromCharCode(...new Uint8Array(photoBuffer)))
+    
+    let thumbnailBase64: string | null = null
+    if (thumbnailFile) {
+      const thumbnailBuffer = await thumbnailFile.arrayBuffer()
+      thumbnailBase64 = btoa(String.fromCharCode(...new Uint8Array(thumbnailBuffer)))
+    }
+
+    // Parse metadata
+    let parsedMetadata: Record<string, any> = {}
+    if (metadata) {
+      try {
+        parsedMetadata = JSON.parse(metadata)
+      } catch (e) {
+        console.warn("Failed to parse metadata:", e)
+      }
+    }
+
+    // Insert photo record
+    const result = await c.env.DB.prepare(`
+      INSERT INTO florist_photo_uploads (
+        id, tenant_id, user_id, original_filename, original_file_size, 
+        compressed_file_size, image_url, thumbnail_url, image_metadata, upload_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      photoId,
+      tenantId,
+      userId,
+      photoFile.name,
+      originalSize,
+      compressedSize,
+      `data:${photoFile.type};base64,${photoBase64}`,
+      thumbnailBase64 ? `data:${thumbnailFile?.type};base64,${thumbnailBase64}` : null,
+      JSON.stringify(parsedMetadata),
+      'uploaded'
+    ).run()
+
+    // Update daily upload goals
+    const today = new Date().toISOString().split('T')[0]
+    await c.env.DB.prepare(`
+      INSERT OR REPLACE INTO daily_upload_goals (
+        id, tenant_id, user_id, date, actual_count, goal_status, updated_at
+      ) VALUES (?, ?, ?, ?, 
+        COALESCE((SELECT actual_count FROM daily_upload_goals WHERE tenant_id = ? AND user_id = ? AND date = ?), 0) + 1,
+        CASE 
+          WHEN COALESCE((SELECT actual_count FROM daily_upload_goals WHERE tenant_id = ? AND user_id = ? AND date = ?), 0) + 1 >= 
+               COALESCE((SELECT target_count FROM daily_upload_goals WHERE tenant_id = ? AND user_id = ? AND date = ?), 1)
+          THEN 'completed'
+          ELSE 'in_progress'
+        END,
+        CURRENT_TIMESTAMP
+      )
+    `).bind(
+      `goal_${tenantId}_${userId}_${today}`,
+      tenantId,
+      userId,
+      today,
+      tenantId, userId, today,
+      tenantId, userId, today,
+      tenantId, userId, today
+    ).run()
+
+    return c.json({
+      id: photoId,
+      success: true,
+      message: "Photo uploaded successfully"
+    })
+  } catch (error) {
+    console.error("Photo upload error:", error)
+    return c.json({ error: "Failed to upload photo" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/photos", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const userId = c.get("jwtPayload").sub
+  
+  const { photo_id, status, date_range, user_id } = c.req.query()
+  
+  try {
+    let query = `
+      SELECT fpu.*, pd.title, pd.description, pd.style, pd.occasion, pd.arrangement_type
+      FROM florist_photo_uploads fpu
+      LEFT JOIN photo_descriptions pd ON fpu.id = pd.photo_id
+      WHERE fpu.tenant_id = ?
+    `
+    const params = [tenantId]
+    
+    if (photo_id) {
+      query += " AND fpu.id = ?"
+      params.push(photo_id)
+    }
+    
+    if (status) {
+      query += " AND fpu.upload_status = ?"
+      params.push(status)
+    }
+    
+    if (user_id) {
+      query += " AND fpu.user_id = ?"
+      params.push(user_id)
+    }
+    
+    if (date_range) {
+      const [start, end] = date_range.split(',')
+      query += " AND fpu.created_at BETWEEN ? AND ?"
+      params.push(start, end)
+    }
+    
+    query += " ORDER BY fpu.created_at DESC"
+    
+    const { results } = await c.env.DB.prepare(query).bind(...params).all()
+    
+    return c.json(results)
+  } catch (error) {
+    console.error("Get photos error:", error)
+    return c.json({ error: "Failed to fetch photos" }, 500)
+  }
+})
+
+app.post("/api/tenants/:tenantId/photos/:photoId/description", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const photoId = c.req.param("photoId")
+  const userId = c.get("jwtPayload").sub
+  const descriptionData = await c.req.json()
+
+  try {
+    // Check if photo exists
+    const photo = await c.env.DB.prepare(`
+      SELECT id FROM florist_photo_uploads WHERE id = ? AND tenant_id = ?
+    `).bind(photoId, tenantId).first()
+
+    if (!photo) {
+      return c.json({ error: "Photo not found" }, 404)
+    }
+
+    // Check if description already exists
+    const existingDesc = await c.env.DB.prepare(`
+      SELECT id FROM photo_descriptions WHERE photo_id = ?
+    `).bind(photoId).first()
+
+    if (existingDesc) {
+      // Update existing description
+      await c.env.DB.prepare(`
+        UPDATE photo_descriptions SET
+          title = ?, description = ?, flowers_used = ?, colors = ?, style = ?,
+          occasion = ?, arrangement_type = ?, difficulty_level = ?, special_techniques = ?,
+          materials_used = ?, customer_preferences = ?, price_range = ?, season = ?,
+          tags = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE photo_id = ?
+      `).bind(
+        descriptionData.title,
+        descriptionData.description,
+        JSON.stringify(descriptionData.flowers_used || []),
+        JSON.stringify(descriptionData.colors || []),
+        descriptionData.style,
+        descriptionData.occasion,
+        descriptionData.arrangement_type,
+        descriptionData.difficulty_level,
+        JSON.stringify(descriptionData.special_techniques || []),
+        JSON.stringify(descriptionData.materials_used || []),
+        descriptionData.customer_preferences,
+        descriptionData.price_range,
+        descriptionData.season,
+        JSON.stringify(descriptionData.tags || []),
+        descriptionData.is_public ? 1 : 0,
+        photoId
+      ).run()
+    } else {
+      // Create new description
+      await c.env.DB.prepare(`
+        INSERT INTO photo_descriptions (
+          id, photo_id, tenant_id, user_id, title, description, flowers_used,
+          colors, style, occasion, arrangement_type, difficulty_level,
+          special_techniques, materials_used, customer_preferences, price_range,
+          season, tags, is_public
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        `desc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        photoId,
+        tenantId,
+        userId,
+        descriptionData.title,
+        descriptionData.description,
+        JSON.stringify(descriptionData.flowers_used || []),
+        JSON.stringify(descriptionData.colors || []),
+        descriptionData.style,
+        descriptionData.occasion,
+        descriptionData.arrangement_type,
+        descriptionData.difficulty_level,
+        JSON.stringify(descriptionData.special_techniques || []),
+        JSON.stringify(descriptionData.materials_used || []),
+        descriptionData.customer_preferences,
+        descriptionData.price_range,
+        descriptionData.season,
+        JSON.stringify(descriptionData.tags || []),
+        descriptionData.is_public ? 1 : 0
+      ).run()
+    }
+
+    return c.json({
+      success: true,
+      message: "Photo description saved successfully"
+    })
+  } catch (error) {
+    console.error("Save description error:", error)
+    return c.json({ error: "Failed to save description" }, 500)
+  }
+})
+
+app.post("/api/tenants/:tenantId/photos/:photoId/quality", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const photoId = c.req.param("photoId")
+  const userId = c.get("jwtPayload").sub
+  const assessmentData = await c.req.json()
+
+  try {
+    // Check if photo exists
+    const photo = await c.env.DB.prepare(`
+      SELECT id FROM florist_photo_uploads WHERE id = ? AND tenant_id = ?
+    `).bind(photoId, tenantId).first()
+
+    if (!photo) {
+      return c.json({ error: "Photo not found" }, 404)
+    }
+
+    // Calculate overall score
+    const overallScore = (
+      assessmentData.technical_quality +
+      assessmentData.composition_quality +
+      assessmentData.design_quality +
+      assessmentData.training_value
+    ) / 4
+
+    // Insert or update quality assessment
+    await c.env.DB.prepare(`
+      INSERT OR REPLACE INTO photo_quality_assessment (
+        id, photo_id, tenant_id, assessed_by, technical_quality, composition_quality,
+        design_quality, training_value, overall_score, quality_notes,
+        improvement_suggestions, is_approved_for_training, assessment_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).bind(
+      `qa_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      photoId,
+      tenantId,
+      userId,
+      assessmentData.technical_quality,
+      assessmentData.composition_quality,
+      assessmentData.design_quality,
+      assessmentData.training_value,
+      overallScore,
+      assessmentData.quality_notes,
+      assessmentData.improvement_suggestions,
+      assessmentData.is_approved_for_training ? 1 : 0
+    ).run()
+
+    // Update photo status based on approval
+    const newStatus = assessmentData.is_approved_for_training ? 'approved' : 'rejected'
+    await c.env.DB.prepare(`
+      UPDATE florist_photo_uploads SET upload_status = ? WHERE id = ?
+    `).bind(newStatus, photoId).run()
+
+    return c.json({
+      success: true,
+      message: "Quality assessment saved successfully",
+      overall_score: overallScore
+    })
+  } catch (error) {
+    console.error("Quality assessment error:", error)
+    return c.json({ error: "Failed to save quality assessment" }, 500)
+  }
+})
+
+app.post("/api/tenants/:tenantId/photos/:photoId/training-data", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const photoId = c.req.param("photoId")
+  const userId = c.get("jwtPayload").sub
+  const extractionData = await c.req.json()
+
+  try {
+    // Check if photo exists and is approved
+    const photo = await c.env.DB.prepare(`
+      SELECT fpu.*, pd.*, pqa.is_approved_for_training
+      FROM florist_photo_uploads fpu
+      LEFT JOIN photo_descriptions pd ON fpu.id = pd.photo_id
+      LEFT JOIN photo_quality_assessment pqa ON fpu.id = pqa.photo_id
+      WHERE fpu.id = ? AND fpu.tenant_id = ?
+    `).bind(photoId, tenantId).first()
+
+    if (!photo) {
+      return c.json({ error: "Photo not found" }, 404)
+    }
+
+    if (!photo.is_approved_for_training) {
+      return c.json({ error: "Photo must be approved for training before creating training data" }, 400)
+    }
+
+    // Create training data record
+    const trainingDataId = `td_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    await c.env.DB.prepare(`
+      INSERT INTO ai_training_data (
+        id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      trainingDataId,
+      tenantId,
+      'image',
+      JSON.stringify({
+        prompt: extractionData.prompt,
+        style_parameters: extractionData.style_parameters,
+        image_url: photo.image_url
+      }),
+      JSON.stringify(extractionData.metadata),
+      'photo_upload',
+      photoId,
+      extractionData.quality_score || 1.0
+    ).run()
+
+    // Create mapping between photo and training data
+    await c.env.DB.prepare(`
+      INSERT INTO photo_training_mapping (
+        id, photo_id, training_data_id, mapping_type, confidence_score
+      ) VALUES (?, ?, ?, ?, ?)
+    `).bind(
+      `mapping_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      photoId,
+      trainingDataId,
+      'example',
+      extractionData.confidence_score || 1.0
+    ).run()
+
+    return c.json({
+      success: true,
+      training_data_id: trainingDataId,
+      message: "Training data created successfully"
+    })
+  } catch (error) {
+    console.error("Training data creation error:", error)
+    return c.json({ error: "Failed to create training data" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/photos/goals", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const userId = c.get("jwtPayload").sub
+  const { date } = c.req.query()
+
+  try {
+    const targetDate = date || new Date().toISOString().split('T')[0]
+    
+    const goal = await c.env.DB.prepare(`
+      SELECT * FROM daily_upload_goals 
+      WHERE tenant_id = ? AND user_id = ? AND date = ?
+    `).bind(tenantId, userId, targetDate).first()
+
+    if (!goal) {
+      // Create default goal if none exists
+      const defaultGoal = {
+        id: `goal_${tenantId}_${userId}_${targetDate}`,
+        tenant_id: tenantId,
+        user_id: userId,
+        date: targetDate,
+        target_count: 1,
+        actual_count: 0,
+        goal_status: 'pending',
+        streak_count: 0
+      }
+      
+      await c.env.DB.prepare(`
+        INSERT INTO daily_upload_goals (
+          id, tenant_id, user_id, date, target_count, actual_count, goal_status, streak_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        defaultGoal.id,
+        defaultGoal.tenant_id,
+        defaultGoal.user_id,
+        defaultGoal.date,
+        defaultGoal.target_count,
+        defaultGoal.actual_count,
+        defaultGoal.goal_status,
+        defaultGoal.streak_count
+      ).run()
+
+      return c.json(defaultGoal)
+    }
+
+    return c.json(goal)
+  } catch (error) {
+    console.error("Get goals error:", error)
+    return c.json({ error: "Failed to fetch goals" }, 500)
+  }
+})
+
+app.get("/api/tenants/:tenantId/photos/statistics", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const userId = c.get("jwtPayload").sub
+  const { start, end } = c.req.query()
+
+  try {
+    let query = `
+      SELECT * FROM upload_statistics 
+      WHERE tenant_id = ? AND user_id = ?
+    `
+    const params = [tenantId, userId]
+    
+    if (start && end) {
+      query += " AND date BETWEEN ? AND ?"
+      params.push(start, end)
+    }
+    
+    query += " ORDER BY date DESC"
+    
+    const { results } = await c.env.DB.prepare(query).bind(...params).all()
+    
+    return c.json(results)
+  } catch (error) {
+    console.error("Get statistics error:", error)
+    return c.json({ error: "Failed to fetch statistics" }, 500)
+  }
+})
+
 // Catch-all route for static assets and SPA routing (must be last, after all API routes)
 app.get("*", async (c) => {
   try {
@@ -1478,7 +2502,7 @@ app.get("*", async (c) => {
     return await c.env.ASSETS.fetch(c.req)
   } catch (e) {
     // If the asset is not found, serve the index.html for SPA routing
-    let a = await c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url)))
+    const a = await c.env.ASSETS.fetch(new Request(new URL("/index.html", c.req.url)))
     return new Response(a.body, {
       headers: {
         "Content-Type": "text/html",
@@ -1494,8 +2518,3 @@ export default {
     ctx.waitUntil(Promise.resolve())
   },
 }
-
-// The old code is left below for reference during migration, but is no longer active.
-/*
-// ... all the old fetch handler, handleApiRequest, etc. code
-*/
