@@ -109,18 +109,38 @@ app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
       configPromise,
       promptsPromise
     ] = [
-      // Get more products but with smart selection strategy
+      // Get more products with dynamic category-based rotation
       db.prepare(`
-        SELECT id, title, description, price, tags, product_type, created_at 
-        FROM saved_products 
-        WHERE tenant_id = ? 
-        ORDER BY 
-          CASE 
-            WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
-            WHEN description IS NOT NULL AND description != '' THEN 2 
-            ELSE 3 
-          END,
-          created_at DESC
+        WITH CategoryProducts AS (
+          SELECT 
+            id, title, description, price, tags, product_type, created_at,
+            CASE 
+              WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
+              WHEN description IS NOT NULL AND description != '' THEN 2 
+              ELSE 3 
+            END as priority_score,
+            ROW_NUMBER() OVER (
+              PARTITION BY 
+                CASE 
+                  WHEN product_type IS NOT NULL THEN product_type 
+                  ELSE 'unknown' 
+                END
+              ORDER BY 
+                CASE 
+                  WHEN tags IS NOT NULL AND tags != '[]' THEN 1 
+                  WHEN description IS NOT NULL AND description != '' THEN 2 
+                  ELSE 3 
+                END,
+                created_at DESC
+            ) as category_rank
+          FROM saved_products 
+          WHERE tenant_id = ?
+        )
+        SELECT 
+          id, title, description, price, tags, product_type, created_at, priority_score
+        FROM CategoryProducts 
+        WHERE category_rank <= 50  -- Take top 50 from each category
+        ORDER BY priority_score, created_at DESC
         LIMIT 500
       `).bind(tenantId).all(),
       db.prepare(`SELECT name, description, color_palette, mood, arrangement_style FROM ai_styles WHERE tenant_id = ?`).bind(tenantId).all(),
@@ -303,7 +323,7 @@ app.post('/api/ai/chat', async (c) => {
 
     const systemMessage = {
       role: 'system',
-      content: `${systemMessageContent}\n\nHere is a curated selection of the shop's inventory and style guide (showing ${compactKnowledgeBase.selectedProducts} of ${compactKnowledgeBase.totalProducts} total products):\nPRODUCTS: ${JSON.stringify(compactKnowledgeBase.products)}\nSTYLES: ${JSON.stringify(compactKnowledgeBase.styles)}\nOCCASIONS: ${JSON.stringify(compactKnowledgeBase.occasions)}`
+      content: `${systemMessageContent}\n\nHere is a curated selection of the shop's inventory and style guide:\nPRODUCTS: ${JSON.stringify(compactKnowledgeBase.products)}\nSTYLES: ${JSON.stringify(compactKnowledgeBase.styles)}\nOCCASIONS: ${JSON.stringify(compactKnowledgeBase.occasions)}`
     };
 
     // 2. Prepare the messages for the API
@@ -2905,6 +2925,97 @@ app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
   } catch (error) {
     console.error('Error fetching saved products:', error);
     return c.json({ error: 'Failed to fetch saved products.' }, 500);
+  }
+});
+
+// --- AI Knowledge Base Analytics ---
+app.get('/api/tenants/:tenantId/ai/knowledge-base/analytics', async (c) => {
+  try {
+    const { tenantId } = c.req.param();
+    const db = c.env.DB;
+
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required.' }, 400);
+    }
+
+    // Get comprehensive analytics about product coverage
+    const [
+      totalProductsResult,
+      categoryBreakdownResult,
+      tagCoverageResult,
+      recentProductsResult,
+      priorityDistributionResult
+    ] = await Promise.all([
+      // Total products count
+      db.prepare(`SELECT COUNT(*) as total FROM saved_products WHERE tenant_id = ?`).bind(tenantId).all(),
+      
+      // Product category breakdown
+      db.prepare(`
+        SELECT 
+          product_type,
+          COUNT(*) as count,
+          COUNT(CASE WHEN tags IS NOT NULL AND tags != '[]' THEN 1 END) as tagged_count,
+          COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) as described_count
+        FROM saved_products 
+        WHERE tenant_id = ? 
+        GROUP BY product_type 
+        ORDER BY count DESC
+      `).bind(tenantId).all(),
+      
+      // Tag coverage analysis
+      db.prepare(`
+        SELECT 
+          COUNT(*) as total_products,
+          COUNT(CASE WHEN tags IS NOT NULL AND tags != '[]' THEN 1 END) as tagged_products,
+          COUNT(CASE WHEN description IS NOT NULL AND description != '' THEN 1 END) as described_products,
+          COUNT(CASE WHEN price IS NOT NULL THEN 1 END) as priced_products
+        FROM saved_products 
+        WHERE tenant_id = ?
+      `).bind(tenantId).all(),
+      
+      // Recent products (last 30 days)
+      db.prepare(`
+        SELECT COUNT(*) as recent_count 
+        FROM saved_products 
+        WHERE tenant_id = ? 
+        AND created_at >= datetime('now', '-30 days')
+      `).bind(tenantId).all(),
+      
+      // Priority distribution
+      db.prepare(`
+        SELECT 
+          CASE 
+            WHEN tags IS NOT NULL AND tags != '[]' THEN 'high_priority'
+            WHEN description IS NOT NULL AND description != '' THEN 'medium_priority'
+            ELSE 'low_priority'
+          END as priority_level,
+          COUNT(*) as count
+        FROM saved_products 
+        WHERE tenant_id = ?
+        GROUP BY priority_level
+      `).bind(tenantId).all()
+    ]);
+
+    const analytics = {
+      totalProducts: totalProductsResult.results[0]?.total || 0,
+      categoryBreakdown: categoryBreakdownResult.results || [],
+      tagCoverage: {
+        total: tagCoverageResult.results[0]?.total_products || 0,
+        tagged: tagCoverageResult.results[0]?.tagged_products || 0,
+        described: tagCoverageResult.results[0]?.described_products || 0,
+        priced: tagCoverageResult.results[0]?.priced_products || 0
+      },
+      recentProducts: recentProductsResult.results[0]?.recent_count || 0,
+      priorityDistribution: priorityDistributionResult.results || [],
+      knowledgeBaseLimit: 500,
+      coveragePercentage: Math.min(100, (500 / (Number(totalProductsResult.results[0]?.total) || 1)) * 100)
+    };
+
+    return c.json(analytics);
+
+  } catch (error) {
+    console.error('Error fetching knowledge base analytics:', error);
+    return c.json({ error: 'Failed to fetch knowledge base analytics.' }, 500);
   }
 });
 
