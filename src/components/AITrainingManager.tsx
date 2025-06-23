@@ -1252,7 +1252,7 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
                   <SelectValue placeholder="Select a store" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Stores</SelectItem>
+                  <SelectItem value="all">All Stores</SelectItem>
                   {stores.map((store) => (
                     <SelectItem key={store.id} value={store.id}>
                       {store.name || store.shopify_domain}
