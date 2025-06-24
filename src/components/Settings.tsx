@@ -1,145 +1,16 @@
-import React, { useState, useEffect, useMemo } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card"
+import React, { useState, useEffect } from "react"
 import { Button } from "./ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Input } from "./ui/input"
 import { Label } from "./ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
-import { Switch } from "./ui/switch"
-import { Badge } from "./ui/badge"
-import { Separator } from "./ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "./ui/dialog"
-import { Textarea } from "./ui/textarea"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "./ui/collapsible"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table"
-import { Alert, AlertDescription } from "./ui/alert"
-import {
-  Settings as SettingsIcon,
-  Users,
-  Store as StoreIcon,
-  Shield,
-  Bell,
-  Palette,
-  Database,
-  Download,
-  Upload,
-  Trash2,
-  Plus,
-  Edit,
-  Save,
-  X,
-  Eye,
-  EyeOff,
-  Key,
-  Mail,
-  Phone,
-  MapPin,
-  Clock,
-  Globe,
-  DollarSign,
-  Calendar,
-  CheckCircle,
-  AlertCircle,
-  Info,
-  Webhook,
-  RefreshCw,
-  UserPlus,
-  Link,
-  FileText,
-  Package,
-  User as UserIcon,
-  Tag,
-  UserCheck,
-  Layout,
-  BarChart3,
-  CreditCard,
-  Loader2,
-  XCircle,
-  ArrowRight,
-  Hash,
-  Percent,
-  Truck,
-  RotateCcw,
-  Building,
-  Gift,
-  ChevronsUpDown,
-  Check,
-  Package2,
-  Palette as PaletteIcon,
-  Text,
-  List,
-  Combine,
-  AlertTriangle,
-  TrendingUp,
-  Zap,
-  Copy,
-  Camera,
-  ChevronDown,
-  Image,
-  ExternalLink,
-  TestTube,
-} from "lucide-react"
+import { Badge } from "./ui/badge"
+import { useParams } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext"
-import { useMobileView } from "./Dashboard"
-import {
-  getUsers,
-  getStores,
-  createStore,
-  updateStore,
-  deleteStore,
-  registerShopifyWebhooks,
-  getOrderCardConfig,
-  saveOrderCardConfig,
-  getTenantSettings,
-  updateTenantSettings,
-  getProductLabels,
-  fetchShopifyOrder,
-  testShopifyConnection,
-} from "../services/api"
-import type { User, Store, ProductLabel } from "../types"
-import {
-  getAllFields,
-  type OrderCardField,
-  type OrderCardFieldType,
-} from "../types/orderCardFields"
-import { OrderCardPreview } from "./OrderCardPreview"
-import { OrderCardSettings } from "./OrderCardSettingsNew"
-import { Users as UsersComponent } from "./Users"
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "./ui/command"
-import { cn } from "../lib/utils"
-import { ScrollArea } from "./ui/scroll-area"
-import { useParams, useNavigate } from "react-router-dom"
+import { getStores, createStore, updateStore, deleteStore } from "../services/api"
+import type { Store } from "../types"
 import { toast } from "sonner"
-
-const userRoles = ["admin", "florist", "owner", "viewer"] as const
-type UserRole = (typeof userRoles)[number]
-
-type NewUser = {
-  name: string
-  email: string
-  password?: string
-  role: UserRole
-}
+import { useNavigate } from "react-router-dom"
 
 type NewStore = {
   name: string
@@ -151,125 +22,14 @@ type NewStore = {
   }
 }
 
-interface ShopifyFieldOption {
-  value: string
-  label: string
-  icon: React.ComponentType<{ className?: string }>
-}
-
-interface ShopifyFieldCategory {
-  name: string
-  fields: ShopifyFieldOption[]
-}
-
-function getShopifyFieldOptions(): ShopifyFieldCategory[] {
-  return [
-    {
-      name: "Product Labels",
-      fields: [
-        { value: "product:difficultyLabel", label: "Difficulty Label", icon: AlertTriangle },
-        { value: "product:productTypeLabel", label: "Product Type Label", icon: Package2 },
-      ],
-    },
-    {
-      name: "Core Order Fields",
-      fields: [
-        { value: "id", label: "Order ID", icon: Hash },
-        { value: "name", label: "Order Name", icon: FileText },
-        { value: "order_number", label: "Order Number", icon: Hash },
-        { value: "created_at", label: "Created At", icon: Calendar },
-        { value: "updated_at", label: "Updated At", icon: Calendar },
-        { value: "processed_at", label: "Processed At", icon: Calendar },
-        { value: "cancelled_at", label: "Cancelled At", icon: Calendar },
-        { value: "note", label: "Note", icon: FileText },
-        { value: "tags", label: "Tags", icon: Tag },
-        { value: "currency", label: "Currency", icon: DollarSign },
-        { value: "total_price", label: "Total Price", icon: DollarSign },
-        { value: "subtotal_price", label: "Subtotal Price", icon: DollarSign },
-        { value: "total_tax", label: "Total Tax", icon: DollarSign },
-        { value: "total_discounts", label: "Total Discounts", icon: DollarSign },
-        { value: "total_weight", label: "Total Weight", icon: Package },
-        { value: "financial_status", label: "Financial Status", icon: CreditCard },
-        { value: "fulfillment_status", label: "Fulfillment Status", icon: Package },
-        { value: "confirmed", label: "Confirmed", icon: CheckCircle },
-        { value: "test", label: "Test Order", icon: AlertCircle },
-        { value: "cancelled", label: "Cancelled", icon: XCircle },
-        { value: "cancel_reason", label: "Cancel Reason", icon: AlertCircle },
-        { value: "closed_at", label: "Closed At", icon: Calendar },
-        { value: "location_id", label: "Location ID", icon: MapPin },
-        { value: "source_name", label: "Source Name", icon: Link },
-        { value: "source_identifier", label: "Source Identifier", icon: Hash },
-        { value: "source_url", label: "Source URL", icon: Link },
-        { value: "device_id", label: "Device ID", icon: Package },
-        { value: "phone", label: "Phone", icon: Phone },
-        { value: "landing_site", label: "Landing Site", icon: Globe },
-        { value: "currency", label: "Currency", icon: DollarSign },
-        { value: "discount_codes", label: "Discount Codes", icon: Percent },
-        { value: "tax_lines", label: "Tax Lines", icon: DollarSign },
-      ],
-    },
-    {
-      name: "Fulfillment & Status",
-      fields: [
-        { value: "fulfillment_status", label: "Fulfillment Status", icon: Package },
-        { value: "fulfillments", label: "Fulfillments", icon: Package },
-        { value: "refunds", label: "Refunds", icon: RotateCcw },
-        { value: "confirmed", label: "Confirmed", icon: CheckCircle },
-        { value: "cancelled", label: "Cancelled", icon: XCircle },
-        { value: "cancel_reason", label: "Cancel Reason", icon: AlertCircle },
-        { value: "closed_at", label: "Closed At", icon: Calendar },
-        { value: "test", label: "Test Order", icon: AlertCircle },
-      ],
-    },
-    {
-      name: "Custom Fields & Attributes",
-      fields: [
-        { value: "note_attributes", label: "Note Attributes", icon: List },
-        { value: "properties", label: "Properties", icon: List },
-        { value: "tags", label: "Tags", icon: Tag },
-        { value: "note", label: "Note", icon: FileText },
-        { value: "custom:COMBINE", label: "Combine Fields", icon: Combine },
-      ],
-    },
-  ]
-}
-
-const iconMapping: { [key: string]: React.ComponentType<{ className?: string }> } = {
-  productTitle: Package,
-  productVariant: Palette,
-  timeslot: Clock,
-  orderId: Hash,
-  orderDate: Calendar,
-  orderTags: Tag,
-  assignedTo: UserCheck,
-  priority: AlertCircle,
-  customisations: Edit,
-  status: CheckCircle,
-  default: FileText,
-}
-
-const getFieldIcon = (fieldId: string) => {
-  const Icon = iconMapping[fieldId] || iconMapping.default
-  return <Icon className="h-5 w-5 mr-3 text-gray-500" />
-}
-
-interface WebhookConfig {
-  id: string
-  topic: string
-  address: string
-  status: "active" | "inactive" | "error"
-  lastTriggered?: string
-}
-
-export const Settings: React.FC = () => {
-  const { tenant, user } = useAuth()
-  const isMobile = useMobileView()
-  const { tenantId, tab = "general" } = useParams<{
-    tenantId: string
-    tab: string
-  }>()
-  const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState(tab)
+  export const Settings: React.FC = () => {
+    const { tenant, user } = useAuth()
+    const navigate = useNavigate()
+    const { tenantId, tab = "general" } = useParams<{
+      tenantId: string
+      tab: string
+    }>()
+    const [activeTab, setActiveTab] = useState(tab)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setLoading] = useState(true)
   
@@ -319,7 +79,6 @@ export const Settings: React.FC = () => {
 
   const handleTabChange = (newTab: string) => {
     setActiveTab(newTab)
-    navigate(`/settings/${newTab}`)
   }
 
   // Store management functions

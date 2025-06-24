@@ -10,14 +10,15 @@ import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Alert, AlertDescription } from './ui/alert';
 import { Separator } from './ui/separator';
-import { 
-  Upload, 
-  Camera, 
-  Image, 
-  FileText, 
-  Star, 
-  CheckCircle, 
-  XCircle, 
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import {
+  Upload,
+  Camera,
+  Image as ImageIcon,
+  FileText,
+  Star,
+  CheckCircle,
+  XCircle,
   AlertCircle,
   Download,
   Trash2,
@@ -26,7 +27,8 @@ import {
   Target,
   TrendingUp,
   Calendar,
-  Users
+  Users,
+  Loader2,
 } from 'lucide-react';
 import { createPhotoUploadService, type FloristPhotoUpload, type PhotoDescription, type PhotoQualityAssessment } from '../services/photoUploadService';
 import { useAuth } from '../contexts/AuthContext';
@@ -306,7 +308,7 @@ export default function PhotoUploadManager({ tenantId }: PhotoUploadManagerProps
             Upload
           </TabsTrigger>
           <TabsTrigger value="photos" className="flex items-center gap-2">
-            <Image className="h-4 w-4" />
+            <ImageIcon className="h-4 w-4" />
             Photos ({photos.length})
           </TabsTrigger>
           <TabsTrigger value="descriptions" className="flex items-center gap-2">
@@ -341,7 +343,7 @@ export default function PhotoUploadManager({ tenantId }: PhotoUploadManagerProps
               >
                 {selectedFile ? (
                   <div className="space-y-2">
-                    <Image className="h-12 w-12 mx-auto text-green-600" />
+                    <ImageIcon className="h-12 w-12 mx-auto text-green-600" />
                     <p className="font-medium">{selectedFile.name}</p>
                     <p className="text-sm text-gray-500">
                       {formatFileSize(selectedFile.size)}
@@ -429,7 +431,7 @@ export default function PhotoUploadManager({ tenantId }: PhotoUploadManagerProps
                 </div>
               ) : photos.length === 0 ? (
                 <div className="text-center py-8">
-                  <Image className="h-12 w-12 mx-auto text-gray-400" />
+                  <ImageIcon className="h-12 w-12 mx-auto text-gray-400" />
                   <p className="mt-2 text-gray-500">No photos uploaded yet</p>
                   <Button
                     variant="outline"

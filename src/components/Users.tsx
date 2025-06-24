@@ -32,7 +32,7 @@ import {
 import { useAuth } from "../contexts/AuthContext"
 import { useMobileView } from "./Dashboard"
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api"
-import type { User } from "../types"
+import type { User as UserType } from "../types"
 import { toast } from "sonner"
 
 const userRoles = ["admin", "florist"] as const
@@ -56,7 +56,7 @@ export const Users: React.FC = () => {
   const { user: currentUser, tenant } = useAuth()
   const isMobile = useMobileView()
   
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<UserType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -169,7 +169,7 @@ export const Users: React.FC = () => {
     }
   }
 
-  const openEditDialog = (user: User) => {
+  const openEditDialog = (user: UserType) => {
     setEditingUser({
       id: user.id,
       name: user.name,

@@ -402,7 +402,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     for (const order of results || []) {
       try {
         // Parse line items from JSON string
-        const lineItems = order.line_items ? JSON.parse(order.line_items) : []
+        const lineItems = order.line_items ? JSON.parse(order.line_items as string) : []
         
         // Process each line item
         for (const lineItem of lineItems) {
@@ -439,8 +439,8 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               shopifyOrderData: (() => {
                 try {
                   // Try to parse stored GraphQL data first
-                  if (order.shopify_order_data && order.shopify_order_data.trim() !== '') {
-                    const parsedData = JSON.parse(order.shopify_order_data as string);
+                  if (order.shopify_order_data && typeof order.shopify_order_data === 'string' && order.shopify_order_data.trim() !== '') {
+                    const parsedData = JSON.parse(order.shopify_order_data);
                     console.log('[GRAPHQL-PRESERVATION] Using original GraphQL data for order:', order.shopify_order_id);
                     return parsedData;
                   }
@@ -454,8 +454,8 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
                   id: order.shopify_order_id,
                   name: order.shopify_order_id,
                   customer: {
-                    first_name: order.customer_name?.split(' ')[0] || '',
-                    last_name: order.customer_name?.split(' ').slice(1).join(' ') || '',
+                    first_name: (order.customer_name as string)?.split(' ')[0] || '',
+                    last_name: (order.customer_name as string)?.split(' ').slice(1).join(' ') || '',
                     email: order.customer_email
                   },
                   line_items: lineItems,

@@ -153,7 +153,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
     if (!enabled || !tenant?.id) return
 
     // Start polling as fallback
-    pollIntervalRef.current = setInterval(checkForUpdates, pollInterval)
+    pollIntervalRef.current = setInterval(checkForUpdates, pollInterval) as unknown as number
 
     // Try to establish SSE connection
     connectSSE()
@@ -172,7 +172,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       setTimeout(() => {
         if (enabled) {
           connectSSE()
-          pollIntervalRef.current = setInterval(checkForUpdates, pollInterval)
+          pollIntervalRef.current = setInterval(checkForUpdates, pollInterval) as unknown as number
         }
       }, 1000)
     }
