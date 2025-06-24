@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import { AuthProvider, useAuth } from "./contexts/AuthContext"
 import { Login } from "./components/Login"
 import { Dashboard } from "./components/Dashboard"
+import { DashboardView } from "./components/DashboardView"
 import { OrdersView } from "./components/OrdersView"
 import { ProductManagement } from "./components/ProductManagement"
 import { Settings } from "./components/Settings"
@@ -65,7 +66,8 @@ function AppContent() {
           <Route path="/ai-florist" element={<CustomerAIFlorist />} />
           <Route path="/ai-florist-widget" element={<AIFlorist />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
-            <Route index element={<OrdersView />} />
+            <Route index element={<DashboardView />} />
+            <Route path="dashboard" element={<DashboardView />} />
             <Route path="orders" element={<OrdersView />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="products" element={<ProductsManagementRoute><ProductManagement /></ProductsManagementRoute>} />

@@ -385,6 +385,11 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   onUpdate,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false)
+  
+  // Debug log for state changes
+  useEffect(() => {
+    console.log(`OrderCard ${order.id} - isExpanded changed to:`, isExpanded)
+  }, [isExpanded, order.id])
   const [status, setStatus] = useState<OrderStatus>("assigned")
   const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
   const [selectedProductId] = useState<string | undefined>()
@@ -607,7 +612,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => {
+                  console.log('Expand button clicked, current state:', isExpanded)
+                  setIsExpanded(!isExpanded)
+                }}
               >
                 <EyeOff className="h-4 w-4" />
               </Button>
@@ -648,7 +656,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({
                   variant="ghost"
                   size="sm"
                   className="h-6 w-6 p-0 flex-shrink-0"
-                  onClick={() => setIsExpanded(!isExpanded)}
+                  onClick={() => {
+                    console.log('Collapse button clicked, current state:', isExpanded)
+                    setIsExpanded(!isExpanded)
+                  }}
                 >
                   <Eye className="h-3 w-3" />
                 </Button>

@@ -53,10 +53,10 @@ export function Dashboard() {
   }
 
   const getActiveTab = () => {
-    // Default to 'orders' if the path is '/' or '/dashboard'
+    // Default to 'dashboard' if the path is '/' or '/dashboard'
     const path = location.pathname.substring(1)
     if (path === "" || path === "dashboard") {
-      return "orders"
+      return "dashboard"
     }
     return path
   }
@@ -141,8 +141,15 @@ export function Dashboard() {
             className={`${isMobileView ? "space-y-4" : "space-y-6"}`}
           >
             <TabsList
-              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-5"}`}
+              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-6"}`}
             >
+              <TabsTrigger
+                value="dashboard"
+                className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
+              >
+                <BarChart3 className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                Dashboard
+              </TabsTrigger>
               <TabsTrigger
                 value="orders"
                 className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
