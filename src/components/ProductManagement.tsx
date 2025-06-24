@@ -45,6 +45,7 @@ import {
   addProductLabel,
   updateProductLabel,
   syncShopifyProduct,
+  removeProductLabel,
 } from "../services/api"
 import type { ProductLabel, Store, Product, SavedProduct } from "../types"
 import { toast } from "sonner"
@@ -117,6 +118,9 @@ export function ProductManagement() {
   const [editLabelColor, setEditLabelColor] = useState("#3b82f6")
   const [editLabelCategory, setEditLabelCategory] = useState<"difficulty" | "productType" | "custom">("difficulty")
   const [editLabelPriority, setEditLabelPriority] = useState(1)
+
+  // New state for removing labels
+  const [isRemovingLabels, setIsRemovingLabels] = useState(false)
 
   // Helper to fetch latest product data from Shopify by productId
   async function fetchShopifyProductById(shopifyProductId: string) {
@@ -732,6 +736,36 @@ export function ProductManagement() {
       toast.error('❌ Failed to update products. Please try again.', { duration: 5000 })
     } finally {
       setIsSavingProducts(false)
+    }
+  }
+
+  // Bulk remove all labels from selected saved products
+  const handleBulkRemoveLabels = async () => {
+    if (!tenant?.id || selectedSavedProducts.size === 0) return
+    setIsRemovingLabels(true)
+    try {
+      // Find the selected saved products
+      const productsToRemoveLabels = savedProducts.filter((product) => selectedSavedProducts.has(product.id))
+      // For each product, remove all its labels
+      const removePromises: Promise<any>[] = []
+      for (const product of productsToRemoveLabels) {
+        if (product.labelIds && product.labelIds.length > 0) {
+          for (const labelId of product.labelIds) {
+            removePromises.push(removeProductLabel(tenant.id, product.id, labelId))
+          }
+        }
+      }
+      await Promise.all(removePromises)
+      // Refresh saved products list
+      const newSavedProducts = await getSavedProducts(tenant.id)
+      setSavedProducts(newSavedProducts)
+      setSelectedSavedProducts(new Set())
+      toast.success(`✅ Removed all labels from ${productsToRemoveLabels.length} products!`, { duration: 4000 })
+    } catch (err) {
+      console.error('Error removing labels from saved products:', err)
+      toast.error('❌ Failed to remove labels. Please try again.', { duration: 5000 })
+    } finally {
+      setIsRemovingLabels(false)
     }
   }
 
@@ -1379,9 +1413,10 @@ export function ProductManagement() {
               Saved Products
             </CardTitle>
           </div>
-          <div className={`flex flex-col ${isMobileView ? "gap-3" : "sm:flex-row sm:items-center sm:justify-between mt-4"}`}>
-            {/* Filters on the left */}
-            <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:flex-wrap sm:items-center gap-2"}`}>
+          {/* --- Responsive Filters and Actions Layout --- */}
+          <div className={`w-full ${isMobileView ? "flex flex-col gap-2" : "flex flex-row flex-wrap items-center gap-2 justify-between mt-4"}`}>
+            {/* Filters */}
+            <div className={`${isMobileView ? "flex flex-col gap-2 w-full" : "flex flex-row flex-wrap gap-2 items-center"}`}>
               <div className={isMobileView ? "w-full" : "w-64"}>
                 <Input
                   placeholder="Search saved products..."
@@ -1410,9 +1445,8 @@ export function ProductManagement() {
                 Clear Filters
               </Button>
             </div>
-
-            {/* Actions on the right */}
-            <div className={`flex flex-col ${isMobileView ? "gap-2" : "sm:flex-row sm:items-center gap-2 mt-2 sm:mt-0"}`}>
+            {/* Bulk Actions */}
+            <div className={`${isMobileView ? "flex flex-col gap-2 w-full" : "flex flex-row gap-2 items-center"}`}>
               <Select value={selectedDifficultyLabel} onValueChange={setSelectedDifficultyLabel}>
                 <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-48"}`}>
                   <SelectValue placeholder="Select difficulty label" />
@@ -1449,7 +1483,6 @@ export function ProductManagement() {
                   ))}
                 </SelectContent>
               </Select>
-
               <Button
                 size="sm"
                 variant="outline"
@@ -1463,7 +1496,6 @@ export function ProductManagement() {
                 <Tag className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Apply Labels ({selectedSavedProducts.size})
               </Button>
-
               <Button
                 size="sm"
                 variant="destructive"
@@ -1474,7 +1506,6 @@ export function ProductManagement() {
                 <Trash2 className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Delete ({selectedSavedProducts.size})
               </Button>
-
               <Button
                 size="sm"
                 variant="outline"
@@ -1489,38 +1520,22 @@ export function ProductManagement() {
                 )}
                 Update Selected ({selectedSavedProducts.size})
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleBulkRemoveLabels}
+                disabled={selectedSavedProducts.size === 0 || isRemovingLabels}
+                className={isMobileView ? "w-full h-9 text-sm" : ""}
+              >
+                {isRemovingLabels ? (
+                  <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                ) : (
+                  <Tag className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                )}
+                Remove Labels ({selectedSavedProducts.size})
+              </Button>
             </div>
           </div>
-          {(savedProductSearch || labelledFilter !== "all") && (
-            <div className={`flex flex-wrap ${isMobileView ? "gap-1 mt-2" : "gap-2 mt-2"}`}>
-              {savedProductSearch && (
-                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
-                  Search: "{savedProductSearch}"
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSavedProductSearch("")}
-                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
-                  >
-                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
-                  </Button>
-                </Badge>
-              )}
-              {labelledFilter !== "all" && (
-                <Badge variant="secondary" className={`${isMobileView ? "text-xs" : "text-xs"}`}>
-                  {labelledFilter === "labelled" ? "Labelled" : "Not Labelled"}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setLabelledFilter("all")}
-                    className={`ml-1 p-0 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}
-                  >
-                    <X className={`${isMobileView ? "h-2 w-2" : "h-3 w-3"}`} />
-                  </Button>
-                </Badge>
-              )}
-            </div>
-          )}
         </CardHeader>
         <CardContent className={isMobileView ? "pt-0" : ""}>
           {paginatedSavedProducts.length > 0 ? (

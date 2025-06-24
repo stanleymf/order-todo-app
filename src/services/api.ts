@@ -632,7 +632,7 @@ export async function getProductByShopifyIds(
   shopifyVariantId: string
 ): Promise<any | null> {
   return authenticatedRequest<any>(
-    `/api/tenants/${tenantId}/saved-products/by-shopify-ids?productId=${shopifyProductId}&variantId=${shopifyVariantId}`
+    `/api/tenants/${tenantId}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`
   )
 }
 

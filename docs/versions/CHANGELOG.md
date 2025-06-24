@@ -2,6 +2,97 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.9] - 2025-06-24
+
+### 🎯 **OrdersView Logic Implementation - Add-On Classification & Line Item Processing**
+
+- **Complete OrdersView Overhaul**: Implemented comprehensive logic for processing Shopify orders, line items, quantities, and add-on classification.
+- **Full Shopify Order Data Integration**: OrdersView now fetches complete Shopify order data for each order to enable proper field mapping and add-on detection.
+- **Line Item Processing**: Each line item within a Shopify order is now processed individually, with quantity flattening (e.g., quantity 3 = 3 separate cards).
+- **Add-On Classification System**: Implemented automatic detection of add-ons using existing saved products API:
+  - Extracts Product Title ID and Variant ID from each line item
+  - Matches against saved_products table using `/api/tenants/:tenantId/saved-products/by-shopify-id`
+  - Classifies line items as add-ons if they have "Add-Ons" label in product_labels
+- **Container Separation**: Orders are now displayed in two separate containers:
+  - **Main Orders Container**: Regular line items (non-add-ons)
+  - **Add-Ons Processing Container**: Add-on line items for further processing
+- **OrderCard Enhancement**: Updated OrderCard to handle new data structure:
+  - Displays add-ons information in main order cards
+  - Special handling for add-on cards with distinct styling
+  - Add-ons field shows related add-ons with title, quantity, and price
+  - Visual indicators (Gift icon) for add-on items
+
+### 🔧 **Technical Implementation**
+
+- **New Data Structures**: Added `ProcessedLineItem` interface for structured line item processing:
+  ```typescript
+  interface ProcessedLineItem {
+    orderId: string;
+    lineItemId: string;
+    productTitleId: string;
+    variantId: string;
+    title: string;
+    quantity: number;
+    price: number;
+    isAddOn: boolean;
+    shopifyOrderData: any;
+    savedProductData?: any;
+    cardId: string;
+  }
+  ```
+- **Helper Functions**: Implemented comprehensive processing pipeline:
+  - `processLineItems()`: Flattens line items by quantity
+  - `classifyLineItems()`: Determines add-on status using saved products API
+  - `separateMainAndAddOns()`: Sorts items into appropriate containers
+  - `getAddOnsForOrder()`: Retrieves add-ons for specific orders
+- **API Integration**: Leveraged existing endpoints:
+  - `fetchShopifyOrder()`: Gets full Shopify order data
+  - `getProductByShopifyIds()`: Matches line items to saved products
+  - `getOrdersByDate()`: Retrieves basic order data
+- **Error Handling**: Robust error handling for:
+  - Missing Shopify order data
+  - Failed add-on classification
+  - API failures with graceful degradation
+
+### 🎨 **UI/UX Improvements**
+
+- **Statistics Dashboard**: Updated header stats to show:
+  - Total Orders (main order cards)
+  - Add-Ons count
+  - Completed/Pending counts based on new data structure
+- **Visual Indicators**: Added distinct styling for add-on cards:
+  - Gift icon for add-on items
+  - "Add-On" badges
+  - Separate container with clear labeling
+- **Add-Ons Display**: Enhanced add-ons field in OrderCard:
+  - Lists all related add-ons with details
+  - Shows quantity and price for each add-on
+  - Clean, organized layout with background highlighting
+
+### 📊 **Data Flow**
+
+1. **Order Fetching**: `getOrdersByDate()` retrieves basic order data
+2. **Shopify Data Enrichment**: `fetchShopifyOrder()` gets full Shopify order data for each order
+3. **Line Item Processing**: `processLineItems()` flattens line items by quantity
+4. **Add-On Classification**: `classifyLineItems()` matches against saved products to identify add-ons
+5. **Container Separation**: `separateMainAndAddOns()` sorts items into main vs. add-on containers
+6. **UI Rendering**: OrderCard displays appropriate information based on item type
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully
+- **Bundle**: 792.85 kB (225.28 kB gzipped)
+- **Version ID**: 3d52d4da-0205-468b-8caa-570c8e893c27
+- **All endpoints functional**: No breaking changes to existing APIs
+
+### 🎯 **Impact**
+
+- **Complete Order Processing**: Full Shopify order data now available for field mapping
+- **Add-On Management**: Automatic detection and separation of add-on items
+- **Quantity Handling**: Individual cards for each line item quantity
+- **Enhanced UX**: Clear visual distinction between main orders and add-ons
+- **Future-Ready**: Foundation for advanced add-on processing workflows
+
 ## [1.4.8] - 2025-06-24
 
 ### 🐛 Bug Fixes & UI Improvements
@@ -157,38 +248,9 @@ All notable changes to this project will be documented in this file.
 - Removed invalid field type references and problematic grouped field logic
 - Fixed field editor component property access issues
 
-## [1.4.3] - 2025-01-13
-
-### 🔄 **Saved Products Sync System**
-
-- **New Sync Script**: Created comprehensive sync system to sync saved products from local SQLite database to D1 database.
-- **Upsert Operations**: Implemented safe "upsert" (insert or update) operations that preserve existing data and only add/update products as needed.
-- **Missing POST Endpoint**: Added the missing `/api/tenants/:tenantId/saved-products` POST endpoint to the worker that was preventing product saving functionality.
-- **Sync Script Features**:
-  - Generates SQL scripts for safe database operations
-  - Supports tenant-specific syncing with `--tenant-id` parameter
-  - Dry-run mode for testing without making changes
-  - Batch processing for large datasets
-  - Comprehensive logging and progress tracking
-- **Script Usage**: Added `npm run sync-saved-products` command for easy execution.
-- **Data Preservation**: Sync operations use `INSERT OR REPLACE` to ensure no data loss unless explicitly requested.
-
-### 🔧 **Technical Implementation**
-
-- **Worker Endpoint**: Added POST endpoint for saving products that was missing from the worker implementation.
-- **Database Service**: Leverages existing `d1DatabaseService.saveProducts()` method for consistent data handling.
-- **Script Architecture**: Created modular sync system with:
-  - `SavedProductsSync` class for core sync logic
-  - SQL script generation for safe execution
-  - Command-line argument parsing
-  - Comprehensive error handling and logging
-
-### 🎯 **Impact**
-
-- **Product Management**: Users can now successfully save products from Shopify to their local database.
-- **Data Synchronization**: Provides safe way to sync local product data to production D1 database.
-- **Development Workflow**: Enables local development with SQLite and production deployment with D1.
-- **Data Integrity**: Ensures no existing product data is lost during sync operations.
+## [1.4.3] - 2025-06-24
+### Fixed
+- Collapsed view of OrderCardPreview now uses the fetched difficulty label from Saved Products, ensuring the badge is always correct and matches the expanded view.
 
 ## [1.4.2] - 2025-06-24
 ### Fixed

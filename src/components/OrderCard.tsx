@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Badge } from "./ui/badge"
 import { Button } from "./ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Textarea } from "./ui/textarea"
 import { Input } from "./ui/input"
-import { Label } from "./ui/label"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
 import {
   CheckCircle,
   Package,
@@ -15,340 +15,467 @@ import {
   Tag,
   User,
   AlertTriangle,
-  Edit3,
-  Save,
-  X,
-  ChevronDown,
-  ChevronUp,
+  Eye,
+  EyeOff,
   Circle,
   Gift,
   MessageSquare,
+  Save,
+  RefreshCw,
+  Loader2,
 } from "lucide-react"
-import { OrderCardField, getFieldById } from "../types/orderCardFields"
+import { OrderCardField } from "../types/orderCardFields"
+import { useIsMobile } from "./hooks/use-mobile"
+import { ProductImageModal } from "./shared/ProductImageModal"
 import { useAuth } from "../contexts/AuthContext"
-import { getOrderCardConfig } from "../services/api"
-import { getAllFields } from "../types/orderCardFields"
 
 interface OrderCardProps {
-  order: any // Using 'any' for now, should be a proper Order type
-  users?: Array<{ id: string; name: string }>
-  difficultyLabels?: Array<{ id: string; name: string; color: string }>
-  onUpdate?: (orderId: string, updates: any) => void
-  isEditable?: boolean
-  currentUserId?: string
+  fields: OrderCardField[];
+  realOrderData: any;
+  users?: Array<{ id: string; name: string }>;
+  difficultyLabels?: Array<{ id: string; name: string; color: string }>;
+  productTypeLabels?: Array<{ id: string; name: string; color: string }>;
+  currentUserId?: string;
 }
 
+// ========== Utility Functions (from OrderCardPreview) ==========
+const getValueFromShopifyData = (sourcePath: string, data: any): any => {
+  if (!sourcePath || !data) return null;
+  const parts = sourcePath.split('.');
+  let current: any = data;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (current === null || typeof current === 'undefined') return null;
+    if (Array.isArray(current)) {
+      const index = parseInt(part);
+      if (!isNaN(index)) {
+        if (index >= 0 && index < current.length) {
+          current = current[index];
+        } else {
+          return null;
+        }
+      } else {
+        const nextPart = parts[i + 1];
+        if (nextPart) {
+          const item = current.find(d => d.name === nextPart);
+          current = item ? item.value : null;
+          i++;
+        } else {
+          return current;
+        }
+      }
+    } else if (typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return null;
+    }
+  }
+  return current;
+};
+
+const applyTransformation = (value: any, field: OrderCardField): any => {
+  if (field.transformation === "extract" && field.transformationRule) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') {
+          const match = item.match(new RegExp(field.transformationRule));
+          if (match) return match[0];
+        }
+      }
+      return "Not set";
+    }
+    if (typeof value === "string") {
+      try {
+        const regex = new RegExp(field.transformationRule);
+        const match = value.match(regex);
+        return match ? match[0] : "Not set";
+      } catch (e) {
+        return "Invalid Regex";
+      }
+    }
+    return "Not set";
+  }
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+  return value ?? "Not set";
+};
+
+// ========== Main Component ==========
 export const OrderCard: React.FC<OrderCardProps> = ({
-  order,
+  fields,
+  realOrderData,
   users = [],
   difficultyLabels = [],
-  onUpdate,
-  isEditable = true,
+  productTypeLabels = [],
   currentUserId,
 }) => {
-  const { tenant } = useAuth()
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [fields, setFields] = useState<OrderCardField[]>([])
-  const [transformedData, setTransformedData] = useState<any>({})
+  const { tenant } = useAuth();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [productLabel, setProductLabel] = useState<{ name: string; color: string } | null>(null);
+  const [orderCardLabels, setOrderCardLabels] = useState<{ difficulty?: { name: string, color: string }, productType?: { name: string, color: string } }>({});
+  const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
+  const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>();
+  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>();
 
+  // Fetch product label logic (from OrderCardPreview)
   useEffect(() => {
-    const loadConfig = async () => {
-      if (!tenant) return
-      try {
-        const config = await getOrderCardConfig(tenant.id)
-        if (config && config.fields) {
-          setFields(config.fields)
-        } else {
-          setFields(getAllFields())
-        }
-      } catch (error) {
-        setFields(getAllFields())
-      }
-    }
-    loadConfig()
-  }, [tenant])
-
-  const getValueFromShopifyData = (sourcePath: string, data: any) => {
-    if (!sourcePath || !data) return undefined
-
-    if (sourcePath === "tags") return Array.isArray(data.tags) ? data.tags.join(", ") : data.tags
-    if (sourcePath === "line_items.title") return data.lineItems?.edges?.[0]?.node?.title
-    if (sourcePath === "line_items.variant_title")
-      return data.lineItems?.edges?.[0]?.node?.variant?.title
-    return data[sourcePath]
-  }
-
-  const applyTransformation = (value: any, field: OrderCardField): any => {
-    if (!value) return value
-
-    // Apply regex processing if configured
-    if (field.processor && field.processor.type === "regex" && field.processor.pattern) {
-      if (typeof value === "string") {
-        try {
-          const regex = new RegExp(field.processor.pattern, 'g')
-          const matches = value.match(regex)
-          
-          if (matches && matches.length > 0) {
-            let result = matches[0]
-            
-            // Apply output formatting if specified
-            if (field.processor.outputFormat) {
-              switch (field.processor.outputFormat) {
-                case "date":
-                  const dateMatch = result.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
-                  if (dateMatch) {
-                    const [, day, month, year] = dateMatch
-                    result = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-                  }
-                  break
-                case "timeslot":
-                  // Keep timeslot as-is
-                  break
-                case "time":
-                  // Extract just the time part
-                  const timeMatch = result.match(/(\d{1,2}:\d{2})/)
-                  if (timeMatch) {
-                    result = timeMatch[1]
-                  }
-                  break
-              }
-            }
-            
-            return result
-          }
-          return "No match found"
-        } catch (error) {
-          console.error("Regex processing error:", error)
-          return "Regex error"
+    const fetchProductLabelAndImage = async () => {
+      if (!tenant?.id || !realOrderData) return;
+      let shopifyProductId = realOrderData.shopifyProductId || realOrderData.product_id || realOrderData.productId;
+      let shopifyVariantId = realOrderData.shopifyVariantId || realOrderData.variant_id || realOrderData.variantId;
+      if (!shopifyProductId || !shopifyVariantId) {
+        const lineItem = realOrderData.lineItems?.edges?.[0]?.node;
+        if (lineItem) {
+          shopifyProductId = lineItem.product?.id;
+          shopifyVariantId = lineItem.variant?.id;
         }
       }
-    }
-
-    // Apply existing transformation logic
-    if (field.transformation === "extract" && field.transformationRule) {
-      if (typeof value !== "string") return null
+      if (shopifyProductId && shopifyProductId.includes('/')) {
+        shopifyProductId = shopifyProductId.split('/').pop();
+      }
+      if (shopifyVariantId && shopifyVariantId.includes('/')) {
+        shopifyVariantId = shopifyVariantId.split('/').pop();
+      }
+      if (!shopifyProductId || !shopifyVariantId) return;
       try {
-        const regex = new RegExp(field.transformationRule)
-        const match = value.match(regex)
-        if (match && match[0]) {
-          const extractedValue = match[0]
-          if (field.type === "date") {
-            const parts = extractedValue.split("/")
-            let date
-            if (parts.length === 3 && parts[2].length === 4) {
-              const reformattedDate = `${parts[2]}-${parts[1]}-${parts[0]}`
-              date = new Date(reformattedDate)
-            } else {
-              date = new Date(extractedValue)
-            }
-            return date && !isNaN(date.getTime()) ? date.toISOString() : "Invalid Date"
+        const jwt = localStorage.getItem("auth_token");
+        const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${jwt}`,
+            "Content-Type": "application/json"
           }
-          return extractedValue
+        });
+        if (!res.ok) return;
+        const product = await res.json();
+        setProductImageUrl(product.imageUrl || product.image_url || null);
+        let names = [];
+        let cats = [];
+        let colors = [];
+        if (Array.isArray(product.labelNames)) {
+          names = product.labelNames;
+        } else if (typeof product.labelNames === 'string') {
+          names = product.labelNames.split(',');
         }
-        return "No match"
+        if (Array.isArray(product.labelCategories)) {
+          cats = product.labelCategories;
+        } else if (typeof product.labelCategories === 'string') {
+          cats = product.labelCategories.split(',');
+        }
+        if (Array.isArray(product.labelColors)) {
+          colors = product.labelColors;
+        } else if (typeof product.labelColors === 'string') {
+          colors = product.labelColors.split(',');
+        }
+        let difficulty;
+        let productType;
+        for (let i = 0; i < cats.length; i++) {
+          if (cats[i] === 'difficulty') {
+            difficulty = { name: names[i], color: colors[i] || '#e53e3e' };
+          }
+          if (cats[i] === 'productType') {
+            productType = { name: names[i], color: colors[i] || '#3182ce' };
+          }
+        }
+        setOrderCardLabels({ difficulty, productType });
+        let label = null;
+        for (let i = 0; i < cats.length; i++) {
+          if (cats[i] === 'difficulty') {
+            label = { name: names[i], color: colors[i] || '#e53e3e' };
+            break;
+          }
+        }
+        if (!label) {
+          for (let i = 0; i < cats.length; i++) {
+            if (cats[i] === 'productType') {
+              label = { name: names[i], color: colors[i] || '#3182ce' };
+              break;
+            }
+          }
+        }
+        setProductLabel(label);
       } catch (e) {
-        return "Regex Error"
+        setProductLabel(null);
+        setProductImageUrl(null);
       }
+    };
+    fetchProductLabelAndImage();
+  }, [tenant?.id, realOrderData]);
+
+  // Handlers
+  const handleShowProductImage = useCallback((shopifyProductId?: string, shopifyVariantId?: string) => {
+    const numericProductId = shopifyProductId ? shopifyProductId.split('/').pop() : undefined;
+    const numericVariantId = shopifyVariantId ? shopifyVariantId.split('/').pop() : undefined;
+    setSelectedProductId(numericProductId);
+    setSelectedVariantId(numericVariantId);
+    setIsProductImageModalOpen(true);
+  }, []);
+
+  // Field value getter
+  const getFieldValue = useCallback((fieldId: string): any => {
+    const field = fields.find((f) => f.id === fieldId);
+    if (!field) return "";
+    let rawValue;
+    // Prefer shopifyOrderData if present
+    const dataSource = realOrderData.shopifyOrderData || realOrderData;
+    if (dataSource && field.shopifyFields && field.shopifyFields.length > 0) {
+      const sourcePath = field.shopifyFields[0];
+      rawValue = getValueFromShopifyData(sourcePath, dataSource);
+    } else {
+      rawValue = (realOrderData as any)[fieldId];
     }
-    return value
-  }
+    const transformedValue = applyTransformation(rawValue, field);
+    return transformedValue;
+  }, [fields, realOrderData]);
 
-  useEffect(() => {
-    if (order && fields.length > 0) {
-      const newTransformedData: { [key: string]: any } = {}
-      fields.forEach((field) => {
-        let value
-        // Default to order properties if they exist (e.g., from DB)
-        if (order[field.id] !== undefined) {
-          value = order[field.id]
-        }
-        // Otherwise, try to map from Shopify data if available
-        else if (order.shopifyOrderData && field.shopifyFields && field.shopifyFields.length > 0) {
-          const shopifyPath = field.shopifyFields[0]
-          value = getValueFromShopifyData(shopifyPath, order.shopifyOrderData)
-        }
-        newTransformedData[field.id] = applyTransformation(value, field)
-      })
-      setTransformedData(newTransformedData)
+  // Card style
+  const getCardStyle = () => {
+    if (realOrderData.isCompleted) {
+      return "border-green-500 bg-green-50";
     }
-  }, [order, fields])
-
-  const getFieldIcon = (fieldId: string) => {
-    switch (fieldId) {
-      case "productTitle":
-      case "productVariantTitle":
-        return <Package className="h-4 w-4" />
-      case "timeslot":
-        return <Clock className="h-4 w-4" />
-      case "orderId":
-        return <Hash className="h-4 w-4" />
-      case "orderDate":
-        return <Calendar className="h-4 w-4" />
-      case "orderTags":
-        return <Tag className="h-4 w-4" />
-      case "assignedTo":
-        return <User className="h-4 w-4" />
-      case "priorityLabel":
-        return <AlertTriangle className="h-4 w-4" />
-      case "addOns":
-        return <Gift className="h-4 w-4" />
-      case "customisations":
-        return <MessageSquare className="h-4 w-4" />
-      default:
-        return null
+    if (realOrderData.assignedTo) {
+      return "border-blue-500 bg-blue-50";
     }
-  }
+    return "border-gray-200 bg-white";
+  };
 
-  const getAssignedUserName = () => {
-    const user = users.find((u) => u.id === transformedData.assignedTo)
-    return user?.name || "Unassigned"
-  }
-
-  const getPriorityLabelName = () => {
-    const label = difficultyLabels.find(
-      (l) => l.name.toLowerCase() === String(transformedData.priorityLabel).toLowerCase()
-    )
-    return label?.name || "Not Set"
-  }
-
-  const getPriorityColor = () => {
-    const label = difficultyLabels.find(
-      (l) => l.name.toLowerCase() === String(transformedData.priorityLabel).toLowerCase()
-    )
-    return label?.color || "gray"
-  }
-
-  const renderValue = (field: OrderCardField) => {
-    const value = transformedData[field.id]
-
-    if (value === undefined || value === null) return "N/A"
-
-    switch (field.type) {
-      case "date":
-        const date = new Date(value)
-        return !isNaN(date.getTime())
-          ? new Intl.DateTimeFormat("en-GB", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-            }).format(date)
-          : String(value)
-      case "select":
-        if (field.id === "assignedTo") return getAssignedUserName()
-        if (field.id === "priorityLabel") return getPriorityLabelName()
-        return String(value)
-      default:
-        return String(value)
-    }
-  }
-
-  const visibleFields = fields.filter((f) => f.isVisible)
-
-  if (fields.length === 0) {
-    return <div>Loading configuration...</div>
-  }
-
-  const CollapsedView = () => (
-    <CardContent className="p-3 cursor-pointer" onClick={() => setIsExpanded(true)}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="text-base font-semibold text-gray-900 leading-tight">
-            {transformedData.productTitle || "No Product Title"}
+  // Collapsed View
+  const CollapsedView = () => {
+    // Use the fetched difficulty label for consistency
+    const difficultyLabel = productLabel && productLabel.name && productLabel.color ? productLabel : null;
+    
+    // Check if this is an add-on card
+    const isAddOnCard = realOrderData.isAddOnCard;
+    
+    return (
+      <CardContent className="p-3 cursor-pointer relative min-h-[90px] fade-in" onClick={() => setIsExpanded(true)}>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0 pr-16">
+            <div className="text-base font-semibold text-gray-900 leading-tight">
+              {isAddOnCard ? realOrderData.addOnTitle : realOrderData.productTitle}
+            </div>
+            <div className="text-sm text-gray-500 font-normal mt-1">
+              {isAddOnCard ? `Add-On - $${realOrderData.addOnPrice}` : realOrderData.productVariantTitle}
+            </div>
+            {!isAddOnCard && realOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
+              <div className="mt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 w-5 p-0"
+                  onClick={e => {
+                    e.stopPropagation();
+                    const productId = realOrderData.lineItems.edges[0].node.product.id;
+                    const variantId = realOrderData.lineItems.edges[0].node.variant?.id;
+                    setSelectedProductId(productId);
+                    setSelectedVariantId(variantId);
+                    setIsProductImageModalOpen(true);
+                  }}
+                >
+                  <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                </Button>
+              </div>
+            )}
+            {/* Display add-ons for main orders */}
+            {!isAddOnCard && realOrderData.addOns && realOrderData.addOns.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                <Badge variant="outline" className="text-xs">
+                  <Gift className="h-3 w-3 mr-1" />
+                  {realOrderData.addOns.length} add-on{realOrderData.addOns.length !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+            )}
           </div>
-          <div className="text-sm text-gray-500 font-normal mt-1">
-            {transformedData.productVariantTitle}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          {/* Status logic can be added here if needed */}
-          {transformedData.priorityLabel && (
-            <Badge
-              variant="secondary"
-              style={{ backgroundColor: getPriorityColor(), color: "white" }}
-            >
-              {getPriorityLabelName()}
-            </Badge>
-          )}
-        </div>
-      </div>
-    </CardContent>
-  )
-
-  const ExpandedView = () => (
-    <>
-      <CardHeader className="pb-3 cursor-pointer">
-        <div className="flex justify-between items-start">
-          <div className="flex-1">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              {transformedData.productTitle || "Untitled Product"}
-            </CardTitle>
-            {transformedData.product_label && (
-              <Badge variant="secondary" className="mt-2">
-                {transformedData.product_label}
+          <div className="absolute top-3 right-3 flex flex-col items-end gap-2 flex-shrink-0">
+            {isAddOnCard && (
+              <Badge variant="secondary" className="text-xs">
+                <Gift className="h-3 w-3 mr-1" />
+                Add-On
               </Badge>
             )}
-            {transformedData.productVariantTitle && (
-              <p className="text-sm text-muted-foreground mt-1">
-                {transformedData.productVariantTitle}
-              </p>
-            )}
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => setIsExpanded(false)}>
-            <ChevronUp className="h-5 w-5" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {visibleFields.map((field) => (
-          <div key={field.id} className="flex items-start gap-2 text-sm">
-            <div className="w-5 h-5 flex-shrink-0 text-muted-foreground">
-              {getFieldIcon(field.id)}
-            </div>
-            <span className="font-medium w-32 flex-shrink-0">{field.label}:</span>
-            {field.id === "priorityLabel" ? (
+            {difficultyLabel && (
               <Badge
-                variant="secondary"
-                style={{ backgroundColor: getPriorityColor(), color: "white" }}
+                style={{ backgroundColor: difficultyLabel.color, color: "white", marginTop: 8 }}
+                className="text-xs"
               >
-                {renderValue(field)}
+                {difficultyLabel.name}
               </Badge>
-            ) : (
-              <span className="flex-1 break-words">{renderValue(field)}</span>
             )}
-          </div>
-        ))}
-        
-        {/* Editable Notes Field */}
-        <div className="pt-4 border-t">
-          <div className="flex items-start gap-2">
-            <div className="w-5 h-5 flex-shrink-0 text-muted-foreground mt-1">
-              <MessageSquare className="h-4 w-4" />
-            </div>
-            <div className="flex-1">
-              <Label className="text-sm font-medium">Notes</Label>
-              <Textarea
-                placeholder="Add notes about this order..."
-                value={order.notes || ""}
-                onChange={(e) => {
-                  if (onUpdate && order.id) {
-                    onUpdate(order.id, { notes: e.target.value })
-                  }
-                }}
-                onBlur={() => {
-                  // Auto-save on blur
-                  if (onUpdate && order.id) {
-                    onUpdate(order.id, { notes: order.notes })
-                  }
-                }}
-                className="mt-1 min-h-[80px] resize-none"
-              />
-            </div>
           </div>
         </div>
       </CardContent>
-    </>
-  )
+    );
+  };
 
-  return <Card>{isExpanded ? <ExpandedView /> : <CollapsedView />}</Card>
+  // Expanded View
+  const ExpandedView = () => {
+    const renderField = (field: OrderCardField) => {
+      if (field.id === "difficultyLabel" || field.id === "productTypeLabel") {
+        return (
+          <div className="flex items-center gap-2 text-sm">
+            {field.id === "difficultyLabel" ? (
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <Package className="h-4 w-4 text-muted-foreground" />
+            )}
+            <span className="font-medium">{field.label}:</span>
+            {productLabel ? (
+              <Badge
+                variant="secondary"
+                style={{ backgroundColor: productLabel.color, color: "white" }}
+              >
+                {productLabel.name}
+              </Badge>
+            ) : (
+              <span className="text-gray-400">Not set</span>
+            )}
+          </div>
+        );
+      }
+      
+      // Special handling for add-ons field
+      if (field.id === "addOns") {
+        const addOns = realOrderData.addOns;
+        if (!addOns || addOns.length === 0) {
+          return (
+            <div className="flex items-center gap-2 text-sm">
+              <Gift className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{field.label}:</span>
+              <span className="text-gray-400">None</span>
+            </div>
+          );
+        }
+        
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Gift className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{field.label}:</span>
+            </div>
+            <div className="ml-6 space-y-1">
+              {addOns.map((addOn: any, index: number) => (
+                <div key={index} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
+                  <span>{addOn.title}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">Qty: {addOn.quantity}</span>
+                    <span className="font-medium">${addOn.price}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+      
+      const value = getFieldValue(field.id);
+      return (
+        <div key={field.id} className="flex items-center gap-2 text-sm">
+          {/* Add icon logic if needed */}
+          <span className="font-medium">{field.label}:</span>
+          <span>{value}</span>
+        </div>
+      );
+    };
+    
+    // Check if this is an add-on card
+    const isAddOnCard = realOrderData.isAddOnCard;
+    
+    return (
+      <>
+        <CardHeader className="pb-3 cursor-pointer" onClick={() => setIsExpanded(false)}>
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                {isAddOnCard ? <Gift className="h-5 w-5" /> : <Package className="h-5 w-5" />}
+                {isAddOnCard ? realOrderData.addOnTitle : realOrderData.productTitle}
+                {!isAddOnCard && realOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0 ml-1"
+                    onClick={e => {
+                      e.stopPropagation();
+                      const productId = realOrderData.lineItems.edges[0].node.product.id;
+                      const variantId = realOrderData.lineItems.edges[0].node.variant?.id;
+                      setSelectedProductId(productId);
+                      setSelectedVariantId(variantId);
+                      setIsProductImageModalOpen(true);
+                    }}
+                  >
+                    <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                  </Button>
+                )}
+                {isAddOnCard && (
+                  <Badge variant="secondary" className="ml-2">
+                    Add-On
+                  </Badge>
+                )}
+              </CardTitle>
+              {isAddOnCard ? (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Add-On - ${realOrderData.addOnPrice}
+                </p>
+              ) : (
+                realOrderData.productVariantTitle && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {realOrderData.productVariantTitle}
+                  </p>
+                )
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {fields
+            .filter(
+              field =>
+                field.isVisible &&
+                ![
+                  "productTitle",
+                  "productVariantTitle",
+                  "orderId",
+                  "assignedTo",
+                  "customisations",
+                ].includes(field.id)
+            )
+            .map(renderField)}
+          {fields.find(f => f.id === "customisations")?.isVisible && (
+            <div className="space-y-2">
+              <Textarea
+                id="customisations-textarea"
+                value={getFieldValue("customisations")}
+                onChange={e => {}}
+                placeholder="Add extra notes..."
+                className="mt-1 resize-none overflow-y-auto max-h-[500px] whitespace-pre-wrap"
+                onClick={e => e.stopPropagation()}
+                onFocus={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+                onKeyDown={e => e.stopPropagation()}
+              />
+            </div>
+          )}
+        </CardContent>
+      </>
+    );
+  };
+
+  return (
+    <Card className={`${getCardStyle()} transition-all duration-200 fade-in`}>
+      {isExpanded ? <ExpandedView /> : <CollapsedView />}
+      <ProductImageModal
+        isOpen={isProductImageModalOpen}
+        onClose={() => setIsProductImageModalOpen(false)}
+        shopifyProductId={selectedProductId}
+        shopifyVariantId={selectedVariantId}
+        tenantId={tenant?.id}
+      />
+    </Card>
+  );
 }
+
+// Add fade-in animation for cards
+// In your global CSS or index.css, add:
+// .fade-in { animation: fadeIn 0.3s ease; }
+// @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

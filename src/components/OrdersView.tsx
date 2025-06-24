@@ -33,6 +33,7 @@ import {
   CalendarDays,
   Wifi,
   WifiOff,
+  Gift,
 } from "lucide-react"
 import { format } from "date-fns"
 import { OrderCard } from "./OrderCard"
@@ -50,9 +51,26 @@ import {
   deleteOrder,
   getOrderCardConfig,
   getOrdersByDate,
+  fetchShopifyOrder,
+  getProductByShopifyIds,
 } from "../services/api"
 import type { User, Order, Store, ProductLabel } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
+
+// Interface for processed line items
+interface ProcessedLineItem {
+  orderId: string;
+  lineItemId: string;
+  productTitleId: string;
+  variantId: string;
+  title: string;
+  quantity: number;
+  price: number;
+  isAddOn: boolean;
+  shopifyOrderData: any;
+  savedProductData?: any;
+  cardId: string; // Unique identifier for each card
+}
 
 export function OrdersView() {
   const { user: currentUser, tenant } = useAuth()
@@ -81,6 +99,8 @@ export function OrdersView() {
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [orders, setOrders] = useState<Order[]>([])
   const [todoCards, setTodoCards] = useState<any[]>([])
+  const [mainOrderCards, setMainOrderCards] = useState<ProcessedLineItem[]>([])
+  const [addOnCards, setAddOnCards] = useState<ProcessedLineItem[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [florists, setFlorists] = useState<User[]>([])
   const [productLabels, setProductLabels] = useState<ProductLabel[]>([])
@@ -93,6 +113,84 @@ export function OrdersView() {
 
   // Get mobile view context
   const { isMobileView } = useMobileView()
+
+  // Helper function to process line items from Shopify order data
+  const processLineItems = useCallback((shopifyOrderData: any): ProcessedLineItem[] => {
+    const lineItems: ProcessedLineItem[] = []
+    
+    if (!shopifyOrderData?.line_items || !Array.isArray(shopifyOrderData.line_items)) {
+      return lineItems
+    }
+    
+    shopifyOrderData.line_items.forEach((lineItem: any, lineItemIndex: number) => {
+      // Create individual cards for each quantity
+      for (let i = 0; i < (lineItem.quantity || 1); i++) {
+        const cardId = `${shopifyOrderData.id}-${lineItem.id}-${i}`
+        
+        lineItems.push({
+          orderId: shopifyOrderData.id,
+          lineItemId: lineItem.id,
+          productTitleId: lineItem.product_title_id || lineItem.product_id?.toString(),
+          variantId: lineItem.variant_id?.toString(),
+          title: lineItem.title || lineItem.name,
+          quantity: 1, // Individual quantity
+          price: parseFloat(lineItem.price || '0'),
+          isAddOn: false, // Will be determined later
+          shopifyOrderData: shopifyOrderData,
+          cardId: cardId
+        })
+      }
+    })
+    
+    return lineItems
+  }, [])
+
+  // Helper function to classify line items as add-ons
+  const classifyLineItems = useCallback(async (lineItems: ProcessedLineItem[], tenantId: string): Promise<ProcessedLineItem[]> => {
+    const classifiedItems: ProcessedLineItem[] = []
+    
+    for (const item of lineItems) {
+      try {
+        // Fetch saved product data to check for add-on label
+        const savedProduct = await getProductByShopifyIds(
+          tenantId,
+          item.productTitleId,
+          item.variantId
+        )
+        
+        // Check if it's an add-on by looking for "Add-Ons" label
+        const isAddOn = savedProduct?.labelNames?.includes("Add-Ons") || false
+        
+        classifiedItems.push({
+          ...item,
+          isAddOn,
+          savedProductData: savedProduct
+        })
+      } catch (error) {
+        console.warn(`Failed to classify line item ${item.cardId}:`, error)
+        // If classification fails, treat as main product
+        classifiedItems.push({
+          ...item,
+          isAddOn: false
+        })
+      }
+    }
+    
+    return classifiedItems
+  }, [])
+
+  // Helper function to separate main items and add-ons
+  const separateMainAndAddOns = useCallback((classifiedItems: ProcessedLineItem[]) => {
+    const mainItems = classifiedItems.filter(item => !item.isAddOn)
+    const addOns = classifiedItems.filter(item => item.isAddOn)
+    
+    return { mainItems, addOns }
+  }, [])
+
+  // Helper function to get add-ons for a specific order
+  const getAddOnsForOrder = useCallback((orderId: string, allAddOns: ProcessedLineItem[]) => {
+    return allAddOns.filter(addOn => addOn.orderId === orderId)
+  }, [])
 
   // Define data fetching functions first
   const loadData = useCallback(async () => {
@@ -125,21 +223,76 @@ export function OrdersView() {
     }
     setProcessingOrders(true)
     setError(null)
-    const todoData = await getOrdersByDate(tenant.id, selectedDate)
-    setTodoCards(todoData)
-    setProcessingOrders(false)
-  }, [tenant?.id, selectedDate])
+    
+    try {
+      // Get basic order data
+      const todoData = await getOrdersByDate(tenant.id, selectedDate)
+      setTodoCards(todoData)
+      
+      // Process each order to get full Shopify data and line items
+      const allLineItems: ProcessedLineItem[] = []
+      
+      for (const order of todoData) {
+        if (order.shopifyOrderId && order.storeId) {
+          try {
+            // Fetch full Shopify order data
+            const shopifyOrderData = await fetchShopifyOrder(
+              tenant.id,
+              order.storeId,
+              order.shopifyOrderId
+            )
+            
+            // Process line items from this order
+            const orderLineItems = processLineItems(shopifyOrderData)
+            allLineItems.push(...orderLineItems)
+            
+          } catch (error) {
+            console.warn(`Failed to fetch Shopify data for order ${order.shopifyOrderId}:`, error)
+            // Continue with other orders even if one fails
+          }
+        }
+      }
+      
+      // Classify line items as add-ons or main products
+      const classifiedItems = await classifyLineItems(allLineItems, tenant.id)
+      
+      // Separate main items and add-ons
+      const { mainItems, addOns } = separateMainAndAddOns(classifiedItems)
+      
+      setMainOrderCards(mainItems)
+      setAddOnCards(addOns)
+      
+    } catch (error) {
+      console.error('Error processing orders:', error)
+      setError('Failed to process orders')
+    } finally {
+      setProcessingOrders(false)
+    }
+  }, [tenant?.id, selectedDate, processLineItems, classifyLineItems, separateMainAndAddOns])
 
   // Now define the handler that uses them
   const handleRealtimeUpdate = useCallback((update: any) => {
-    if (update.type === 'order_updated') {
-      if (todoCards.length > 0) {
-        processOrders();
-      } else {
-        loadData();
-      }
+    if (update.type === 'order_updated' && update.order && update.order.cardId) {
+      setTodoCards(prevCards =>
+        prevCards.map(card =>
+          card.cardId === update.order.cardId ? { ...card, ...update.order } : card
+        )
+      );
+      
+      // Also update main order cards and add-on cards
+      setMainOrderCards(prevCards =>
+        prevCards.map(card =>
+          card.cardId === update.order.cardId ? { ...card, ...update.order } : card
+        )
+      );
+      
+      setAddOnCards(prevCards =>
+        prevCards.map(card =>
+          card.cardId === update.order.cardId ? { ...card, ...update.order } : card
+        )
+      );
     }
-  }, [todoCards.length, loadData, processOrders])
+  }, [])
 
   // Finally, use the handler in the hook
   const { isConnected, updates } = useRealtimeUpdates({
@@ -228,6 +381,21 @@ export function OrdersView() {
     return true
   })
 
+  // Filter main order cards and add-on cards
+  const filteredMainOrderCards = mainOrderCards.filter((card) => {
+    if (selectedStatus !== "all" && card.shopifyOrderData?.status !== selectedStatus) return false
+    if (searchQuery && !card.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      return false
+    return true
+  })
+
+  const filteredAddOnCards = addOnCards.filter((card) => {
+    if (selectedStatus !== "all" && card.shopifyOrderData?.status !== selectedStatus) return false
+    if (searchQuery && !card.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      return false
+    return true
+  })
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -285,18 +453,16 @@ export function OrdersView() {
             <Package className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
           <CardContent className={isMobileView ? "pt-1" : ""}>
-            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>{orders.length}</div>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>{mainOrderCards.length}</div>
           </CardContent>
         </Card>
         <Card className={isMobileView ? "p-3" : ""}>
           <CardHeader className={`flex flex-row items-center justify-between space-y-0 pb-2 ${isMobileView ? "pb-1" : ""}`}>
-            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Assigned to Me</CardTitle>
-            <Users className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+            <CardTitle className={`font-medium ${isMobileView ? "text-xs" : "text-sm"}`}>Add-Ons</CardTitle>
+            <Gift className={`text-muted-foreground ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
           </CardHeader>
           <CardContent className={isMobileView ? "pt-1" : ""}>
-            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
-              {orders.filter((order) => order.assignedTo === currentUser.id).length}
-            </div>
+            <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>{addOnCards.length}</div>
           </CardContent>
         </Card>
         <Card className={isMobileView ? "p-3" : ""}>
@@ -306,7 +472,7 @@ export function OrdersView() {
           </CardHeader>
           <CardContent className={isMobileView ? "pt-1" : ""}>
             <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
-              {orders.filter((order) => order.status === "completed").length}
+              {mainOrderCards.filter((card) => card.shopifyOrderData?.status === "completed").length}
             </div>
           </CardContent>
         </Card>
@@ -317,7 +483,7 @@ export function OrdersView() {
           </CardHeader>
           <CardContent className={isMobileView ? "pt-1" : ""}>
             <div className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>
-              {orders.filter((order) => order.status === "pending").length}
+              {mainOrderCards.filter((card) => card.shopifyOrderData?.status === "pending").length}
             </div>
           </CardContent>
         </Card>
@@ -463,7 +629,7 @@ export function OrdersView() {
       <Card>
         <CardHeader className={isMobileView ? "pb-3" : ""}>
           <div className={`flex justify-between items-center ${isMobileView ? "flex-col gap-3 items-start" : ""}`}>
-            <CardTitle className={isMobileView ? "text-base" : ""}>Orders</CardTitle>
+            <CardTitle className={isMobileView ? "text-base" : ""}>Main Orders</CardTitle>
             <div className={`flex gap-2 ${isMobileView ? "flex-wrap w-full" : ""}`}>
               <Button
                 variant={isBatchMode ? "default" : "outline"}
@@ -493,36 +659,36 @@ export function OrdersView() {
           </div>
         </CardHeader>
         <CardContent className={isMobileView ? "pt-0" : ""}>
-          {todoCards.length === 0 ? (
+          {filteredMainOrderCards.length === 0 ? (
             <div className="text-center py-8">
-              <p className={`text-muted-foreground ${isMobileView ? "text-sm" : ""}`}>No orders found for the selected criteria.</p>
+              <p className={`text-muted-foreground ${isMobileView ? "text-sm" : ""}`}>No main orders found for the selected criteria.</p>
               <p className={`text-muted-foreground mt-2 ${isMobileView ? "text-xs" : "text-sm"}`}>
                 Select a date to fetch orders.
               </p>
             </div>
           ) : (
             <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
-              {filteredTodoCards.map((card) => {
-                // Adapt the 'card' object to the 'Order' type expected by OrderCard
-                const orderAdapter: Order = {
-                  id: card.cardId,
-                  tenantId: tenant?.id || "",
-                  shopifyOrderId: card.shopifyOrderId,
-                  customerName: card.customerName,
-                  deliveryDate: card.deliveryDate,
-                  status: card.status || "pending", // Default status
-                  notes: `Product: ${card.productTitle} (${card.variantTitle || ""})\nAdd-ons: ${card.addOns.join(", ")}`,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                  // The rest of the fields for Order type can be added if needed
-                }
+              {filteredMainOrderCards.map((card) => {
+                // Get add-ons for this specific order
+                const orderAddOns = getAddOnsForOrder(card.orderId, addOnCards)
+                
                 return (
                   <OrderCard
                     key={card.cardId}
-                    order={orderAdapter}
+                    fields={orderCardConfig}
+                    realOrderData={{
+                      ...card.shopifyOrderData,
+                      cardId: card.cardId,
+                      // Add add-ons information to the order data
+                      addOns: orderAddOns.map(addOn => ({
+                        title: addOn.title,
+                        price: addOn.price,
+                        quantity: addOn.quantity
+                      }))
+                    }}
                     users={florists}
-                    difficultyLabels={productLabels}
-                    onUpdate={handleOrderUpdate}
+                    difficultyLabels={productLabels.filter(l => l.category === 'difficulty')}
+                    productTypeLabels={productLabels.filter(l => l.category === 'productType')}
                     currentUserId={currentUser?.id}
                   />
                 )
@@ -531,6 +697,47 @@ export function OrdersView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Add-Ons Processing Container */}
+      {filteredAddOnCards.length > 0 && (
+        <Card>
+          <CardHeader className={isMobileView ? "pb-3" : ""}>
+            <div className={`flex justify-between items-center ${isMobileView ? "flex-col gap-3 items-start" : ""}`}>
+              <CardTitle className={isMobileView ? "text-base" : ""}>
+                <div className="flex items-center gap-2">
+                  <Gift className="h-4 w-4" />
+                  Add-Ons for Processing
+                </div>
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs">
+                {filteredAddOnCards.length} add-on{filteredAddOnCards.length !== 1 ? 's' : ''}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className={isMobileView ? "pt-0" : ""}>
+            <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
+              {filteredAddOnCards.map((card) => (
+                <OrderCard
+                  key={card.cardId}
+                  fields={orderCardConfig}
+                  realOrderData={{
+                    ...card.shopifyOrderData,
+                    cardId: card.cardId,
+                    // Mark this as an add-on card
+                    isAddOnCard: true,
+                    addOnTitle: card.title,
+                    addOnPrice: card.price
+                  }}
+                  users={florists}
+                  difficultyLabels={productLabels.filter(l => l.category === 'difficulty')}
+                  productTypeLabels={productLabels.filter(l => l.category === 'productType')}
+                  currentUserId={currentUser?.id}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

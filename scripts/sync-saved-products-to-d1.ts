@@ -10,6 +10,7 @@
  */
 
 import sqlite3 from 'sqlite3'
+import { v4 as uuidv4 } from 'uuid'
 
 interface SavedProduct {
   id: string
@@ -31,6 +32,14 @@ interface SavedProduct {
   image_height?: number
   created_at: string
   updated_at: string
+}
+
+interface ProductLabelMapping {
+  id: string
+  tenant_id: string
+  saved_product_id: string
+  label_id: string
+  created_at: string
 }
 
 interface SyncOptions {
@@ -80,107 +89,103 @@ class SavedProductsSync {
     })
   }
 
-  async generateSyncScript(products: SavedProduct[]): Promise<string> {
-    console.log('📝 Generating sync script...')
-    
-    let script = `-- Generated Sync Script for Saved Products
--- Date: ${new Date().toISOString()}
--- Total Products: ${products.length}
+  async getProductLabelMappings(productId: string): Promise<ProductLabelMapping[]> {
+    return new Promise((resolve, reject) => {
+      this.localDb.all(
+        'SELECT * FROM product_label_mappings WHERE saved_product_id = ?',
+        [productId],
+        (err, rows) => {
+          if (err) reject(err)
+          else resolve(rows as ProductLabelMapping[] || [])
+        }
+      )
+    })
+  }
 
--- Begin transaction
-BEGIN TRANSACTION;
-
-`
-
-    for (const product of products) {
-      const now = new Date().toISOString()
-      
-      script += `-- Product: ${product.title} (${product.shopify_product_id})
-INSERT OR REPLACE INTO saved_products (
-  id, tenant_id, shopify_product_id, shopify_variant_id, title, variant_title,
-  description, price, tags, product_type, vendor, handle, status,
-  image_url, image_alt, image_width, image_height,
-  created_at, updated_at
-) VALUES (
-  '${product.id}',
-  '${product.tenant_id}',
-  '${product.shopify_product_id}',
-  '${product.shopify_variant_id}',
-  '${product.title.replace(/'/g, "''")}',
-  ${product.variant_title ? `'${product.variant_title.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.description ? `'${product.description.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.price},
-  '${product.tags.replace(/'/g, "''")}',
-  ${product.product_type ? `'${product.product_type.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.vendor ? `'${product.vendor.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.handle ? `'${product.handle.replace(/'/g, "''")}'` : 'NULL'},
-  '${product.status || 'active'}',
-  ${product.image_url ? `'${product.image_url.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.image_alt ? `'${product.image_alt.replace(/'/g, "''")}'` : 'NULL'},
-  ${product.image_width || 'NULL'},
-  ${product.image_height || 'NULL'},
-  '${product.created_at}',
-  '${now}'
-);
-
-`
+  async upsertProductAndPreserveLabels(product: SavedProduct): Promise<void> {
+    // Find existing product by tenant_id, shopify_product_id, shopify_variant_id
+    const existing = await new Promise<SavedProduct | undefined>((resolve, reject) => {
+      this.localDb.get(
+        'SELECT * FROM saved_products WHERE tenant_id = ? AND shopify_product_id = ? AND shopify_variant_id = ?',
+        [product.tenant_id, product.shopify_product_id, product.shopify_variant_id],
+        (err, row) => {
+          if (err) reject(err)
+          else resolve(row as SavedProduct || undefined)
+        }
+      )
+    })
+    let labelMappings: ProductLabelMapping[] = []
+    if (existing) {
+      labelMappings = await this.getProductLabelMappings(existing.id)
     }
-
-    script += `-- Commit transaction
-COMMIT;
-
--- Sync completed successfully!
-`
-
-    return script
+    // Upsert product
+    await new Promise((resolve, reject) => {
+      this.localDb.run(
+        `INSERT OR REPLACE INTO saved_products (
+          id, tenant_id, shopify_product_id, shopify_variant_id, title, variant_title,
+          description, price, tags, product_type, vendor, handle, status,
+          image_url, image_alt, image_width, image_height,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          existing ? existing.id : product.id,
+          product.tenant_id,
+          product.shopify_product_id,
+          product.shopify_variant_id,
+          product.title,
+          product.variant_title || null,
+          product.description || null,
+          product.price,
+          product.tags,
+          product.product_type || null,
+          product.vendor || null,
+          product.handle || null,
+          product.status || 'active',
+          product.image_url || null,
+          product.image_alt || null,
+          product.image_width || null,
+          product.image_height || null,
+          product.created_at,
+          product.updated_at
+        ],
+        (err) => {
+          if (err) reject(err)
+          else resolve(undefined)
+        }
+      )
+    })
+    // Re-attach labels
+    if (labelMappings.length > 0) {
+      for (const mapping of labelMappings) {
+        await new Promise((resolve, reject) => {
+          this.localDb.run(
+            `INSERT OR IGNORE INTO product_label_mappings (id, tenant_id, saved_product_id, label_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+            [uuidv4(), mapping.tenant_id, existing ? existing.id : product.id, mapping.label_id, new Date().toISOString()],
+            (err) => {
+              if (err) reject(err)
+              else resolve(undefined)
+            }
+          )
+        })
+      }
+    }
   }
 
   async syncProducts(): Promise<void> {
     console.log('🔄 Starting saved products sync...')
-    
     // Get products from local database
     console.log('📥 Fetching products from local database...')
     const localProducts = await this.getLocalSavedProducts(this.options.tenantId)
     console.log(`Found ${localProducts.length} products in local database`)
-    
     if (localProducts.length === 0) {
       console.log('⚠️ No products found in local database')
       return
     }
-
-    // Generate sync script
-    const syncScript = await this.generateSyncScript(localProducts)
-    
-    // Write script to file
-    const scriptPath = `./sync-saved-products-${Date.now()}.sql`
-    
-    // Note: In a real implementation, you would write the file here
-    // For now, we'll just log the script content
-    console.log(`\n📄 Sync script would be written to: ${scriptPath}`)
-    console.log(`📊 Total products to sync: ${localProducts.length}`)
-    
-    // Log the first few lines of the script as a preview
-    const scriptLines = syncScript.split('\n')
-    console.log('\n📝 Script preview (first 10 lines):')
-    scriptLines.slice(0, 10).forEach(line => console.log(`  ${line}`))
-    if (scriptLines.length > 10) {
-      console.log(`  ... and ${scriptLines.length - 10} more lines`)
+    // Upsert each product and preserve labels
+    for (const product of localProducts) {
+      await this.upsertProductAndPreserveLabels(product)
     }
-    
-    if (this.options.dryRun) {
-      console.log('\n🧪 DRY RUN MODE - Script preview generated')
-      console.log('\nTo execute the sync:')
-      console.log('1. Copy the generated script content above')
-      console.log('2. Create a .sql file with the content')
-      console.log('3. Run the script against your D1 database using wrangler')
-      console.log('   wrangler d1 execute DB --file=your-script.sql')
-    } else {
-      console.log('\nTo execute the sync:')
-      console.log('1. Copy the generated script content above')
-      console.log('2. Create a .sql file with the content')
-      console.log('3. Run the script against your D1 database using wrangler')
-      console.log('   wrangler d1 execute DB --file=your-script.sql')
-    }
+    console.log('✅ Sync completed with label preservation!')
   }
 
   async cleanup() {
@@ -191,4 +196,5 @@ COMMIT;
 }
 
 // Export for use in other scripts
-export { SavedProductsSync, SavedProduct, SyncOptions } 
+export { SavedProductsSync }
+export type { SavedProduct, SyncOptions } 

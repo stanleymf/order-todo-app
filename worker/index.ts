@@ -3299,15 +3299,28 @@ app.get("/api/tenants/:tenantId/saved-products/by-shopify-id", async (c) => {
   const tenantId = c.req.param("tenantId")
   const shopifyProductId = c.req.query("shopify_product_id")
   const shopifyVariantId = c.req.query("shopify_variant_id")
+  
+  console.log(`[SAVED-PRODUCTS-BY-SHOPIFY-ID] Request for tenant: ${tenantId}, product: ${shopifyProductId}, variant: ${shopifyVariantId}`)
+  
   if (!shopifyProductId || !shopifyVariantId) {
+    console.log(`[SAVED-PRODUCTS-BY-SHOPIFY-ID] Missing required parameters`)
     return c.json({ error: "shopify_product_id and shopify_variant_id are required" }, 400)
   }
+  
   try {
     const product = await d1DatabaseService.getProductByShopifyIds(c.env, tenantId, shopifyProductId, shopifyVariantId)
+    console.log(`[SAVED-PRODUCTS-BY-SHOPIFY-ID] Database query result:`, { 
+      found: !!product, 
+      hasLabels: product ? !!product.labelNames : false,
+      labelNames: product?.labelNames,
+      labelCategories: product?.labelCategories,
+      labelColors: product?.labelColors
+    })
+    
     if (!product) return c.json({ error: "Product not found" }, 404)
     return c.json(product)
   } catch (error) {
-    console.error("Error fetching saved product by Shopify ID:", error)
+    console.error("[SAVED-PRODUCTS-BY-SHOPIFY-ID] Error fetching saved product by Shopify ID:", error)
     return c.json({ error: "Failed to fetch saved product" }, 500)
   }
 })
