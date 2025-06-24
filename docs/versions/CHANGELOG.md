@@ -28,6 +28,13 @@ All notable changes to this project will be documented in this file.
 - **Status Reset**: Fixed status buttons to properly reset to unassigned when clicked again
 - **Stats Calculation**: Enhanced statistics to handle edge cases and empty data states
 
+### 🚀 Deployment
+- **Build**: 1420 modules transformed successfully
+- **Bundle**: 702.43 kB (197.84 kB gzipped)  
+- **Version ID**: d05d709e-ed11-4765-883c-dee170e6ca5e
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **Status**: 🟢 **Live** - Status toggle and collapsible stats features deployed
+
 ## [1.5.4] - 2024-12-XX
 
 ### 🚀 Major Features Added
