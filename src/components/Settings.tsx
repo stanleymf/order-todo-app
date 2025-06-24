@@ -230,7 +230,7 @@ type NewStore = {
 
   // Get webhook URL for a store
   const getWebhookUrl = (store: Store) => {
-    return `https://order-to-do.stanleytan92.workers.dev/api/webhooks/shopify`
+    return `https://order-to-do.stanleytan92.workers.dev/api/webhooks/shopify/orders-create/${tenant?.id}/${store.id}`
   }
 
   if (isLoading) return <div>Loading...</div>

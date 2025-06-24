@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.5] - 2025-01-25
+
+### 🚀 Major Features Added
+- **Status Button Toggle**: Status buttons now toggle off when clicked again - clicking the same status resets to unassigned
+- **Collapsible Stats Container**: Replaced 4 overview cards with comprehensive collapsible Stats container featuring 8 detailed stat cards
+- **Enhanced Analytics Dashboard**: Complete stats overhaul with detailed breakdowns and visual enhancements
+
+### 🎨 UI/UX Improvements
+- **Comprehensive Stats Display**: 8 detailed stat cards including:
+  - Total Order Count, Unassigned Count, Assigned Count, Completed Count
+  - Breakdown by Store, Difficulty Labels Count, Product Type Label Count, Add-Ons Count
+- **Collapsible Interface**: Stats container can be collapsed/expanded with smooth animations
+- **Color-Coded Cards**: Each stat card has distinct color scheme for visual hierarchy
+- **Detailed Breakdowns**: Store, difficulty, and product type breakdowns show individual counts
+- **Responsive Design**: Stats container adapts to mobile with proper spacing and typography
+
+### 🔧 Technical Enhancements
+- **Toggle Logic**: Improved status change logic to handle toggle-off functionality
+- **Enhanced Stats Calculation**: Comprehensive statistics calculation with detailed breakdowns
+- **Performance Optimization**: Smart data processing for multiple breakdown categories
+- **Mobile Responsive**: Proper mobile layout for all stat cards
+
+### 🐛 Fixes
+- **Status Reset**: Fixed status buttons to properly reset to unassigned when clicked again
+- **Stats Calculation**: Enhanced statistics to handle edge cases and empty data states
+
+## [1.5.4] - 2024-12-XX
+
+### 🚀 Major Features Added
+- **Field Mapping System Integration**: OrderDetailCard now uses proper FieldMappings configuration instead of hardcoded field extraction
+- **Add-on Classification System**: Automatic classification of line items as main orders vs add-ons based on saved_products and product_labels lookup
+- **Separate Order Containers**: Orders page now displays main orders and add-ons in separate visual containers
+- **Enhanced Variant Title Support**: Product variant titles now properly display using configured field mappings
+
+### 🔧 Backend Enhancements
+- **Database Lookup Integration**: Added product label mapping query for add-on classification
+- **Enhanced API Response**: `/api/tenants/:tenantId/orders-from-db-by-date` now returns categorized orders with `mainOrders` and `addOnOrders` arrays
+- **Improved Field Extraction**: Generic field value extraction with transformation support in OrderDetailCard
+
+### 🎨 UI/UX Improvements
+- **Two-Column Layout**: Orders page displays main orders and add-ons side by side
+- **Visual Distinction**: Add-on cards have orange color scheme vs blue for main orders
+- **Enhanced Overview Cards**: Updated stats to show main orders count and add-ons count separately
+- **Improved Field Display**: Better handling of array values and empty fields
+
+### 🐛 Fixes
+- **Webhook URL Generation**: Fixed webhook registration to include tenant and store IDs in URL
+- **Field Configuration**: OrderDetailCard now respects FieldMappings instead of hardcoded logic
+- **Variant Title Display**: Missing variant titles now properly extracted and displayed
+
+### 🔄 API Changes
+- **Breaking**: `getOrdersFromDbByDate` response format changed from array to object with `orders`, `mainOrders`, `addOnOrders` properties
+- **Backward Compatible**: Frontend handles both old and new response formats
+
+## [1.5.3] - 2024-12-XX
+
 ## [1.5.2] - 2025-01-15
 
 ### Fixed

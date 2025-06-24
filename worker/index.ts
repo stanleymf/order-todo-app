@@ -396,6 +396,51 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
     console.log(`Found ${results?.length || 0} orders in database for date ${date}`)
 
+    // Build product label map for add-on classification
+    const productLabelMap = new Map<string, any[]>()
+    try {
+      const { results: labelMappings } = await c.env.DB.prepare(`
+        SELECT sp.shopify_product_id, sp.shopify_variant_id, pl.name, pl.category
+        FROM saved_products sp
+        JOIN product_label_mappings plm ON sp.id = plm.saved_product_id
+        JOIN product_labels pl ON plm.label_id = pl.id
+        WHERE sp.tenant_id = ?
+      `).bind(tenantId).all()
+
+      for (const mapping of labelMappings || []) {
+        const key = `${mapping.shopify_product_id}-${mapping.shopify_variant_id}`
+        if (!productLabelMap.has(key)) {
+          productLabelMap.set(key, [])
+        }
+        productLabelMap.get(key)?.push(mapping)
+      }
+      console.log(`Loaded ${productLabelMap.size} product label mappings for classification`)
+    } catch (error) {
+      console.error("Failed to load product labels for classification:", error)
+    }
+
+    // Classify line item as add-on
+    const isAddOnProduct = (productId: string, variantId: string): boolean => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      return labels.some((label: any) => 
+        label.name?.toLowerCase().includes("add-on") || 
+        label.name?.toLowerCase().includes("addon") ||
+        label.category?.toLowerCase().includes("add-on") ||
+        label.category?.toLowerCase().includes("addon")
+      )
+    }
+
+    // Get difficulty label for product
+    const getDifficultyLabel = (productId: string, variantId: string): string | null => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const difficultyLabel = labels.find((label: any) => 
+        label.category?.toLowerCase() === "difficulty"
+      )
+      return difficultyLabel?.name || null
+    }
+
     // Process each order into line items
     const processedOrders: any[] = []
     
@@ -406,6 +451,12 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         
         // Process each line item
         for (const lineItem of lineItems) {
+          // Classify as add-on
+          const isAddOn = isAddOnProduct(
+            lineItem.product_id?.toString() || '', 
+            lineItem.variant_id?.toString() || ''
+          )
+
           // Create individual cards for each quantity
           for (let i = 0; i < (lineItem.quantity || 1); i++) {
             const cardId = `${order.shopify_order_id}-${lineItem.id || lineItem.product_id}-${i}`
@@ -435,6 +486,9 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               quantity: 1, // Individual quantity
               price: parseFloat(lineItem.price || '0'),
               variantTitle: lineItem.variant_title,
+              // Add-on classification
+              isAddOn: isAddOn,
+              productCategory: isAddOn ? "add-on" : "main-order",
               // Shopify order data (preserve original GraphQL data if available)
               shopifyOrderData: (() => {
                 try {
@@ -475,8 +529,23 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       }
     }
 
+    // Separate orders into main orders and add-ons
+    const mainOrders = processedOrders.filter(order => !order.isAddOn)
+    const addOnOrders = processedOrders.filter(order => order.isAddOn)
+
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
-    return c.json(processedOrders)
+    console.log(`Main orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
+    
+    return c.json({
+      orders: processedOrders,
+      mainOrders: mainOrders,
+      addOnOrders: addOnOrders,
+      stats: {
+        total: processedOrders.length,
+        mainOrders: mainOrders.length,
+        addOns: addOnOrders.length
+      }
+    })
   } catch (error: any) {
     console.error("Error fetching orders from database:", error)
     return c.json({ error: "Failed to fetch orders from database", details: error.message }, 500)
@@ -1086,7 +1155,7 @@ app.post("/api/tenants/:tenantId/stores/:storeId/register-webhooks", async (c) =
     ]
     
     const baseUrl = new URL(c.req.url).hostname
-    const webhookUrl = `https://${baseUrl}/api/webhooks/shopify`
+    const webhookUrl = `https://${baseUrl}/api/webhooks/shopify/orders-create/${tenantId}/${storeId}`
 
     const registeredWebhooks: WebhookConfig[] = []
 

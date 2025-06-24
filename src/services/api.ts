@@ -232,13 +232,13 @@ export async function getOrdersByDate(tenantId: string, date: string): Promise<a
   }
 }
 
-export async function getOrdersFromDbByDate(tenantId: string, date: string): Promise<any[]> {
+export async function getOrdersFromDbByDate(tenantId: string, date: string): Promise<any> {
   // The date should be in dd/mm/yyyy format for the API
   const formattedDate = date.split("-").reverse().join("/")
   console.log(`Calling getOrdersFromDbByDate with tenantId: ${tenantId}, date: ${date}, formattedDate: ${formattedDate}`)
   
   try {
-    const result = await apiRequest<any[]>(`/api/tenants/${tenantId}/orders-from-db-by-date?date=${formattedDate}`)
+    const result = await apiRequest<any>(`/api/tenants/${tenantId}/orders-from-db-by-date?date=${formattedDate}`)
     console.log(`getOrdersFromDbByDate response:`, result)
     return result
   } catch (error) {

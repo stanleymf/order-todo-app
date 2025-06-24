@@ -69,10 +69,10 @@ export function Dashboard() {
   return (
     <MobileViewContext.Provider value={{ isMobileView, toggleMobileView }}>
       <div
-        className={`min-h-screen bg-gray-50 ${isMobileView ? "max-w-[393px] mx-auto border-x-4 border-gray-400 shadow-2xl" : ""}`}
+        className={`min-h-screen bg-gray-50 ${isMobileView ? "max-w-[440px] mx-auto border-x-4 border-gray-400 shadow-2xl" : ""}`}
       >
         <header className="bg-white shadow-sm border-b">
-          <div className={`mx-auto ${isMobileView ? "px-3" : "max-w-7xl px-4 sm:px-6 lg:px-8"}`}>
+          <div className={`mx-auto ${isMobileView ? "px-2" : "max-w-7xl px-4 sm:px-6 lg:px-8"}`}>
             <div
               className={`flex justify-between items-center h-16 ${isMobileView ? "gap-2" : ""}`}
             >
@@ -134,7 +134,7 @@ export function Dashboard() {
         </header>
 
         <main
-          className={`mx-auto py-4 ${isMobileView ? "px-3" : "max-w-7xl px-4 sm:px-6 lg:px-8 py-8"}`}
+          className={`mx-auto py-4 ${isMobileView ? "px-2" : "max-w-7xl px-4 sm:px-6 lg:px-8 py-8"}`}
         >
           <Tabs
             value={getActiveTab()}
