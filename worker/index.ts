@@ -1926,8 +1926,20 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
 
     const customerName = `${shopifyOrder.customer?.first_name ?? ""} ${shopifyOrder.customer?.last_name ?? ""}`.trim() || "N/A";
     
-    const deliveryDateAttribute = shopifyOrder.note_attributes?.find((attr: any) => attr.name === "delivery_date");
-    const deliveryDate = deliveryDateAttribute ? deliveryDateAttribute.value : shopifyOrder.created_at.split("T")[0];
+    // Extract delivery date ONLY from Shopify order tags in dd/mm/yyyy format
+    const extractDeliveryDateFromTags = (tags: string): string | null => {
+      if (!tags) return null;
+      
+      // Split tags and look for date pattern dd/mm/yyyy
+      const tagArray = tags.split(", ");
+      const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+      
+      return dateTag || null;
+    };
+    
+    const deliveryDate = extractDeliveryDateFromTags(shopifyOrder.tags) || shopifyOrder.created_at.split("T")[0];
+    
+    console.log(`Extracted delivery date from tags: ${deliveryDate} (tags: ${shopifyOrder.tags})`);
 
     const productLabel = shopifyOrder.line_items[0]?.properties?.find((p: any) => p.name === '_label')?.value ?? 'default';
     
