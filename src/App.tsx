@@ -9,6 +9,7 @@ import { ProductManagement } from "./components/ProductManagement"
 import { Settings } from "./components/Settings"
 import { AIIntegration } from "./components/AIIntegration"
 import { Analytics } from "./components/Analytics"
+import { Orders } from "./components/Orders"
 import CustomerAIFlorist from "./components/CustomerAIFlorist"
 import AIFlorist from "./components/AIFlorist"
 import MobileCameraWidget from "./components/MobileCameraWidget"
@@ -66,8 +67,9 @@ function AppContent() {
           <Route path="/ai-florist" element={<CustomerAIFlorist />} />
           <Route path="/ai-florist-widget" element={<AIFlorist />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
-            <Route index element={<DashboardView />} />
-            <Route path="dashboard" element={<DashboardView />} />
+            <Route index element={<Orders />} />
+            <Route path="dashboard" element={<Orders />} />
+            <Route path="orders" element={<Orders />} />
 
             <Route path="analytics" element={<Analytics />} />
             <Route path="products" element={<ProductsManagementRoute><ProductManagement /></ProductsManagementRoute>} />

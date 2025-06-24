@@ -11,6 +11,7 @@ import {
   Monitor,
   Settings,
   Sparkles,
+  ClipboardList,
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { useIsMobile } from "./hooks/use-mobile"
@@ -53,10 +54,10 @@ export function Dashboard() {
   }
 
   const getActiveTab = () => {
-    // Default to 'dashboard' if the path is '/' or '/dashboard'
+    // Default to 'orders' if the path is '/' or '/dashboard'
     const path = location.pathname.substring(1)
     if (path === "" || path === "dashboard") {
-      return "dashboard"
+      return "orders"
     }
     return path
   }
@@ -144,11 +145,11 @@ export function Dashboard() {
               className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-5"}`}
             >
               <TabsTrigger
-                value="dashboard"
+                value="orders"
                 className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
               >
-                <BarChart3 className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                Dashboard
+                <ClipboardList className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                Orders
               </TabsTrigger>
               <TabsTrigger
                 value="analytics"
