@@ -302,6 +302,12 @@ const FieldRenderer: React.FC<FieldRendererProps> = ({ field, value, difficultyL
     switch (field.type) {
       case "date":
         try {
+          // Handle dd/mm/yyyy format by converting to yyyy-mm-dd
+          if (typeof value === 'string' && value.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+            const [day, month, year] = value.split('/');
+            const isoDate = `${year}-${month}-${day}`;
+            return new Date(isoDate).toLocaleDateString();
+          }
           return new Date(value).toLocaleDateString()
         } catch {
           return "Invalid Date"

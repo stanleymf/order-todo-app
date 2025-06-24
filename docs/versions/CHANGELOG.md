@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.6] - 2025-01-13
+
+### 🔧 **OrderCardPreview Date Parsing Fix**
+
+- **Fixed Date Display**: Updated date field rendering to properly handle `dd/mm/yyyy` format by converting it to ISO format (`yyyy-mm-dd`) before creating JavaScript Date objects.
+- **Enhanced Date Parsing**: Added specific handling for European date format in the `renderValue` function to prevent "Invalid Date" errors.
+
+### 🐛 **Bug Fixes**
+- Fixed issue where extracted dates in `dd/mm/yyyy` format were showing as "Invalid Date" in the order card preview
+- Added proper date format conversion from `15/06/2025` to `2025-06-15` for JavaScript Date constructor compatibility
+
+### 📊 **Technical Improvements**
+- Enhanced date field rendering with format detection and conversion
+- Improved error handling for date parsing operations
+
 ## [1.4.5] - 2025-01-13
 
 ### 🔧 **OrderCardPreview Array Access & Date Extraction Fixes**
