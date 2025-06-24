@@ -51,8 +51,11 @@ import {
   deleteOrder,
   getOrderCardConfig,
   getOrdersByDate,
+  getOrdersFromDbByDate,
   fetchShopifyOrder,
   getProductByShopifyIds,
+  syncOrdersByDate,
+  deleteOrdersByDate,
 } from "../services/api"
 import type { User, Order, Store, ProductLabel } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
@@ -110,9 +113,36 @@ export function OrdersView() {
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [processingOrders, setProcessingOrders] = useState<boolean>(false)
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [fetchFeedback, setFetchFeedback] = useState<string | null>(null)
 
   // Get mobile view context
   const { isMobileView } = useMobileView()
+
+  // Define data fetching functions first
+  const loadData = useCallback(async () => {
+    if (!tenant?.id) {
+      setError("No tenant found")
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setError(null)
+
+    const [usersData, storesData, labelsData, configData] = await Promise.all([
+      getUsers(tenant.id),
+      getStores(tenant.id),
+      getProductLabels(tenant.id),
+      getOrderCardConfig(tenant.id)
+    ]);
+
+    setFlorists(usersData)
+    setStores(storesData)
+    setProductLabels(labelsData)
+    setOrderCardConfig(configData.fields || [])
+    setLoading(false)
+  }, [tenant?.id])
 
   // Helper function to process line items from Shopify order data
   const processLineItems = useCallback((shopifyOrderData: any): ProcessedLineItem[] => {
@@ -192,83 +222,93 @@ export function OrdersView() {
     return allAddOns.filter(addOn => addOn.orderId === orderId)
   }, [])
 
-  // Define data fetching functions first
-  const loadData = useCallback(async () => {
-    if (!tenant?.id) {
-      setError("No tenant found")
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    setError(null)
-
-    const [usersData, storesData, labelsData, configData] = await Promise.all([
-      getUsers(tenant.id),
-      getStores(tenant.id),
-      getProductLabels(tenant.id),
-      getOrderCardConfig(tenant.id)
-    ]);
-
-    setFlorists(usersData)
-    setStores(storesData)
-    setProductLabels(labelsData)
-    setOrderCardConfig(configData.fields || [])
-    setLoading(false)
-  }, [tenant?.id])
-
-  const processOrders = useCallback(async () => {
-    if (!tenant?.id) {
-      setError("No tenant found")
-      return
-    }
-    setProcessingOrders(true)
-    setError(null)
-    
+  // Helper to reload orders after sync/delete
+  const processOrdersReload = useCallback(async (dateTag?: string) => {
+    if (!tenant?.id) return;
     try {
-      // Get basic order data
-      const todoData = await getOrdersByDate(tenant.id, selectedDate)
-      setTodoCards(todoData)
+      const tag = dateTag || (() => {
+        const [year, month, day] = selectedDate.split("-");
+        return `${day}/${month}/${year}`;
+      })();
+      const todoData = await getOrdersFromDbByDate(tenant.id, tag);
+      setTodoCards(todoData);
       
-      // Process each order to get full Shopify data and line items
-      const allLineItems: ProcessedLineItem[] = []
+      // Process the database orders into mainOrderCards and addOnCards
+      const allLineItems: ProcessedLineItem[] = [];
       
       for (const order of todoData) {
-        if (order.shopifyOrderId && order.storeId) {
-          try {
-            // Fetch full Shopify order data
-            const shopifyOrderData = await fetchShopifyOrder(
-              tenant.id,
-              order.storeId,
-              order.shopifyOrderId
-            )
-            
-            // Process line items from this order
-            const orderLineItems = processLineItems(shopifyOrderData)
-            allLineItems.push(...orderLineItems)
-            
-          } catch (error) {
-            console.warn(`Failed to fetch Shopify data for order ${order.shopifyOrderId}:`, error)
-            // Continue with other orders even if one fails
-          }
-        }
+        // Each order from the database is already a line item card
+        const lineItem: ProcessedLineItem = {
+          orderId: order.orderId,
+          lineItemId: order.lineItemId,
+          productTitleId: order.productTitleId,
+          variantId: order.variantId,
+          title: order.title,
+          quantity: order.quantity,
+          price: order.price,
+          isAddOn: false, // Will be determined by classification
+          shopifyOrderData: order.shopifyOrderData,
+          cardId: order.cardId
+        };
+        
+        allLineItems.push(lineItem);
       }
       
       // Classify line items as add-ons or main products
-      const classifiedItems = await classifyLineItems(allLineItems, tenant.id)
+      const classifiedItems = await classifyLineItems(allLineItems, tenant.id);
       
       // Separate main items and add-ons
-      const { mainItems, addOns } = separateMainAndAddOns(classifiedItems)
+      const { mainItems, addOns } = separateMainAndAddOns(classifiedItems);
       
-      setMainOrderCards(mainItems)
-      setAddOnCards(addOns)
+      setMainOrderCards(mainItems);
+      setAddOnCards(addOns);
       
+      console.log(`Processed ${mainItems.length} main order cards and ${addOns.length} add-on cards from database`);
     } catch (error) {
-      console.error('Error processing orders:', error)
-      setError('Failed to process orders')
-    } finally {
-      setProcessingOrders(false)
+      setError('Failed to reload orders');
     }
-  }, [tenant?.id, selectedDate, processLineItems, classifyLineItems, separateMainAndAddOns])
+  }, [tenant?.id, selectedDate, classifyLineItems, separateMainAndAddOns]);
+
+  // --- Updated Fetch Orders logic ---
+  const fetchOrders = useCallback(async () => {
+    if (!tenant?.id) {
+      setError("No tenant found");
+      return;
+    }
+    setProcessingOrders(true);
+    setError(null);
+    setFetchFeedback(null);
+    try {
+      // Convert selectedDate (yyyy-mm-dd) to dd/mm/yyyy
+      const [year, month, day] = selectedDate.split("-");
+      const dateTag = `${day}/${month}/${year}`;
+      let responses = [];
+      if (!selectedStore || selectedStore === "all") {
+        // Fetch for all stores
+        if (!stores.length) throw new Error("No stores configured");
+        for (const store of stores) {
+          const resp = await syncOrdersByDate(tenant.id, store.id, dateTag);
+          responses.push({ store: store.name, ...resp });
+        }
+      } else {
+        // Fetch for specific store
+        const store = stores.find(s => s.id === selectedStore);
+        if (!store) throw new Error("Selected store not found");
+        const resp = await syncOrdersByDate(tenant.id, selectedStore, dateTag);
+        responses.push({ store: store.name, ...resp });
+      }
+      // After sync, reload orders for the date
+      await processOrdersReload(dateTag);
+      setFetchFeedback(`Fetched orders for ${selectedStore === "all" ? "all stores" : stores.find(s => s.id === selectedStore)?.name || "store"}.`);
+      // Log responses for debugging
+      console.log("Sync responses:", responses);
+    } catch (error: any) {
+      setError('Failed to fetch orders: ' + (error?.message || error));
+      setFetchFeedback(null);
+    } finally {
+      setProcessingOrders(false);
+    }
+  }, [tenant?.id, selectedStore, selectedDate, stores, processOrdersReload]);
 
   // Now define the handler that uses them
   const handleRealtimeUpdate = useCallback((update: any) => {
@@ -308,7 +348,7 @@ export function OrdersView() {
 
   const handleOrderUpdate = () => {
     if (todoCards.length > 0) {
-      processOrders();
+      fetchOrders();
     } else {
       loadData();
     }
@@ -395,6 +435,24 @@ export function OrdersView() {
       return false
     return true
   })
+
+  // --- Bulk Delete logic ---
+  const handleBulkDelete = async () => {
+    if (!tenant?.id) return;
+    setBulkDeleteLoading(true);
+    setError(null);
+    try {
+      const [year, month, day] = selectedDate.split("-");
+      const dateTag = `${day}/${month}/${year}`;
+      await deleteOrdersByDate(tenant.id, dateTag);
+      await processOrdersReload(dateTag);
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      setError('Failed to delete orders');
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -602,26 +660,49 @@ export function OrdersView() {
             </Button>
           </div>
 
-          {/* Process Orders Button */}
-          <div className="flex justify-center pt-4">
+          {/* Fetch Orders Button & Bulk Delete */}
+          <div className="flex justify-center pt-4 gap-4">
             <Button 
-              onClick={processOrders} 
-              disabled={processingOrders}
+              onClick={fetchOrders} 
+              disabled={processingOrders || !stores.length}
               className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
             >
               {processingOrders ? (
                 <>
                   <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
-                  {isMobileView ? "Processing..." : "Processing Orders..."}
+                  {isMobileView ? "Fetching..." : "Fetching Orders..."}
                 </>
               ) : (
                 <>
                   <Package className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                  {isMobileView ? `Process ${selectedDate}` : `Process Orders for ${selectedDate}`}
+                  {isMobileView ? `Fetch ${selectedDate}` : `Fetch Orders for ${selectedDate}`}
+                </>
+              )}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={bulkDeleteLoading}
+              className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
+            >
+              {bulkDeleteLoading ? (
+                <>
+                  <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  Bulk Delete
                 </>
               )}
             </Button>
           </div>
+          {fetchFeedback && (
+            <div className="flex justify-center pt-2">
+              <span className="text-green-600 text-sm">{fetchFeedback}</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -738,6 +819,26 @@ export function OrdersView() {
           </CardContent>
         </Card>
       )}
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Bulk Delete</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete all orders for <b>{selectedDate}</b>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={bulkDeleteLoading}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleteLoading}>
+              {bulkDeleteLoading ? "Deleting..." : "Delete All"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

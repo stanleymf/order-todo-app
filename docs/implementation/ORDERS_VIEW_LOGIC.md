@@ -1,7 +1,86 @@
 # OrdersView Logic Implementation
 
 ## Overview
-This document outlines the logic for OrdersView to properly handle Shopify orders, line items, quantities, and add-on classification.
+This document outlines the logic for OrdersView to properly handle Shopify orders, line items, quantities, add-on classification, and the new webhook-based ingestion and management flow.
+
+---
+
+## Updated Architecture (as of 2025-06-24)
+
+### 1. Shopify Webhook Integration (Primary Source of Truth)
+- Orders are received in real time via the Shopify `orders/create` webhook.
+- Each order is saved to the database, associated with a specific date using a tag in the format `dd/mm/yyyy` (extracted from the order's tags).
+- No manual processing is needed for new orders—they appear automatically for the correct date in the UI.
+
+### 2. Process Orders Button (Manual Sync/Update & Fetch)
+- The "Process Orders" button is retained in the UI.
+- When clicked, it will:
+  - **Fetch new orders from Shopify** for the selected date (using the `dd/mm/yyyy` tag).
+  - **Add any new orders** that are not already in the database (prevents duplicates).
+  - **Update existing saved orders** for the selected date (refresh status, line items, etc.).
+  - **Never create duplicates**—only new or updated orders are saved.
+
+### 3. Bulk Delete Orders
+- A bulk delete button is available in OrdersView.
+- Allows the user to delete all orders for the selected date (or all currently displayed orders) in one action.
+- Useful for clearing out test data or resetting a day's orders.
+
+---
+
+## Technical Flow
+
+### Webhook Ingestion
+1. Shopify sends an `orders/create` webhook when a new order is placed.
+2. The backend webhook handler:
+   - Parses the order payload.
+   - Extracts the `dd/mm/yyyy` date tag from the order's tags.
+   - Saves the order to the database, associating it with the extracted date.
+   - Ensures no duplicate orders are created (idempotent insert/update logic).
+
+### Order Retrieval
+- The frontend fetches orders for the selected date by matching the `dd/mm/yyyy` tag.
+- Orders are displayed immediately for the correct date, with no manual processing required.
+
+### Process Orders Button
+- When clicked, triggers a backend/API call to:
+  - Fetch new orders from Shopify for the selected date.
+  - Add any new orders not already in the database.
+  - Update (refresh) all existing orders for the selected date.
+- No duplicate orders are created; only new or updated ones are saved.
+
+### Bulk Delete
+- The frontend provides a bulk delete button.
+- When clicked, sends a request to the backend to delete all orders for the selected date (or all currently displayed orders).
+- Confirmation dialog is recommended to prevent accidental deletion.
+
+---
+
+## UI/UX Summary
+- **Orders appear automatically** for the correct date as soon as they are received from Shopify.
+- **Process Orders** is now a "sync" action: fetches new orders and updates existing ones, never duplicates.
+- **Bulk Delete** allows for easy clearing of orders for a date.
+- **No duplicates**: All logic ensures that orders are not duplicated, whether via webhook or manual update.
+
+---
+
+## Implementation Steps
+
+1. **Backend**
+   - [ ] Webhook handler for `orders/create` (idempotent save by order ID, date tag extraction)
+   - [ ] Endpoint for updating (refreshing) and fetching new orders for a date (sync logic)
+   - [ ] Endpoint for bulk deleting orders by date
+2. **Frontend**
+   - [ ] Fetch orders for selected date by `dd/mm/yyyy` tag
+   - [ ] Process Orders button triggers sync: fetches new orders and updates existing ones
+   - [ ] Bulk delete button with confirmation dialog
+   - [ ] UI reflects real-time updates and deletion
+
+---
+
+## Notes
+- This architecture ensures real-time, reliable, and duplicate-free order management.
+- Manual processing is only for sync (fetch new + update), not creation only.
+- Bulk delete is a safety/maintenance feature for admins.
 
 ## Current State Analysis
 

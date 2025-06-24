@@ -232,6 +232,21 @@ export async function getOrdersByDate(tenantId: string, date: string): Promise<a
   }
 }
 
+export async function getOrdersFromDbByDate(tenantId: string, date: string): Promise<any[]> {
+  // The date should be in dd/mm/yyyy format for the API
+  const formattedDate = date.split("-").reverse().join("/")
+  console.log(`Calling getOrdersFromDbByDate with tenantId: ${tenantId}, date: ${date}, formattedDate: ${formattedDate}`)
+  
+  try {
+    const result = await apiRequest<any[]>(`/api/tenants/${tenantId}/orders-from-db-by-date?date=${formattedDate}`)
+    console.log(`getOrdersFromDbByDate response:`, result)
+    return result
+  } catch (error) {
+    console.error(`Error in getOrdersFromDbByDate:`, error)
+    throw error
+  }
+}
+
 export async function createOrder(tenantId: string, orderData: CreateOrderRequest): Promise<Order> {
   return authenticatedRequest<Order>(`/api/tenants/${tenantId}/orders`, {
     method: "POST",
@@ -1041,4 +1056,31 @@ export async function createTrainingSessionFromAnalytics(tenantId: string, sessi
     method: "POST",
     body: JSON.stringify(sessionData),
   });
+}
+
+export async function syncOrdersByDate(
+  tenantId: string,
+  storeId: string,
+  date: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/stores/${storeId}/orders/sync-by-date`,
+    {
+      method: "POST",
+      body: JSON.stringify({ date }),
+    }
+  );
+}
+
+export async function deleteOrdersByDate(
+  tenantId: string,
+  date: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/orders/delete-by-date`,
+    {
+      method: "POST",
+      body: JSON.stringify({ date }),
+    }
+  );
 }

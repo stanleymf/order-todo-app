@@ -379,6 +379,94 @@ app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
   }
 })
 
+// --- Orders from Database by Date (PUBLIC) ---
+app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const date = c.req.query("date") // e.g., "22/06/2025"
+
+  if (!date) {
+    return c.json({ error: "Date query parameter is required" }, 400)
+  }
+
+  try {
+    // Fetch orders from database by delivery date
+    const { results } = await c.env.DB.prepare(
+      `SELECT * FROM tenant_orders WHERE tenant_id = ? AND delivery_date = ? ORDER BY created_at ASC`
+    ).bind(tenantId, date).all()
+
+    console.log(`Found ${results?.length || 0} orders in database for date ${date}`)
+
+    // Process each order into line items
+    const processedOrders: any[] = []
+    
+    for (const order of results || []) {
+      try {
+        // Parse line items from JSON string
+        const lineItems = order.line_items ? JSON.parse(order.line_items) : []
+        
+        // Process each line item
+        for (const lineItem of lineItems) {
+          // Create individual cards for each quantity
+          for (let i = 0; i < (lineItem.quantity || 1); i++) {
+            const cardId = `${order.shopify_order_id}-${lineItem.id || lineItem.product_id}-${i}`
+            
+            processedOrders.push({
+              cardId: cardId,
+              orderId: order.id,
+              shopifyOrderId: order.shopify_order_id,
+              customerName: order.customer_name,
+              deliveryDate: order.delivery_date,
+              status: order.status,
+              priority: order.priority,
+              assignedTo: order.assigned_to,
+              notes: order.notes,
+              productLabel: order.product_label,
+              productType: order.product_type,
+              totalPrice: order.total_price,
+              currency: order.currency,
+              customerEmail: order.customer_email,
+              storeId: order.store_id,
+              sessionId: order.session_id,
+              // Line item specific data
+              lineItemId: lineItem.id || lineItem.product_id,
+              productTitleId: lineItem.product_id?.toString(),
+              variantId: lineItem.variant_id?.toString(),
+              title: lineItem.title || lineItem.name,
+              quantity: 1, // Individual quantity
+              price: parseFloat(lineItem.price || '0'),
+              variantTitle: lineItem.variant_title,
+              // Shopify order data (reconstructed)
+              shopifyOrderData: {
+                id: order.shopify_order_id,
+                name: order.shopify_order_id, // Use shopify order ID as name
+                customer: {
+                  first_name: order.customer_name.split(' ')[0] || '',
+                  last_name: order.customer_name.split(' ').slice(1).join(' ') || '',
+                  email: order.customer_email
+                },
+                line_items: lineItems,
+                total_price: order.total_price,
+                currency: order.currency,
+                note: order.notes,
+                status: order.status
+              }
+            })
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing order ${order.id}:`, error)
+        // Continue with other orders
+      }
+    }
+
+    console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
+    return c.json(processedOrders)
+  } catch (error: any) {
+    console.error("Error fetching orders from database:", error)
+    return c.json({ error: "Failed to fetch orders from database", details: error.message }, 500)
+  }
+})
+
 // --- Products (PUBLIC) ---
 // Let the SPA catch-all handle /products.
 
@@ -389,6 +477,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
   const publicEndpoints = [
     // Core public endpoints
     '/api/tenants/:tenantId/orders-by-date',
+    '/api/tenants/:tenantId/orders-from-db-by-date',
     '/api/tenants/:tenantId/analytics',
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
@@ -441,6 +530,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
   const path = c.req.path
   const publicEndpoints = [
     '/api/tenants/:tenantId/orders-by-date',
+    '/api/tenants/:tenantId/orders-from-db-by-date',
     '/api/tenants/:tenantId/analytics',
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
@@ -3764,3 +3854,84 @@ app.get("/api/tenants/:tenantId/debug/saved-products", async (c) => {
     return c.json({ error: "Failed to query database directly" }, 500)
   }
 })
+
+// --- Sync Shopify Orders by Date (Process Orders Button) ---
+app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const storeId = c.req.param("storeId");
+  const { date } = await c.req.json();
+
+  if (!date) {
+    return c.json({ error: "Date is required in dd/mm/yyyy format" }, 400);
+  }
+
+  try {
+    // 1. Get store info
+    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
+    if (!store || !store.settings.accessToken) {
+      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
+    }
+    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken);
+
+    // 2. Fetch all Shopify orders
+    const shopifyOrders = await shopifyApi.getOrders();
+    const dateTag = date.replace(/-/g, "/");
+    const filteredOrders = shopifyOrders.filter((order) => {
+      return order.tags.split(", ").includes(dateTag);
+    });
+
+    // 3. For each order, create or update in DB
+    const newOrders = [];
+    const updatedOrders = [];
+    for (const order of filteredOrders) {
+      // Prepare order data for DB
+      const customerName = `${order.customer?.first_name ?? ""} ${order.customer?.last_name ?? ""}`.trim() || "N/A";
+      const orderData = {
+        shopifyOrderId: String(order.id),
+        customerName: customerName,
+        deliveryDate: date,
+        notes: order.note,
+        product_label: order.line_items?.[0]?.properties?.find((p) => p.name === '_label')?.value ?? 'default',
+        total_price: parseFloat(order.total_price),
+        currency: order.currency,
+        customer_email: order.customer?.email,
+        line_items: JSON.stringify(order.line_items),
+        product_titles: JSON.stringify(order.line_items.map((item) => item.title)),
+        quantities: JSON.stringify(order.line_items.map((item) => item.quantity)),
+        session_id: order.checkout_id,
+        store_id: storeId,
+        product_type: order.line_items?.[0]?.product_type ?? 'Unknown',
+      };
+      // Try to create (will update if exists)
+      const result = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
+      if (result && result.createdAt === result.updatedAt) {
+        newOrders.push(result);
+      } else {
+        updatedOrders.push(result);
+      }
+    }
+    return c.json({ success: true, newOrders, updatedOrders, count: filteredOrders.length });
+  } catch (error) {
+    console.error("Error syncing Shopify orders by date:", error);
+    return c.json({ error: "Failed to sync orders", details: error.message }, 500);
+  }
+});
+
+// --- Bulk Delete Orders by Date ---
+app.post("/api/tenants/:tenantId/orders/delete-by-date", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const { date } = await c.req.json();
+  if (!date) {
+    return c.json({ error: "Date is required in dd/mm/yyyy format" }, 400);
+  }
+  try {
+    // Delete all orders for the tenant with the matching deliveryDate
+    const { results } = await c.env.DB.prepare(
+      `DELETE FROM tenant_orders WHERE tenant_id = ? AND delivery_date = ?`
+    ).bind(tenantId, date).run();
+    return c.json({ success: true, deletedCount: results?.changes ?? 0 });
+  } catch (error) {
+    console.error("Error deleting orders by date:", error);
+    return c.json({ error: "Failed to delete orders", details: error.message }, 500);
+  }
+});
