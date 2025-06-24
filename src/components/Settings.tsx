@@ -5,12 +5,20 @@ import { Input } from "./ui/input"
 import { Label } from "./ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
 import { Badge } from "./ui/badge"
+import { ScrollArea } from "./ui/scroll-area"
+import { Alert, AlertDescription } from "./ui/alert"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog"
 import { useParams } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext"
-import { getStores, createStore, updateStore, deleteStore } from "../services/api"
+import { useIsMobile } from "./hooks/use-mobile"
+import { getStores, createStore, updateStore, deleteStore, registerShopifyWebhooks, testShopifyConnection } from "../services/api"
 import type { Store } from "../types"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
+import { Settings as SettingsIcon, Layout, Users, CreditCard, Store as StoreIcon, Plus, Check, Copy, TestTube, Edit, Trash2, CheckCircle, AlertTriangle, ExternalLink } from "lucide-react"
+import { Separator } from "./ui/separator"
+import { OrderCardSettings } from "./OrderCardSettingsNew"
+import { Users as UsersComponent } from "./Users"
 
 type NewStore = {
   name: string
@@ -24,6 +32,7 @@ type NewStore = {
 
   export const Settings: React.FC = () => {
     const { tenant, user } = useAuth()
+    const isMobile = useIsMobile()
     const navigate = useNavigate()
     const { tenantId, tab = "general" } = useParams<{
       tenantId: string

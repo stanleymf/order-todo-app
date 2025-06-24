@@ -30,7 +30,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
-import { useMobileView } from "./Dashboard"
+import { useIsMobile } from "./hooks/use-mobile"
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api"
 import type { User as UserType } from "../types"
 import { toast } from "sonner"
@@ -54,7 +54,7 @@ type EditUser = {
 
 export const Users: React.FC = () => {
   const { user: currentUser, tenant } = useAuth()
-  const isMobile = useMobileView()
+  const isMobile = useIsMobile()
   
   const [users, setUsers] = useState<UserType[]>([])
   const [isLoading, setIsLoading] = useState(true)

@@ -17,7 +17,7 @@ import {
   Package,
   BarChart3,
   TrendingUp,
-  Store,
+  Store as StoreIcon,
   X,
   RefreshCw,
   AlertCircle,
@@ -25,7 +25,7 @@ import {
 import { format } from "date-fns"
 import { DashboardCard } from "./DashboardCard"
 import { StoreSelector } from "./StoreSelector"
-import { useMobileView } from "./Dashboard"
+import { useIsMobile } from "./hooks/use-mobile"
 import { useAuth } from "../contexts/AuthContext"
 import { useRealtimeUpdates } from "../hooks/use-realtime-updates"
 import {
@@ -72,7 +72,7 @@ interface ProcessedOrder extends Order {
 
 export function DashboardView() {
   const { user, tenant } = useAuth()
-  const { isMobileView } = useMobileView()
+  const isMobileView = useIsMobile()
 
   // Core state
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())

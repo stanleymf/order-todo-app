@@ -16,7 +16,7 @@ import { Toaster } from "./components/ui/sonner"
 import { ProductsManagementRoute } from "./components/ProtectedRoute"
 import "./index.css"
 import { getTenantSettings } from "./services/api"
-import { useMobileView } from "./components/Dashboard"
+import { useIsMobile } from "./components/hooks/use-mobile"
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -39,7 +39,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppContent() {
   const { tenant } = useAuth()
-  const isMobile = useMobileView()
+  const isMobile = useIsMobile()
   const [cameraWidgetEnabled, setCameraWidgetEnabled] = useState(false)
 
   useEffect(() => {

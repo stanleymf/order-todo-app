@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { jwt, sign } from "hono/jwt"
 import { streamSSE } from "hono/streaming"
-import bcrypt from "bcryptjs"
+import * as bcrypt from "bcryptjs"
 import { d1DatabaseService, getFloristPhotos } from "../src/services/database-d1"
 import { ShopifyApiService } from "../src/services/shopify/shopifyApi"
 import type { D1Database, ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types"
@@ -2004,7 +2004,7 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
       "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
     ).bind(tenantId, String(shopifyOrder.id)).first();
     if (existingOrder) {
-      await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
+      await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: JSON.stringify(shopifyOrderGraphQL) });
       console.log("[WEBHOOK] Updated existing order with GraphQL data:", existingOrder.id);
       return c.json({ success: true, orderId: existingOrder.id, updated: true });
     }
@@ -4007,7 +4007,7 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c)
           orderName: shopifyOrderGraphQL?.name,
           orderId: shopifyOrderGraphQL?.id
         });
-        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
+        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: JSON.stringify(shopifyOrderGraphQL) });
         console.log("[SYNC-BY-DATE] Updated existing order with GraphQL data:", existingOrder.id);
         updatedOrders.push(existingOrder.id);
       } else {
