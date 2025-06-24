@@ -2,6 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.13] - 2025-01-24
+
+### 🎯 **Critical Field Mapping & Data Format Resolution**
+
+- **Field Mapping Data Format Fix**: Resolved critical mismatch between REST and GraphQL data formats in OrderCard field mapping
+  - **Enhanced getValueFromShopifyData Function**: Updated to handle both REST format (`line_items[0].title`) and GraphQL format (`lineItems.edges.0.node.title`)
+  - **Automatic Format Translation**: Added intelligent path conversion from GraphQL config paths to REST data structure
+  - **Product Label Integration**: Fixed `product:difficultyLabel` and `product:productTypeLabel` extraction from savedProductData
+  - **Note Attributes Support**: Added proper handling for `note_attributes` arrays (add-ons, customizations)
+
+- **Advanced Transformation Logic**: Enhanced regex transformation system for robust data extraction
+  - **Array Tag Processing**: Improved handling of tags arrays for timeslot and date extraction using regex patterns
+  - **Error-Resilient Regex**: Added try-catch blocks for regex operations to prevent field mapping failures
+  - **Multi-Format Support**: Tags now work as both arrays and comma-separated strings
+
+- **Complete Field Configuration Compliance**: OrderCard now fully supports the configured field mapping structure
+  - **GraphQL Path Support**: `lineItems.edges.0.node.title` → `line_items[0].title` automatic conversion
+  - **Shopify Field Mapping**: All `shopifyFields` configurations now extract data correctly
+  - **Transformation Rules**: Regex patterns for timeslot (`HH:MM-HH:MM`) and date (`dd/mm/yyyy`) extraction working
+  - **Fallback Logic**: Multiple shopifyFields paths attempted until successful data extraction
+
+### 🔧 **Technical Implementation**
+
+- **Data Source Priority**: Enhanced field value extraction with intelligent fallback
+  ```typescript
+  // Priority order: shopifyOrderData → order → savedProductData
+  1. Try shopifyOrderData with all configured shopifyFields paths
+  2. Fallback to direct order properties
+  3. Handle special product: prefix for saved product data
+  ```
+- **REST-GraphQL Bridge**: Seamless translation between data formats
+  - `lineItems.edges.0.node.title` → `line_items[0].title`
+  - `lineItems.edges.0.node.variant.title` → `line_items[0].variant_title`
+  - Maintains backward compatibility with existing configurations
+
+### 🚀 **Issue Resolution**
+
+- **Primary Issue**: ✅ **Fixed** - OrderCard field mapping now works with REST format data from webhooks
+- **Date Extraction**: ✅ **Working** - `dd/mm/yyyy` extraction from order tags via regex transformation
+- **Field Parity**: ✅ **Achieved** - OrderCard now mirrors OrderCardPreview field mapping completely
+- **Data Normalization**: ✅ **Enhanced** - `normalizeOrderForConfig` creates proper GraphQL structure from REST data
+
+### 🎯 **Impact & Results**
+
+- **Configuration-Driven Rendering**: All OrderCard fields now respect the configured `shopifyFields` mappings
+- **Webhook Data Compatibility**: Orders from Shopify webhooks (REST format) display correctly with GraphQL-style configuration
+- **Label System Integration**: Difficulty and product type labels extracted from saved products data
+- **Regex Transformations**: Timeslots, order dates, and other pattern-based extractions working correctly
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully  
+- **Bundle**: 801.97 kB (226.75 kB gzipped)
+- **Version ID**: 4d5a1ca6-ca0c-4cbf-b485-6a17d31b30b3
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **Status**: 🟢 **Critical Issues Resolved** - Field mapping working correctly
+
 ## [1.4.12] - 2025-01-24
 
 ### 🎯 **OrderCard Component Complete Rewrite & UI Structure Fix**

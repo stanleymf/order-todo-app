@@ -250,6 +250,7 @@ export const d1DatabaseService = {
       notes: result.notes,
       createdAt: result.created_at,
       updatedAt: result.updated_at,
+      shopifyOrderData: result.shopify_order_data ? JSON.parse(result.shopify_order_data) : undefined,
     }))
   },
 
@@ -275,6 +276,7 @@ export const d1DatabaseService = {
       session_id?: string
       store_id?: string
       product_type?: string
+      shopifyOrderData?: any // Add this field for full GraphQL order
     }
   ): Promise<Order> {
     // 1. Check if order already exists
@@ -300,6 +302,7 @@ export const d1DatabaseService = {
           notes: existingOrder.notes,
           createdAt: existingOrder.created_at,
           updatedAt: existingOrder.updated_at,
+          shopifyOrderData: existingOrder.shopify_order_data ? JSON.parse(existingOrder.shopify_order_data) : undefined,
         }
       }
     }
@@ -324,15 +327,16 @@ export const d1DatabaseService = {
       session_id: orderData.session_id || null,
       store_id: orderData.store_id || null,
       product_type: orderData.product_type || null,
+      shopifyOrderData: orderData.shopifyOrderData ? JSON.stringify(orderData.shopifyOrderData) : null,
     };
 
     await env.DB.prepare(
       `INSERT INTO tenant_orders (
         id, tenant_id, shopify_order_id, customer_name, delivery_date, status, priority, assigned_to, notes, product_label, 
-        total_price, currency, customer_email, line_items, product_titles, quantities, session_id, store_id, product_type,
+        total_price, currency, customer_email, line_items, product_titles, quantities, session_id, store_id, product_type, shopify_order_data,
         created_at, updated_at
       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id,
       tenantId,
@@ -353,6 +357,7 @@ export const d1DatabaseService = {
       fullOrderData.session_id,
       fullOrderData.store_id,
       fullOrderData.product_type,
+      fullOrderData.shopifyOrderData,
       now,
       now
     ).run()
@@ -373,6 +378,26 @@ export const d1DatabaseService = {
       .all()
     const result = results[0]
     if (!result) return null
+    
+    console.log("[DB-GET] Retrieved order from database:", orderId);
+    console.log("[DB-GET] shopify_order_data field exists:", !!result.shopify_order_data);
+    if (result.shopify_order_data) {
+      try {
+        const parsedData = JSON.parse(result.shopify_order_data);
+        console.log("[DB-GET] Parsed shopifyOrderData structure:", {
+          hasLineItems: !!parsedData?.lineItems,
+          hasEdges: !!parsedData?.lineItems?.edges,
+          edgesLength: parsedData?.lineItems?.edges?.length,
+          firstNodeTitle: parsedData?.lineItems?.edges?.[0]?.node?.title,
+          firstNodeVariantTitle: parsedData?.lineItems?.edges?.[0]?.node?.variant?.title,
+          orderName: parsedData?.name,
+          orderId: parsedData?.id
+        });
+      } catch (e) {
+        console.log("[DB-GET] Failed to parse shopify_order_data:", e);
+      }
+    }
+    
     return {
       id: result.id,
       tenantId: result.tenant_id,
@@ -385,6 +410,7 @@ export const d1DatabaseService = {
       notes: result.notes,
       createdAt: result.created_at,
       updatedAt: result.updated_at,
+      shopifyOrderData: result.shopify_order_data ? JSON.parse(result.shopify_order_data) : undefined,
     }
   },
 
@@ -427,6 +453,24 @@ export const d1DatabaseService = {
       fields.push("shopify_order_id = ?")
       values.push(updateData.shopifyOrderId)
     }
+    // PATCH: allow updating shopifyOrderData
+    if (updateData.shopifyOrderData !== undefined) {
+      console.log("[DB-UPDATE] About to update shopifyOrderData for order:", orderId);
+      console.log("[DB-UPDATE] shopifyOrderData structure check:", {
+        hasLineItems: !!updateData.shopifyOrderData?.lineItems,
+        hasEdges: !!updateData.shopifyOrderData?.lineItems?.edges,
+        edgesLength: updateData.shopifyOrderData?.lineItems?.edges?.length,
+        firstNodeTitle: updateData.shopifyOrderData?.lineItems?.edges?.[0]?.node?.title,
+        firstNodeVariantTitle: updateData.shopifyOrderData?.lineItems?.edges?.[0]?.node?.variant?.title,
+        orderName: updateData.shopifyOrderData?.name,
+        orderId: updateData.shopifyOrderData?.id,
+        dataType: typeof updateData.shopifyOrderData
+      });
+      fields.push("shopify_order_data = ?")
+      const jsonData = updateData.shopifyOrderData ? JSON.stringify(updateData.shopifyOrderData) : null;
+      console.log("[DB-UPDATE] JSON data being saved (first 500 chars):", jsonData?.substring(0, 500));
+      values.push(jsonData)
+    }
 
     fields.push("updated_at = ?")
     values.push(now)
@@ -439,9 +483,14 @@ export const d1DatabaseService = {
     values.push(tenantId, orderId)
     const query = `UPDATE tenant_orders SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`
 
+    console.log("[DB-UPDATE] Executing query:", query);
+    console.log("[DB-UPDATE] Values count:", values.length);
+
     await env.DB.prepare(query)
       .bind(...values)
       .run()
+    
+    console.log("[DB-UPDATE] Database update completed for order:", orderId);
     return await d1DatabaseService.getOrder(env, tenantId, orderId)
   },
 

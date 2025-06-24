@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Badge } from "./ui/badge"
 import { Button } from "./ui/button"
 import { Textarea } from "./ui/textarea"
-import { Input } from "./ui/input"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./ui/select"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
+import { Label } from "./ui/label"
 import {
   CheckCircle,
   Package,
@@ -15,11 +16,14 @@ import {
   User,
   AlertTriangle,
   Eye,
+  EyeOff,
   Circle,
   Gift,
   MessageSquare,
 } from "lucide-react"
 import { OrderCardField } from "../types/orderCardFields"
+import { useIsMobile } from "./hooks/use-mobile"
+import { ProductImageModal } from "./shared/ProductImageModal"
 import { useAuth } from "../contexts/AuthContext"
 
 interface OrderCardProps {
@@ -35,12 +39,74 @@ interface OrderCardProps {
 type OrderStatus = "unassigned" | "assigned" | "completed"
 
 const getValueFromShopifyData = (sourcePath: string, data: any): any => {
-  if (!sourcePath || !data) return undefined
-  if (sourcePath === "tags") return Array.isArray(data.tags) ? data.tags.join(", ") : data.tags
-  if (sourcePath === "line_items.title") return data.lineItems?.edges?.[0]?.node?.title
-  if (sourcePath === "line_items.variant_title") return data.lineItems?.edges?.[0]?.node?.variant?.title
-  return data[sourcePath]
-}
+  if (!sourcePath || !data) {
+    return null;
+  }
+
+  if (sourcePath.startsWith("product:")) {
+    const productField = sourcePath.split(":")[1];
+    const savedProductData = data.savedProductData;
+    
+    if (!savedProductData) return null;
+    
+    if (productField === "difficultyLabel" || productField === "productTypeLabel") {
+      const labelNames = savedProductData.labelNames || [];
+      const labelCategories = savedProductData.labelCategories || [];
+      
+      if (productField === "difficultyLabel") {
+        const difficultyLabels = labelNames.filter((_name: string, index: number) => 
+          labelCategories[index] === 'difficulty'
+        );
+        return difficultyLabels[0] || null;
+      }
+      if (productField === "productTypeLabel") {
+        const productTypeLabels = labelNames.filter((_name: string, index: number) => 
+          labelCategories[index] === 'productType'
+        );
+        return productTypeLabels[0] || null;
+      }
+    }
+    
+    return savedProductData[productField];
+  }
+
+  const parts = sourcePath.split('.');
+  let current: any = data;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    
+    if (current === null || typeof current === 'undefined') {
+      return null;
+    }
+
+    if (Array.isArray(current)) {
+      const index = parseInt(part);
+      if (!isNaN(index)) {
+        if (index >= 0 && index < current.length) {
+          current = current[index];
+        } else {
+          return null;
+        }
+      } else {
+        const nextPart = parts[i + 1];
+        if (nextPart) {
+          const item = current.find(d => d.name === nextPart);
+          current = item ? item.value : null;
+          i++;
+        } else {
+          return current;
+        }
+      }
+    } else if (typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return null;
+    }
+  }
+
+  return current;
+};
 
 const applyTransformation = (value: any, field: OrderCardField): any => {
   if (field.transformation === "extract" && field.transformationRule) {
@@ -65,355 +131,437 @@ const applyTransformation = (value: any, field: OrderCardField): any => {
     }
     return "Not set";
   }
-  if (Array.isArray(value)) return value.join(', ');
-  return value ?? "Not set";
-}
 
-const StatusCircles: React.FC<{ status: OrderStatus; onStatusChange?: (status: OrderStatus) => void }> = ({ status, onStatusChange }) => {
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  return value ?? "Not set";
+};
+
+const StatusCircles: React.FC<{
+  status: OrderStatus
+  onStatusChange: (status: OrderStatus) => void
+}> = ({ status, onStatusChange }) => {
+  const isMobile = useIsMobile()
+  const iconSize = isMobile ? "h-8 w-8" : "h-6 w-6"
+  const buttonPadding = isMobile ? "p-2" : "p-1"
+
   return (
-    <div className="flex items-center gap-1">
-      <Button variant="ghost" size="sm" className={`h-6 w-6 p-0 rounded-full ${status === "unassigned" ? "bg-gray-200" : "bg-gray-100"}`} onClick={() => onStatusChange?.("unassigned")}>
-        <Circle className="h-3 w-3 text-gray-500" />
-      </Button>
-      <Button variant="ghost" size="sm" className={`h-6 w-6 p-0 rounded-full ${status === "assigned" ? "bg-blue-200" : "bg-gray-100"}`} onClick={() => onStatusChange?.("assigned")}>
-        <Circle className="h-3 w-3 text-blue-500" />
-      </Button>
-      <Button variant="ghost" size="sm" className={`h-6 w-6 p-0 rounded-full ${status === "completed" ? "bg-green-200" : "bg-gray-100"}`} onClick={() => onStatusChange?.("completed")}>
-        <CheckCircle className="h-3 w-3 text-green-500" />
-      </Button>
+    <div className={`flex items-center ${isMobile ? "gap-3" : "gap-2"}`}>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            asChild
+            onClick={(e) => {
+              e.stopPropagation()
+              onStatusChange("unassigned")
+            }}
+          >
+            <Button variant="ghost" size="icon" className={`rounded-full ${buttonPadding}`}>
+              <Circle
+                className={`transition-all ${iconSize} ${
+                  status === "unassigned"
+                    ? "fill-gray-400 text-gray-400"
+                    : "text-gray-300 hover:text-gray-400"
+                }`}
+              />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent><p>Unassigned</p></TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            asChild
+            onClick={(e) => {
+              e.stopPropagation()
+              onStatusChange("assigned")
+            }}
+          >
+            <Button variant="ghost" size="icon" className={`rounded-full ${buttonPadding}`}>
+              <Circle
+                className={`transition-all ${iconSize} ${
+                  status === "assigned"
+                    ? "fill-blue-500 text-blue-500"
+                    : "text-gray-300 hover:text-blue-400"
+                }`}
+              />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent><p>Assigned</p></TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            asChild
+            onClick={(e) => {
+              e.stopPropagation()
+              onStatusChange("completed")
+            }}
+          >
+            <Button variant="ghost" size="icon" className={`rounded-full ${buttonPadding}`}>
+              <CheckCircle
+                className={`transition-all ${iconSize} ${
+                  status === "completed"
+                    ? "fill-green-500 text-white"
+                    : "text-gray-300 hover:text-green-400"
+                }`}
+              />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent><p>Completed</p></TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   )
 }
 
-const FieldRenderer: React.FC<{ field: OrderCardField; value: any; difficultyLabels: Array<{ id: string; name: string; color: string }>; users: Array<{ id: string; name: string }>; onUpdate?: (fieldId: string, value: any) => void }> = ({ field, value, difficultyLabels, users, onUpdate }) => {
+const FieldRenderer: React.FC<{
+  field: OrderCardField
+  value: any
+  difficultyLabels: Array<{ id: string; name: string; color: string }>
+  users: Array<{ id: string; name: string }>
+  onUpdate?: (fieldId: string, value: any) => void
+}> = ({ field, value, users, onUpdate }) => {
   const getFieldIcon = () => {
-    switch (field.id) {
-      case "timeslot": return <Clock className="h-4 w-4 text-muted-foreground" />
-      case "orderDate": return <Calendar className="h-4 w-4 text-muted-foreground" />
-      case "orderTags": return <Tag className="h-4 w-4 text-muted-foreground" />
-      case "addOns": return <Gift className="h-4 w-4 text-muted-foreground" />
-      case "customisations": return <MessageSquare className="h-4 w-4 text-muted-foreground" />
-      case "difficultyLabel": return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-      case "productTypeLabel": return <Package className="h-4 w-4 text-muted-foreground" />
-      default: return <Hash className="h-4 w-4 text-muted-foreground" />
+    const iconMap: { [key: string]: React.ElementType } = {
+      productTitle: Package,
+      productVariantTitle: Gift,
+      timeslot: Clock,
+      orderId: Hash,
+      orderDate: Calendar,
+      orderTags: Tag,
+      assignedTo: User,
+      difficultyLabel: AlertTriangle,
+      customisations: MessageSquare,
     }
+    return iconMap[field.id] || Package
+  }
+
+  const getPriorityColor = () => {
+    if (!value || typeof value !== 'string') return 'bg-gray-100 text-gray-800'
+    const priority = value.toLowerCase()
+    if (priority.includes('easy')) return 'bg-green-100 text-green-800'
+    if (priority.includes('medium')) return 'bg-yellow-100 text-yellow-800'
+    if (priority.includes('hard')) return 'bg-red-100 text-red-800'
+    return 'bg-gray-100 text-gray-800'
+  }
+
+  const getAssignedUserName = () => {
+    if (!value) return "Unassigned"
+    const user = users.find(u => u.id === value)
+    return user ? user.name : value
   }
 
   const renderValue = () => {
-    if (field.type === "textarea" && field.isEditable) {
-      return (
-        <Textarea value={value || ""} onChange={(e) => onUpdate?.(field.id, e.target.value)} placeholder={`Enter ${field.label.toLowerCase()}...`} className="mt-1 resize-none" onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} />
-      )
+    switch (field.type) {
+      case "select":
+        if (field.id === "assignedTo") {
+          if (field.isEditable && onUpdate) {
+            return (
+              <Select value={value || ""} onValueChange={(newValue) => onUpdate(field.id, newValue)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select user" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Unassigned</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
+          }
+          return <span className="text-sm text-muted-foreground">{getAssignedUserName()}</span>
+        }
+        break
+
+      case "textarea":
+        if (field.isEditable && onUpdate) {
+          return (
+            <Textarea
+              value={value || ""}
+              onChange={(e) => onUpdate(field.id, e.target.value)}
+              placeholder={`Enter ${field.label.toLowerCase()}`}
+              className="w-full"
+            />
+          )
+        }
+        return <p className="text-sm text-muted-foreground">{value || "Not set"}</p>
+
+      case "tags":
+        if (Array.isArray(value)) {
+          return (
+            <div className="flex flex-wrap gap-1">
+              {value.map((tag, index) => (
+                <Badge key={index} variant="secondary" className="text-xs">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )
+        }
+        return <span className="text-sm text-muted-foreground">{value || "No tags"}</span>
+
+      default:
+        if (field.id === "difficultyLabel" && value) {
+          return (
+            <Badge className={getPriorityColor()}>
+              {value}
+            </Badge>
+          )
+        }
+        return <span className="text-sm text-muted-foreground">{value || "Not set"}</span>
     }
-    if (field.type === "select" && field.isEditable) {
-      return (
-        <Select value={value || ""} onValueChange={(newValue) => onUpdate?.(field.id, newValue)} onOpenChange={(e) => e.stopPropagation()}>
-          <SelectTrigger className="mt-1">
-            <SelectValue placeholder={`Select ${field.label.toLowerCase()}...`} />
-          </SelectTrigger>
-          <SelectContent>
-            {field.id === "assignedTo" && users.map((user) => (
-              <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-            ))}
-            {field.id === "difficultyLabel" && difficultyLabels.map((label) => (
-              <SelectItem key={label.id} value={label.id}>{label.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )
-    }
-    if (field.type === "text" && field.isEditable) {
-      return (
-        <Input value={value || ""} onChange={(e) => onUpdate?.(field.id, e.target.value)} placeholder={`Enter ${field.label.toLowerCase()}...`} className="mt-1" onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} />
-      )
-    }
-    if (field.id === "assignedTo") {
-      const user = users.find((u) => u.id === value)
-      return <span className="text-blue-600 font-medium">{user?.name || ""}</span>
-    }
-    if (field.id === "difficultyLabel") {
-      const label = difficultyLabels.find((l) => l.id === value)
-      if (label) {
-        return <Badge variant="secondary" style={{ backgroundColor: label.color, color: "white" }}>{label.name}</Badge>
-      }
-      return <span className="text-gray-400">Not assigned</span>
-    }
-    return <span className="text-gray-900">{value || "Not set"}</span>
   }
 
+  const Icon = getFieldIcon()
+
   return (
-    <div className="flex items-start gap-3 text-sm">
-      {getFieldIcon()}
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-gray-900 mb-1">{field.label}</div>
-        <div className="text-gray-600">{renderValue()}</div>
+    <div className="flex items-start gap-3 py-2">
+      <Icon className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+      <div className="flex-1 space-y-1">
+        <Label className="text-xs font-medium text-muted-foreground">
+          {field.label}
+        </Label>
+        {renderValue()}
       </div>
     </div>
   )
 }
 
-const ExpandedView: React.FC<{ order: any; status: OrderStatus; onStatusChange: (status: OrderStatus) => void; fields: OrderCardField[]; users: Array<{ id: string; name: string }>; difficultyLabels: Array<{ id: string; name: string; color: string }>; getFieldValue: (fieldId: string) => any; onCustomisationsChange: (value: string) => void; onShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void; productLabel: { name: string; color: string } | null }> = ({ order, status, onStatusChange, fields, users, difficultyLabels, getFieldValue, onCustomisationsChange, onShowProductImage, productLabel }) => {
-  const renderField = (field: OrderCardField) => {
-    if (field.id === "difficultyLabel" || field.id === "productTypeLabel") {
-      return (
-        <div className="flex items-center gap-2 text-sm">
-          {field.id === "difficultyLabel" ? <AlertTriangle className="h-4 w-4 text-muted-foreground" /> : <Package className="h-4 w-4 text-muted-foreground" />}
-          <span className="font-medium">{field.label}:</span>
-          {productLabel ? (
-            <Badge variant="secondary" style={{ backgroundColor: productLabel.color, color: "white" }}>{productLabel.name}</Badge>
-          ) : (
-            <span className="text-gray-400">Not set</span>
-          )}
-        </div>
-      )
+export const OrderCard: React.FC<OrderCardProps> = ({
+  order,
+  fields,
+  users = [],
+  difficultyLabels = [],
+  onUpdate,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [status, setStatus] = useState<OrderStatus>("assigned")
+  const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
+  const [selectedProductId] = useState<string | undefined>()
+  const [selectedVariantId] = useState<string | undefined>()
+
+  const { tenant } = useAuth()
+
+  const getFieldValue = useCallback((fieldId: string): any => {
+    const field = fields.find((f) => f.id === fieldId)
+    if (!field) return null
+
+    let rawValue = null
+    
+    if (field.shopifyFields && field.shopifyFields.length > 0) {
+      const sourcePath = field.shopifyFields[0]
+      rawValue = getValueFromShopifyData(sourcePath, order.shopifyOrderData || order)
+    } else {
+      rawValue = order[fieldId] || order[field.id]
     }
-    const value = getFieldValue(field.id)
+
+    return applyTransformation(rawValue, field)
+  }, [order, fields])
+
+  useEffect(() => {
+    if (order.assignedTo) {
+      setStatus(order.isCompleted ? "completed" : "assigned")
+    } else {
+      setStatus("unassigned")
+    }
+  }, [order])
+
+  useEffect(() => {
+    const fetchProductLabel = async () => {
+      if (!tenant?.id || !order.shopifyOrderData) return
+
+      let shopifyProductId = order.productTitleId
+      let shopifyVariantId = order.variantId
+
+      if (!shopifyProductId || !shopifyVariantId) {
+        const lineItem = order.shopifyOrderData.lineItems?.edges?.[0]?.node
+        if (lineItem) {
+          shopifyProductId = lineItem.product?.id
+          shopifyVariantId = lineItem.variant?.id
+        }
+      }
+
+      if (shopifyProductId && shopifyProductId.includes('/')) {
+        shopifyProductId = shopifyProductId.split('/').pop()
+      }
+      if (shopifyVariantId && shopifyVariantId.includes('/')) {
+        shopifyVariantId = shopifyVariantId.split('/').pop()
+      }
+
+      if (!shopifyProductId || !shopifyVariantId) return
+
+      try {
+        const jwt = localStorage.getItem("auth_token")
+        const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${jwt}`,
+            "Content-Type": "application/json"
+          }
+        })
+        
+        if (!res.ok) return
+        
+        const product = await res.json()
+        
+        if (order.shopifyOrderData) {
+          order.shopifyOrderData.savedProductData = {
+            labelNames: product.labelNames,
+            labelCategories: product.labelCategories,
+            labelColors: product.labelColors,
+          }
+        }
+        
+      } catch (error) {
+        console.error("Failed to fetch product label:", error)
+      }
+    }
+
+    fetchProductLabel()
+  }, [tenant?.id, order])
+
+  const handleStatusChange = (newStatus: OrderStatus) => {
+    setStatus(newStatus)
+    if (onUpdate) {
+      const updates: any = {}
+      switch (newStatus) {
+        case "unassigned":
+          updates.assignedTo = null
+          updates.isCompleted = false
+          break
+        case "assigned":
+          updates.assignedTo = "current-user"
+          updates.isCompleted = false
+          break
+        case "completed":
+          updates.assignedTo = "current-user"
+          updates.isCompleted = true
+          break
+      }
+      onUpdate(order.cardId || order.id, updates)
+    }
+  }
+
+  const handleFieldUpdate = (fieldId: string, value: any) => {
+    if (onUpdate) {
+      onUpdate(order.cardId || order.id, { [fieldId]: value })
+    }
+  }
+
+  const getCardStyle = () => {
+    switch (status) {
+      case "completed":
+        return "border-green-200 bg-green-50/50"
+      case "assigned":
+        return "border-blue-200 bg-blue-50/50"
+      case "unassigned":
+        return "border-gray-200 bg-gray-50/50"
+      default:
+        return "border-gray-200"
+    }
+  }
+
+  const productTitle = getFieldValue('productTitle') || 'Unknown Product'
+  const productVariant = getFieldValue('productVariantTitle') || ''
+  const difficultyLabel = getFieldValue('difficultyLabel')
+  const visibleFields = fields.filter(field => field.isVisible && field.id !== 'productTitle' && field.id !== 'productVariantTitle')
+
+  const getDifficultyBadge = () => {
+    if (!difficultyLabel) return null
+    
+    const getPriorityColor = () => {
+      const priority = difficultyLabel.toLowerCase()
+      if (priority.includes('easy')) return 'bg-green-100 text-green-800'
+      if (priority.includes('medium')) return 'bg-yellow-100 text-yellow-800'
+      if (priority.includes('hard')) return 'bg-red-100 text-red-800'
+      return 'bg-gray-100 text-gray-800'
+    }
+
     return (
-      <FieldRenderer key={field.id} field={field} value={value} difficultyLabels={difficultyLabels} users={users} />
+      <Badge className={getPriorityColor()}>
+        {difficultyLabel}
+      </Badge>
     )
   }
 
   return (
-    <>
-      <CardHeader className="pb-3 cursor-pointer">
-        <div className="flex justify-between items-start">
-          <div className="flex-1">
-            <CardTitle className="text-lg font-semibold flex items-center gap-2">
-              <Package className="h-5 w-5" />
-              {getFieldValue("productTitle")}
-              {order.shopifyOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
-                <Button variant="ghost" size="sm" className="h-6 w-6 p-0 ml-1" onClick={(e) => { e.stopPropagation(); const productId = order.shopifyOrderData.lineItems.edges[0].node.product.id; const variantId = order.shopifyOrderData.lineItems.edges[0].node.variant?.id; onShowProductImage(productId, variantId) }}>
-                  <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
-                </Button>
-              )}
+    <Card 
+      className={`transition-all duration-200 cursor-pointer hover:shadow-md ${getCardStyle()}`}
+      onClick={() => setIsExpanded(!isExpanded)}
+    >
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">
+              {productTitle}
             </CardTitle>
-            {getFieldValue("productVariantTitle") && (
-              <p className="text-sm text-muted-foreground mt-1">{getFieldValue("productVariantTitle")}</p>
-            )}
           </div>
-          <div className="flex items-center gap-3">
-            <StatusCircles status={status} onStatusChange={onStatusChange} />
-          </div>
-        </div>
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Hash className="h-4 w-4" />
-            {getFieldValue("orderId")}
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsExpanded(!isExpanded)
+            }}
+          >
+            {isExpanded ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {fields.filter((field) => field.isVisible && !["productTitle", "productVariantTitle", "orderId", "assignedTo", "customisations"].includes(field.id)).map(renderField)}
-        {(getFieldValue("assignedTo") || fields.find((f) => f.id === "customisations")?.isVisible) && (
-          <div className="border-t pt-4 space-y-3">
-            {getFieldValue("assignedTo") && (
-              <div className="flex items-center gap-2 text-sm">
-                <User className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">Assigned to:</span>
-                <span className="text-blue-600 font-medium">{users.find((u) => u.id === getFieldValue("assignedTo"))?.name || ""}</span>
-              </div>
-            )}
-            {fields.find((f) => f.id === "customisations")?.isVisible && (
-              <div className="space-y-2">
-                <Textarea id="customisations-textarea" value={getFieldValue("customisations")} onChange={(e) => onCustomisationsChange(e.target.value)} placeholder="Add extra notes..." className="mt-1 resize-none overflow-y-auto max-h-[500px] whitespace-pre-wrap" onClick={(e) => e.stopPropagation()} onFocus={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} />
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </>
-  )
-}
 
-const CollapsedView: React.FC<{ order: any; status: OrderStatus; onStatusChange: (status: OrderStatus) => void; difficultyLabels?: Array<{ id: string; name: string; color: string }>; onShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void; productLabel: { name: string; color: string } | null; getFieldValue: (fieldId: string) => any }> = ({ order, status, onStatusChange, difficultyLabels = [], onShowProductImage, productLabel, getFieldValue }) => {
-  const difficultyLabel = productLabel && productLabel.name && productLabel.color ? productLabel : null;
-
-  return (
-    <CardContent className="p-3 cursor-pointer relative min-h-[90px]">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex-1 min-w-0 pr-16">
-          <div className="text-base font-semibold text-gray-900 leading-tight">{getFieldValue("productTitle")}</div>
-          <div className="text-sm text-gray-500 font-normal mt-1">{getFieldValue("productVariantTitle")}</div>
-          {order.shopifyOrderData?.lineItems?.edges?.[0]?.node?.product?.id && (
-            <div className="mt-2">
-              <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={(e) => { e.stopPropagation(); const productId = order.shopifyOrderData.lineItems.edges[0].node.product.id; const variantId = order.shopifyOrderData.lineItems.edges[0].node.variant?.id; onShowProductImage(productId, variantId) }}>
-                <Eye className="h-4 w-4 text-gray-500 hover:text-gray-700" />
-              </Button>
+      {isExpanded ? (
+        <CardContent className="pt-0">
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <StatusCircles status={status} onStatusChange={handleStatusChange} />
             </div>
-          )}
-        </div>
-        <div className="absolute top-3 right-3">
-          <StatusCircles status={status} onStatusChange={onStatusChange} />
-        </div>
-      </div>
-      {difficultyLabel && (
-        <div className="absolute bottom-3 right-3">
-          <Badge style={{ backgroundColor: difficultyLabel.color, color: "white" }}>{difficultyLabel.name}</Badge>
-        </div>
-      )}
-    </CardContent>
-  )
-}
 
-export const OrderCard: React.FC<OrderCardProps> = ({ order, fields, users = [], difficultyLabels = [], productTypeLabels = [], onUpdate, onShowProductImage }) => {
-  const { tenant } = useAuth()
-  const [isExpanded, setIsExpanded] = useState(false)
-  const [status, setStatus] = useState<OrderStatus>("unassigned")
-  const [productLabel, setProductLabel] = useState<{ name: string; color: string } | null>(null)
-
-  useEffect(() => {
-    const fetchProductLabelAndImage = async () => {
-      if (!tenant?.id || !order) return;
-      
-      let shopifyProductId = order.shopifyProductId || order.product_id || order.productId;
-      let shopifyVariantId = order.shopifyVariantId || order.variant_id || order.variantId;
-      
-      if (!shopifyProductId || !shopifyVariantId) {
-        const lineItem = order.shopifyOrderData?.lineItems?.edges?.[0]?.node;
-        if (lineItem) {
-          shopifyProductId = lineItem.product?.id;
-          shopifyVariantId = lineItem.variant?.id;
-        }
-      }
-      
-      if (shopifyProductId && shopifyProductId.includes('/')) {
-        shopifyProductId = shopifyProductId.split('/').pop();
-      }
-      if (shopifyVariantId && shopifyVariantId.includes('/')) {
-        shopifyVariantId = shopifyVariantId.split('/').pop();
-      }
-      
-      if (!shopifyProductId || !shopifyVariantId) {
-        console.log('OrderCard: Missing product or variant ID', { shopifyProductId, shopifyVariantId, orderKeys: Object.keys(order), lineItems: order.shopifyOrderData?.lineItems });
-        return;
-      }
-      
-      console.log('OrderCard: Fetching product label for', { shopifyProductId, shopifyVariantId });
-      
-      try {
-        const jwt = localStorage.getItem("auth_token");
-        const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
-          credentials: "include",
-          headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }
-        });
-        if (!res.ok) {
-          console.log('OrderCard: API response not ok', { status: res.status, statusText: res.statusText });
-          return;
-        }
-        const product = await res.json();
-        console.log('OrderCard: Received product data', product);
-
-        let names = [];
-        let cats = [];
-        let colors = [];
-        if (Array.isArray(product.labelNames)) {
-          names = product.labelNames;
-        } else if (typeof product.labelNames === 'string') {
-          names = product.labelNames.split(',');
-        }
-        if (Array.isArray(product.labelCategories)) {
-          cats = product.labelCategories;
-        } else if (typeof product.labelCategories === 'string') {
-          cats = product.labelCategories.split(',');
-        }
-        if (Array.isArray(product.labelColors)) {
-          colors = product.labelColors;
-        } else if (typeof product.labelColors === 'string') {
-          colors = product.labelColors.split(',');
-        }
-
-        let label = null;
-        for (let i = 0; i < cats.length; i++) {
-          if (cats[i] === 'difficulty') {
-            label = { name: names[i], color: colors[i] || '#e53e3e' };
-            break;
-          }
-        }
-        if (!label) {
-          for (let i = 0; i < cats.length; i++) {
-            if (cats[i] === 'productType') {
-              label = { name: names[i], color: colors[i] || '#3182ce' };
-              break;
-            }
-          }
-        }
-        setProductLabel(label);
-      } catch (e) {
-        console.error('OrderCard: Error fetching product label', e);
-        setProductLabel(null);
-      }
-    };
-    fetchProductLabelAndImage();
-  }, [tenant?.id, order]);
-
-  const handleStatusChange = useCallback((newStatus: OrderStatus) => {
-    setStatus(newStatus)
-  }, [])
-
-  const handleCustomisationsChange = useCallback((value: string) => {
-    if (onUpdate && order.cardId) {
-      onUpdate(order.cardId, { customisations: value })
-    }
-  }, [onUpdate, order.cardId])
-
-  const getCardStyle = () => {
-    if (status === "completed") return "border-green-500 bg-green-50"
-    if (status === "assigned") return "border-blue-500 bg-blue-50"
-    return "border-gray-200 bg-white"
-  }
-
-  const getFieldValue = useCallback((fieldId: string): any => {
-    const field = fields.find((f) => f.id === fieldId)
-    if (!field) return ""
-
-    if (fieldId === "difficultyLabel" || fieldId === "productTypeLabel") {
-      console.log(`Field ${fieldId} (${field.label}): Using Saved Products data, not Shopify`)
-      return null
-    }
-
-    let rawValue
-
-    if (order.shopifyOrderData && field.shopifyFields && field.shopifyFields.length > 0) {
-      const sourcePath = field.shopifyFields[0]
-      rawValue = getValueFromShopifyData(sourcePath, order.shopifyOrderData)
-      
-      console.log(`Field ${fieldId} (${field.label}):`, {
-        sourcePath,
-        rawValue,
-        hasShopifyOrderData: !!order.shopifyOrderData,
-        shopifyFields: field.shopifyFields
-      })
-    } else {
-      rawValue = order[fieldId] || order[field.id]
-      
-      console.log(`Field ${fieldId} (${field.label}):`, {
-        sourcePath: 'direct order properties',
-        rawValue,
-        hasShopifyOrderData: !!order.shopifyOrderData,
-        hasShopifyFields: !!(field.shopifyFields && field.shopifyFields.length > 0)
-      })
-    }
-
-    const transformedValue = applyTransformation(rawValue, field)
-    
-    console.log(`Field ${fieldId} final value:`, transformedValue)
-    
-    return transformedValue
-  }, [fields, order])
-
-  return (
-    <Card className={`${getCardStyle()} transition-all duration-200`} onClick={(e) => {
-      const target = e.target as HTMLElement
-      if (target.closest('input, textarea, select, button, [role="button"], [data-radix-trigger]')) {
-        return
-      }
-      setIsExpanded(!isExpanded)
-    }}>
-      {!isExpanded ? (
-        <CollapsedView order={order} status={status} onStatusChange={handleStatusChange} difficultyLabels={difficultyLabels} onShowProductImage={onShowProductImage} productLabel={productLabel} getFieldValue={getFieldValue} />
+            <div className="space-y-2">
+              {visibleFields.map((field) => (
+                <FieldRenderer
+                  key={field.id}
+                  field={field}
+                  value={getFieldValue(field.id)}
+                  difficultyLabels={difficultyLabels}
+                  users={users}
+                  onUpdate={handleFieldUpdate}
+                />
+              ))}
+            </div>
+          </div>
+        </CardContent>
       ) : (
-        <ExpandedView order={order} status={status} onStatusChange={handleStatusChange} fields={fields} users={users} difficultyLabels={difficultyLabels} getFieldValue={getFieldValue} onCustomisationsChange={handleCustomisationsChange} onShowProductImage={onShowProductImage} productLabel={productLabel} />
+        <CardContent className="pt-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="font-medium text-sm">{productTitle}</h3>
+              {productVariant && (
+                <p className="text-xs text-muted-foreground">{productVariant}</p>
+              )}
+              <div className="flex items-center gap-2 mt-1">
+                {getDifficultyBadge()}
+              </div>
+            </div>
+            
+            <StatusCircles status={status} onStatusChange={handleStatusChange} />
+          </div>
+        </CardContent>
       )}
+
+      <ProductImageModal
+        isOpen={isProductImageModalOpen}
+        onClose={() => setIsProductImageModalOpen(false)}
+        shopifyProductId={selectedProductId}
+        shopifyVariantId={selectedVariantId}
+        tenantId={tenant?.id}
+      />
     </Card>
   )
 }

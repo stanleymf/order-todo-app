@@ -498,6 +498,59 @@ export class ShopifyApiService {
     )
     return productTypeTags.length > 0 ? productTypeTags[0] : null
   }
+
+  // Fetch a single order by Shopify ID using GraphQL
+  async fetchOrderByIdGraphQL(orderGid: string): Promise<any> {
+    const url = `https://${this.config.storeDomain}/admin/api/2023-10/graphql.json`;
+    const query = `
+      query getOrder($id: ID!) {
+        order(id: $id) {
+          id
+          name
+          createdAt
+          displayFulfillmentStatus
+          tags
+          note
+          customer {
+            firstName
+            lastName
+            email
+          }
+          lineItems(first: 50) {
+            edges {
+              node {
+                title
+                variant {
+                  id
+                  title
+                }
+                product {
+                  id
+                }
+              }
+            }
+          }
+          totalPriceSet { shopMoney { amount currencyCode } }
+          currencyCode
+        }
+      }
+    `;
+    const variables = { id: orderGid };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Shopify GraphQL error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    const data = await response.json();
+    if (data.errors) {
+      throw new Error(`Shopify GraphQL error: ${JSON.stringify(data.errors)}`);
+    }
+    return data.data.order;
+  }
 }
 
 // Utility function to create Shopify API service for a store

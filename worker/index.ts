@@ -1919,30 +1919,51 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
   try {
     const shopifyOrder = await c.req.json();
 
-    if (!shopifyOrder || !shopifyOrder.line_items) {
+    if (!shopifyOrder || !shopifyOrder.id) {
       console.error("Malformed Shopify order payload", shopifyOrder);
       return c.json({ error: "Invalid order data" }, 400);
     }
 
+    // Fetch the store to get access token and domain
+    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
+    if (!store || !store.settings.accessToken) {
+      return c.json({ error: "Shopify store not found or is not configured" }, 404);
+    }
+
+    // Import ShopifyApiService dynamically (for Cloudflare Workers compatibility)
+    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
+    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
+
+    // Convert REST order ID to GID for GraphQL (gid://shopify/Order/1234567890)
+    const orderGid = `gid://shopify/Order/${shopifyOrder.id}`;
+    let shopifyOrderGraphQL = null;
+    try {
+      shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+      console.log("[WEBHOOK] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
+    } catch (err) {
+      console.error("[WEBHOOK] Failed to fetch order from Shopify GraphQL:", err);
+    }
+
     const customerName = `${shopifyOrder.customer?.first_name ?? ""} ${shopifyOrder.customer?.last_name ?? ""}`.trim() || "N/A";
-    
     // Extract delivery date ONLY from Shopify order tags in dd/mm/yyyy format
     const extractDeliveryDateFromTags = (tags: string): string | null => {
       if (!tags) return null;
-      
       // Split tags and look for date pattern dd/mm/yyyy
       const tagArray = tags.split(", ");
       const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
-      
       return dateTag || null;
     };
+    const deliveryDate = extractDeliveryDateFromTags(shopifyOrder.tags);
     
-    const deliveryDate = extractDeliveryDateFromTags(shopifyOrder.tags) || shopifyOrder.created_at.split("T")[0];
+    if (!deliveryDate) {
+      console.log("[WEBHOOK] No delivery date found in tags for order:", shopifyOrder.id, "Tags:", shopifyOrder.tags);
+      return c.json({ error: "No delivery date found in order tags" }, 400);
+    }
     
-    console.log(`Extracted delivery date from tags: ${deliveryDate} (tags: ${shopifyOrder.tags})`);
+    console.log("[WEBHOOK] Extracted delivery date from tags:", deliveryDate, "for order:", shopifyOrder.id);
+    
+    const productLabel = shopifyOrder.line_items?.[0]?.properties?.find((p: any) => p.name === '_label')?.value ?? 'default';
 
-    const productLabel = shopifyOrder.line_items[0]?.properties?.find((p: any) => p.name === '_label')?.value ?? 'default';
-    
     // Enhanced order data for analytics
     const orderData = {
       shopifyOrderId: String(shopifyOrder.id),
@@ -1950,21 +1971,29 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
       deliveryDate: deliveryDate,
       notes: shopifyOrder.note,
       product_label: productLabel,
-      
-      // Analytics fields
       total_price: parseFloat(shopifyOrder.total_price),
       currency: shopifyOrder.currency,
       customer_email: shopifyOrder.customer?.email,
       line_items: JSON.stringify(shopifyOrder.line_items),
-      product_titles: JSON.stringify(shopifyOrder.line_items.map((item: any) => item.title)),
-      quantities: JSON.stringify(shopifyOrder.line_items.map((item: any) => item.quantity)),
+      product_titles: JSON.stringify(shopifyOrder.line_items?.map((item: any) => item.title)),
+      quantities: JSON.stringify(shopifyOrder.line_items?.map((item: any) => item.quantity)),
       session_id: shopifyOrder.checkout_id, // Or other session identifier
       store_id: storeId,
-      product_type: shopifyOrder.line_items[0]?.product_type ?? 'Unknown'
+      product_type: shopifyOrder.line_items?.[0]?.product_type ?? 'Unknown',
+      shopifyOrderData: shopifyOrderGraphQL // Store the full GraphQL order for config-driven rendering
     };
 
-    const newOrder = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
+    // Patch: If order exists, update with latest GraphQL data
+    const existingOrder = await c.env.DB.prepare(
+      "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
+    ).bind(tenantId, String(shopifyOrder.id)).first();
+    if (existingOrder) {
+      await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
+      console.log("[WEBHOOK] Updated existing order with GraphQL data:", existingOrder.id);
+      return c.json({ success: true, orderId: existingOrder.id, updated: true });
+    }
 
+    const newOrder = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
     return c.json({ success: true, orderId: newOrder.id });
   } catch (error: any) {
     console.error("Error processing Shopify order webhook:", error);
@@ -3887,21 +3916,53 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c)
 
     // 2. Fetch all Shopify orders
     const shopifyOrders = await shopifyApi.getOrders();
-    const dateTag = date.replace(/-/g, "/");
+    
+    // Extract delivery date from tags function
+    const extractDeliveryDateFromTags = (tags: string): string | null => {
+      if (!tags) return null;
+      // Split tags and look for date pattern dd/mm/yyyy
+      const tagArray = tags.split(", ");
+      const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+      return dateTag || null;
+    };
+    
+    // Filter orders that have the requested date in their tags
     const filteredOrders = shopifyOrders.filter((order) => {
-      return order.tags.split(", ").includes(dateTag);
+      const orderDeliveryDate = extractDeliveryDateFromTags(order.tags);
+      return orderDeliveryDate === date;
     });
+    
+    console.log("[SYNC-BY-DATE] Found", filteredOrders.length, "orders for date:", date);
+    console.log("[SYNC-BY-DATE] Total orders from Shopify:", shopifyOrders.length);
 
-    // 3. For each order, create or update in DB
+    // 3. For each order, fetch GraphQL data and create or update in DB
+    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
+    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
     const newOrders = [];
     const updatedOrders = [];
     for (const order of filteredOrders) {
+      // Fetch GraphQL order data
+      let shopifyOrderGraphQL = null;
+      try {
+        const orderGid = `gid://shopify/Order/${order.id}`;
+        shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+        console.log("[SYNC-BY-DATE] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
+      } catch (err) {
+        console.error("[SYNC-BY-DATE] Failed to fetch order from Shopify GraphQL:", err);
+      }
       // Prepare order data for DB
       const customerName = `${order.customer?.first_name ?? ""} ${order.customer?.last_name ?? ""}`.trim() || "N/A";
+      const orderDeliveryDate = extractDeliveryDateFromTags(order.tags);
+      
+      if (!orderDeliveryDate) {
+        console.log("[SYNC-BY-DATE] Skipping order", order.id, "- no delivery date found in tags:", order.tags);
+        continue;
+      }
+      
       const orderData = {
         shopifyOrderId: String(order.id),
         customerName: customerName,
-        deliveryDate: date,
+        deliveryDate: orderDeliveryDate, // Use extracted date from tags
         notes: order.note,
         product_label: order.line_items?.[0]?.properties?.find((p) => p.name === '_label')?.value ?? 'default',
         total_price: parseFloat(order.total_price),
@@ -3913,13 +3974,29 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c)
         session_id: order.checkout_id,
         store_id: storeId,
         product_type: order.line_items?.[0]?.product_type ?? 'Unknown',
+        shopifyOrderData: shopifyOrderGraphQL
       };
       // Try to create (will update if exists)
-      const result = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
-      if (result && result.createdAt === result.updatedAt) {
-        newOrders.push(result);
+      const existingOrder = await c.env.DB.prepare(
+        "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
+      ).bind(tenantId, String(order.id)).first();
+      if (existingOrder) {
+        console.log("[SYNC-BY-DATE] About to update order with GraphQL data. Order ID:", existingOrder.id);
+        console.log("[SYNC-BY-DATE] GraphQL data structure check:", {
+          hasLineItems: !!shopifyOrderGraphQL?.lineItems,
+          hasEdges: !!shopifyOrderGraphQL?.lineItems?.edges,
+          edgesLength: shopifyOrderGraphQL?.lineItems?.edges?.length,
+          firstNodeTitle: shopifyOrderGraphQL?.lineItems?.edges?.[0]?.node?.title,
+          firstNodeVariantTitle: shopifyOrderGraphQL?.lineItems?.edges?.[0]?.node?.variant?.title,
+          orderName: shopifyOrderGraphQL?.name,
+          orderId: shopifyOrderGraphQL?.id
+        });
+        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
+        console.log("[SYNC-BY-DATE] Updated existing order with GraphQL data:", existingOrder.id);
+        updatedOrders.push(existingOrder.id);
       } else {
-        updatedOrders.push(result);
+        const result = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
+        newOrders.push(result);
       }
     }
     return c.json({ success: true, newOrders, updatedOrders, count: filteredOrders.length });
@@ -3947,3 +4024,221 @@ app.post("/api/tenants/:tenantId/orders/delete-by-date", async (c) => {
     return c.json({ error: "Failed to delete orders", details: error.message }, 500);
   }
 });
+
+// --- Clear All Orders (Fresh Start) ---
+app.post("/api/tenants/:tenantId/orders/clear-all", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  
+  try {
+    console.log("[CLEAR-ALL] Starting to clear all orders for tenant:", tenantId);
+    
+    // Get count before deletion for feedback
+    const countResult = await c.env.DB.prepare(
+      `SELECT COUNT(*) as count FROM tenant_orders WHERE tenant_id = ?`
+    ).bind(tenantId).first();
+    
+    const orderCount = countResult?.count || 0;
+    console.log("[CLEAR-ALL] Found", orderCount, "orders to delete");
+    
+    // Delete all orders for the tenant
+    const { results } = await c.env.DB.prepare(
+      `DELETE FROM tenant_orders WHERE tenant_id = ?`
+    ).bind(tenantId).run();
+    
+    const deletedCount = results?.changes ?? 0;
+    
+    console.log("[CLEAR-ALL] Successfully deleted", deletedCount, "orders for tenant:", tenantId);
+    
+    return c.json({ 
+      success: true, 
+      deletedCount: deletedCount,
+      message: `Cleared ${deletedCount} orders from database. Ready for fresh sync!`
+    });
+  } catch (error) {
+    console.error("Error clearing all orders:", error);
+    return c.json({ error: "Failed to clear orders", details: error.message }, 500);
+  }
+});
+
+// --- Force Update Order with GraphQL Data ---
+app.post("/api/tenants/:tenantId/orders/:orderId/force-update-graphql", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const orderId = c.req.param("orderId");
+  
+  try {
+    // Get the order to find its Shopify order ID
+    const order = await d1DatabaseService.getOrder(c.env, tenantId, orderId);
+    if (!order) {
+      return c.json({ error: "Order not found" }, 404);
+    }
+    
+    if (!order.shopifyOrderId) {
+      return c.json({ error: "Order has no Shopify ID" }, 400);
+    }
+    
+    // Get store info
+    const stores = await d1DatabaseService.getStores(c.env, tenantId);
+    if (!stores || stores.length === 0) {
+      return c.json({ error: "No Shopify stores configured" }, 404);
+    }
+    const store = stores[0];
+    
+    // Fetch GraphQL order data
+    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
+    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
+    
+    const orderGid = `gid://shopify/Order/${order.shopifyOrderId}`;
+    const shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+    
+    console.log("[FORCE-UPDATE] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
+    
+    // Update the order with GraphQL data
+    await d1DatabaseService.updateOrder(c.env, tenantId, orderId, { shopifyOrderData: shopifyOrderGraphQL });
+    
+    return c.json({ 
+      success: true, 
+      message: "Order updated with GraphQL data",
+      orderId: orderId,
+      shopifyOrderId: order.shopifyOrderId
+    });
+  } catch (error) {
+    console.error("Error force updating order with GraphQL data:", error);
+    return c.json({ error: "Failed to update order", details: error.message }, 500);
+  }
+});
+
+// --- Sync All Orders and Categorize by Delivery Date ---
+app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-all", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const storeId = c.req.param("storeId");
+  
+  try {
+    // 1. Get store info
+    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
+    if (!store || !store.settings.accessToken) {
+      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
+    }
+    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken);
+
+    // 2. Fetch all Shopify orders
+    const shopifyOrders = await shopifyApi.getOrders();
+    
+    // Extract delivery date from tags function
+    const extractDeliveryDateFromTags = (tags: string): string | null => {
+      if (!tags) return null;
+      // Split tags and look for date pattern dd/mm/yyyy
+      const tagArray = tags.split(", ");
+      const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+      return dateTag || null;
+    };
+    
+    // Group orders by delivery date
+    const ordersByDate: { [date: string]: any[] } = {};
+    const ordersWithoutDate: any[] = [];
+    
+    shopifyOrders.forEach((order) => {
+      const deliveryDate = extractDeliveryDateFromTags(order.tags);
+      if (deliveryDate) {
+        if (!ordersByDate[deliveryDate]) {
+          ordersByDate[deliveryDate] = [];
+        }
+        ordersByDate[deliveryDate].push(order);
+      } else {
+        ordersWithoutDate.push(order);
+      }
+    });
+    
+    // Log all extracted delivery dates and counts
+    Object.entries(ordersByDate).forEach(([date, orders]) => {
+      console.log(`[SYNC-ALL] Delivery date: ${date} - Orders: ${orders.length}`);
+    });
+    console.log("[SYNC-ALL] Orders without delivery date:", ordersWithoutDate.length);
+    console.log("[SYNC-ALL] Total orders from Shopify:", shopifyOrders.length);
+
+    // 3. For each order, fetch GraphQL data and create or update in DB
+    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
+    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
+    const newOrders = [];
+    const updatedOrders = [];
+    
+    // Process all orders with delivery dates
+    for (const [deliveryDate, orders] of Object.entries(ordersByDate)) {
+      console.log("[SYNC-ALL] Processing", orders.length, "orders for date:", deliveryDate);
+      
+      for (const order of orders) {
+        // Fetch GraphQL order data
+        let shopifyOrderGraphQL = null;
+        try {
+          const orderGid = `gid://shopify/Order/${order.id}`;
+          shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+          console.log("[SYNC-ALL] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
+        } catch (err) {
+          console.error("[SYNC-ALL] Failed to fetch order from Shopify GraphQL:", err);
+        }
+        
+        // Prepare order data for DB
+        const customerName = `${order.customer?.first_name ?? ""} ${order.customer?.last_name ?? ""}`.trim() || "N/A";
+        const orderData = {
+          shopifyOrderId: String(order.id),
+          customerName: customerName,
+          deliveryDate: deliveryDate, // Use the extracted date from tags
+          notes: order.note,
+          product_label: order.line_items?.[0]?.properties?.find((p) => p.name === '_label')?.value ?? 'default',
+          total_price: parseFloat(order.total_price),
+          currency: order.currency,
+          customer_email: order.customer?.email,
+          line_items: JSON.stringify(order.line_items),
+          product_titles: JSON.stringify(order.line_items.map((item) => item.title)),
+          quantities: JSON.stringify(order.line_items.map((item) => item.quantity)),
+          session_id: order.checkout_id,
+          store_id: storeId,
+          product_type: order.line_items?.[0]?.product_type ?? 'Unknown',
+          shopifyOrderData: shopifyOrderGraphQL
+        };
+        
+        // Try to create (will update if exists)
+        const existingOrder = await c.env.DB.prepare(
+          "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
+        ).bind(tenantId, String(order.id)).first();
+        
+        if (existingOrder) {
+          await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { 
+            shopifyOrderData: shopifyOrderGraphQL,
+            deliveryDate: deliveryDate // Update delivery date if it changed
+          });
+          console.log("[SYNC-ALL] Updated existing order with GraphQL data:", existingOrder.id);
+          updatedOrders.push(existingOrder.id);
+        } else {
+          const result = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
+          newOrders.push(result);
+        }
+      }
+    }
+    
+    return c.json({ 
+      success: true, 
+      newOrders, 
+      updatedOrders, 
+      totalProcessed: newOrders.length + updatedOrders.length,
+      ordersByDate: Object.keys(ordersByDate),
+      ordersWithoutDate: ordersWithoutDate.length
+    });
+  } catch (error) {
+    console.error("Error syncing all Shopify orders:", error);
+    return c.json({ error: "Failed to sync orders", details: error.message }, 500);
+  }
+});
+
+// --- Date normalization utility ---
+function normalizeDateToISO(dateStr: string): string | null {
+  // Accepts dd/mm/yyyy, returns yyyy-mm-dd
+  if (!dateStr) return null;
+  const match = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    return `${year}-${month}-${day}`;
+  }
+  // If already ISO, return as is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  return null;
+}

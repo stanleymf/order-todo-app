@@ -1072,6 +1072,18 @@ export async function syncOrdersByDate(
   );
 }
 
+export async function syncAllOrders(
+  tenantId: string,
+  storeId: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/stores/${storeId}/orders/sync-all`,
+    {
+      method: "POST",
+    }
+  );
+}
+
 export async function deleteOrdersByDate(
   tenantId: string,
   date: string
@@ -1081,6 +1093,17 @@ export async function deleteOrdersByDate(
     {
       method: "POST",
       body: JSON.stringify({ date }),
+    }
+  );
+}
+
+export async function clearAllOrders(
+  tenantId: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/orders/clear-all`,
+    {
+      method: "POST",
     }
   );
 }

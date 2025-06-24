@@ -478,3 +478,48 @@ const classifyLineItems = async (lineItems, tenantId) => {
 - Add-on usage analytics
 - Processing time tracking
 - Performance metrics 
+
+# OrdersView Logic: OrderCard Behavior Reference
+
+## 1. Config-Driven Rendering
+- **OrderCard** must render all fields, layout, and UI based solely on the field mapping config fetched from the backend (set by "Go Live" in Settings > OrderCardPreview).
+- No hardcoded or duplicated field logic—config is the single source of truth.
+
+## 2. UI/UX Parity
+- The live OrderCard in OrdersView must be a **carbon copy** of the OrderCardPreview:
+  - Same Card, CardHeader, CardContent structure
+  - Same field order, visibility, icons, and transformation rules
+  - Same editable fields, selects, and textareas
+  - Same image modal (eye icon) and status/assignment controls
+
+## 3. Field Value Extraction
+- For each field:
+  - Use `shopifyFields` mapping to extract from Shopify order data if present
+  - Apply transformation rules (e.g., regex) as defined in config
+  - Fallback to direct order properties if no mapping
+  - Special handling for label fields (difficulty/productType) using Saved Products API
+
+## 4. Status & Assignment Logic
+- Status buttons (unassigned/assigned/completed) update the order's status
+- When assigned or completed, the "Assigned To" field is set to the current logged-in user
+- Status and assignment changes are persisted via the provided `onUpdate` handler
+
+## 5. Page-Level Business Logic
+- **OrdersView** is responsible for:
+  - Fetching the config and order data
+  - Applying any additional business logic (filtering, sorting, stat cards, etc.)
+  - Passing the correct config and data to each OrderCard
+- OrderCard remains a pure presentational component, unaware of page-level logic
+
+## 6. WYSIWYG Guarantee
+- Any change made in the preview and saved via "Go Live" is instantly reflected in OrdersView
+- No risk of drift between preview and live views
+
+## 7. Extensibility
+- Future enhancements (new fields, new logic) should be made in the config and shared logic, not in separate components
+
+---
+
+**Summary:**
+- The OrderCard in OrdersView is always a true mirror of the preview, driven by the config, and all business logic remains in OrdersView.
+- This ensures maintainability, flexibility, and a perfect WYSIWYG experience for users. 

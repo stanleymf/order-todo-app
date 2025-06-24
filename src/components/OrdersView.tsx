@@ -34,6 +34,7 @@ import {
   Wifi,
   WifiOff,
   Gift,
+  Database,
 } from "lucide-react"
 import { format } from "date-fns"
 import { OrderCard } from "./OrderCard"
@@ -55,7 +56,9 @@ import {
   fetchShopifyOrder,
   getProductByShopifyIds,
   syncOrdersByDate,
+  syncAllOrders,
   deleteOrdersByDate,
+  clearAllOrders,
 } from "../services/api"
 import type { User, Order, Store, ProductLabel } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
@@ -74,6 +77,65 @@ interface ProcessedLineItem {
   shopifyOrderData: any;
   savedProductData?: any;
   cardId: string; // Unique identifier for each card
+}
+
+// Normalization utility: DB/REST order -> Shopify GraphQL structure
+function normalizeOrderForConfig(order: any): any {
+  if (!order) return order;
+  // Clone to avoid mutating original
+  const normalized = { ...order };
+
+  // Normalize line_items to lineItems.edges[].node
+  if (Array.isArray(order.shopifyOrderData?.line_items)) {
+    normalized.shopifyOrderData = {
+      ...order.shopifyOrderData,
+      lineItems: {
+        edges: order.shopifyOrderData.line_items.map((item: any) => ({ node: item }))
+      }
+    };
+  }
+
+  // Normalize name to formatted order number if available
+  if (order.shopifyOrderData?.name && !order.shopifyOrderData?.name.startsWith('#')) {
+    // Ensure shopifyOrderData is properly initialized
+    if (!normalized.shopifyOrderData) {
+      normalized.shopifyOrderData = { ...order.shopifyOrderData };
+    }
+    
+    let formattedName = order.shopifyOrderData.name;
+    
+    // If the name is a long ID like "6180356718816", extract last 5 digits
+    if (formattedName.length > 5 && /^\d+$/.test(formattedName)) {
+      formattedName = formattedName.slice(-5);
+    }
+    
+    normalized.shopifyOrderData = {
+      ...normalized.shopifyOrderData,
+      name: `#WF${formattedName}`
+    };
+  }
+
+  // Copy tags if present
+  if (order.shopifyOrderData?.tags) {
+    normalized.shopifyOrderData.tags = order.shopifyOrderData.tags;
+  }
+
+  // Copy note if present
+  if (order.shopifyOrderData?.note) {
+    normalized.shopifyOrderData.note = order.shopifyOrderData.note;
+  }
+
+  // Copy customer fields if present
+  if (order.shopifyOrderData?.customer) {
+    normalized.shopifyOrderData.customer = order.shopifyOrderData.customer;
+  }
+
+  // Copy localProduct if present
+  if (order.shopifyOrderData?.localProduct) {
+    normalized.shopifyOrderData.localProduct = order.shopifyOrderData.localProduct;
+  }
+
+  return normalized;
 }
 
 export function OrdersView() {
@@ -120,6 +182,7 @@ export function OrdersView() {
   const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>()
   const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>()
+  const [showDebug, setShowDebug] = useState(false)
 
   // Get mobile view context
   const { isMobileView } = useMobileView()
@@ -268,6 +331,8 @@ export function OrdersView() {
       setAddOnCards(addOns);
       
       console.log(`Processed ${mainItems.length} main order cards and ${addOns.length} add-on cards from database`);
+      console.log('Fetched orders from DB:', todoData.map(o => ({ id: o.id, deliveryDate: o.deliveryDate })));
+      console.log('Selected date for filtering:', selectedDate);
     } catch (error) {
       setError('Failed to reload orders');
     }
@@ -314,6 +379,71 @@ export function OrdersView() {
     }
   }, [tenant?.id, selectedStore, selectedDate, stores, processOrdersReload]);
 
+  // --- Sync All Orders and Categorize by Delivery Date ---
+  const syncAllOrdersByDate = useCallback(async () => {
+    if (!tenant?.id) {
+      setError("No tenant found");
+      return;
+    }
+    setProcessingOrders(true);
+    setError(null);
+    setFetchFeedback(null);
+    try {
+      let responses = [];
+      if (!selectedStore || selectedStore === "all") {
+        // Sync all orders for all stores
+        if (!stores.length) throw new Error("No stores configured");
+        for (const store of stores) {
+          const resp = await syncAllOrders(tenant.id, store.id);
+          responses.push({ store: store.name, ...resp });
+        }
+      } else {
+        // Sync all orders for specific store
+        const store = stores.find(s => s.id === selectedStore);
+        if (!store) throw new Error("Selected store not found");
+        const resp = await syncAllOrders(tenant.id, selectedStore);
+        responses.push({ store: store.name, ...resp });
+      }
+      
+      setFetchFeedback(`Synced all orders for ${selectedStore === "all" ? "all stores" : stores.find(s => s.id === selectedStore)?.name || "store"}. Orders categorized by delivery date.`);
+      // Log responses for debugging
+      console.log("Sync all responses:", responses);
+    } catch (error: any) {
+      setError('Failed to sync all orders: ' + (error?.message || error));
+      setFetchFeedback(null);
+    } finally {
+      setProcessingOrders(false);
+    }
+  }, [tenant?.id, selectedStore, stores]);
+
+  // --- Clear All Orders (Fresh Start) ---
+  const clearAllOrdersData = useCallback(async () => {
+    if (!tenant?.id) {
+      setError("No tenant found");
+      return;
+    }
+    setProcessingOrders(true);
+    setError(null);
+    setFetchFeedback(null);
+    try {
+      const response = await clearAllOrders(tenant.id);
+      setFetchFeedback(`${response.message} Database cleared successfully!`);
+      
+      // Clear local state
+      setOrders([]);
+      setTodoCards([]);
+      setMainOrderCards([]);
+      setAddOnCards([]);
+      
+      console.log("Clear all orders response:", response);
+    } catch (error: any) {
+      setError('Failed to clear orders: ' + (error?.message || error));
+      setFetchFeedback(null);
+    } finally {
+      setProcessingOrders(false);
+    }
+  }, [tenant?.id]);
+
   // Now define the handler that uses them
   const handleRealtimeUpdate = useCallback((update: any) => {
     if (update.type === 'order_updated' && update.order && update.order.cardId) {
@@ -350,11 +480,33 @@ export function OrdersView() {
     loadData();
   }, [loadData]);
 
-  const handleOrderUpdate = () => {
-    if (todoCards.length > 0) {
-      fetchOrders();
-    } else {
-      loadData();
+  const handleOrderUpdate = async (orderId: string, updates: any) => {
+    if (!tenant?.id || !currentUser?.id) return
+    
+    try {
+      // Update the order in the database
+      await updateOrder(tenant.id, orderId, updates, currentUser.id)
+      
+      // Update local state to reflect changes
+      setMainOrderCards(prevCards =>
+        prevCards.map(card =>
+          card.cardId === orderId
+            ? { ...card, ...updates }
+            : card
+        )
+      )
+      
+      // Also update add-on cards if needed
+      setAddOnCards(prevCards =>
+        prevCards.map(card =>
+          card.cardId === orderId
+            ? { ...card, ...updates }
+            : card
+        )
+      )
+    } catch (error) {
+      console.error('Failed to update order:', error)
+      setError('Failed to update order')
     }
   }
 
@@ -467,6 +619,12 @@ export function OrdersView() {
     setIsProductImageModalOpen(true)
   }, [])
 
+  // Pick a sample order for debug (first main order card if available)
+  const sampleOrder = mainOrderCards.length > 0 ? mainOrderCards[0] : (orders.length > 0 ? orders[0] : null)
+
+  // Determine if current user is admin
+  const isAdmin = currentUser && currentUser.role === 'admin'
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -494,6 +652,29 @@ export function OrdersView() {
 
   return (
     <div className={`space-y-6 ${isMobileView ? "space-y-4" : ""}`}>
+      {/* Debug Panel (admin only) */}
+      {isAdmin && (
+        <div className="mb-4 p-3 border rounded bg-gray-50 text-xs">
+          <button
+            className="mb-2 px-2 py-1 bg-gray-200 rounded hover:bg-gray-300"
+            onClick={() => setShowDebug((v) => !v)}
+          >
+            {showDebug ? "Hide" : "Show"} Debug Panel
+          </button>
+          {showDebug && (
+            <div className="overflow-x-auto max-h-96 mt-2">
+              <div className="mb-2">
+                <strong>Order Card Config:</strong>
+                <pre className="bg-gray-100 p-2 rounded overflow-x-auto">{JSON.stringify(orderCardConfig, null, 2)}</pre>
+              </div>
+              <div>
+                <strong>Sample Order Data:</strong>
+                <pre className="bg-gray-100 p-2 rounded overflow-x-auto">{JSON.stringify(sampleOrder, null, 2)}</pre>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {/* Real-time Connection Status */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -692,6 +873,42 @@ export function OrdersView() {
                 </>
               )}
             </Button>
+            <Button 
+              onClick={syncAllOrdersByDate} 
+              disabled={processingOrders || !stores.length}
+              variant="outline"
+              className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
+            >
+              {processingOrders ? (
+                <>
+                  <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
+                  {isMobileView ? "Syncing..." : "Syncing All Orders..."}
+                </>
+              ) : (
+                <>
+                  <CalendarDays className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  {isMobileView ? "Sync All" : "Sync All Orders"}
+                </>
+              )}
+            </Button>
+            <Button 
+              onClick={clearAllOrdersData} 
+              disabled={processingOrders || !stores.length}
+              variant="secondary"
+              className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
+            >
+              {processingOrders ? (
+                <>
+                  <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
+                  {isMobileView ? "Clearing..." : "Clearing DB..."}
+                </>
+              ) : (
+                <>
+                  <Database className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  {isMobileView ? "Clear DB" : "Clear All Orders"}
+                </>
+              )}
+            </Button>
             <Button
               variant="destructive"
               onClick={() => setShowDeleteConfirm(true)}
@@ -765,7 +982,7 @@ export function OrdersView() {
               {filteredMainOrderCards.map((order) => (
                 <OrderCard
                   key={order.cardId}
-                  order={order}
+                  order={normalizeOrderForConfig(order)}
                   fields={orderCardConfig}
                   users={florists}
                   difficultyLabels={productLabels.filter(p => p.category === 'difficulty')}
@@ -800,7 +1017,7 @@ export function OrdersView() {
               {filteredAddOnCards.map((card) => (
                 <OrderCard
                   key={card.cardId}
-                  order={card}
+                  order={normalizeOrderForConfig(card)}
                   fields={orderCardConfig}
                   users={florists}
                   difficultyLabels={productLabels.filter(p => p.category === 'difficulty')}
