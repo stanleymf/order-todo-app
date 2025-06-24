@@ -59,6 +59,7 @@ import {
 } from "../services/api"
 import type { User, Order, Store, ProductLabel } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
+import { ProductImageModal } from "./shared/ProductImageModal"
 
 // Interface for processed line items
 interface ProcessedLineItem {
@@ -116,6 +117,9 @@ export function OrdersView() {
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [fetchFeedback, setFetchFeedback] = useState<string | null>(null)
+  const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
+  const [selectedProductId, setSelectedProductId] = useState<string | undefined>()
+  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>()
 
   // Get mobile view context
   const { isMobileView } = useMobileView()
@@ -454,6 +458,15 @@ export function OrdersView() {
     }
   };
 
+  const handleShowProductImage = useCallback((shopifyProductId?: string, shopifyVariantId?: string) => {
+    // Always pass only the numeric ID (strip gid://.../)
+    const numericProductId = shopifyProductId ? shopifyProductId.split('/').pop() : undefined
+    const numericVariantId = shopifyVariantId ? shopifyVariantId.split('/').pop() : undefined
+    setSelectedProductId(numericProductId)
+    setSelectedVariantId(numericVariantId)
+    setIsProductImageModalOpen(true)
+  }, [])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -749,31 +762,18 @@ export function OrdersView() {
             </div>
           ) : (
             <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
-              {filteredMainOrderCards.map((card) => {
-                // Get add-ons for this specific order
-                const orderAddOns = getAddOnsForOrder(card.orderId, addOnCards)
-                
-                return (
-                  <OrderCard
-                    key={card.cardId}
-                    fields={orderCardConfig}
-                    realOrderData={{
-                      ...card.shopifyOrderData,
-                      cardId: card.cardId,
-                      // Add add-ons information to the order data
-                      addOns: orderAddOns.map(addOn => ({
-                        title: addOn.title,
-                        price: addOn.price,
-                        quantity: addOn.quantity
-                      }))
-                    }}
-                    users={florists}
-                    difficultyLabels={productLabels.filter(l => l.category === 'difficulty')}
-                    productTypeLabels={productLabels.filter(l => l.category === 'productType')}
-                    currentUserId={currentUser?.id}
-                  />
-                )
-              })}
+              {filteredMainOrderCards.map((order) => (
+                <OrderCard
+                  key={order.cardId}
+                  order={order}
+                  fields={orderCardConfig}
+                  users={florists}
+                  difficultyLabels={productLabels.filter(p => p.category === 'difficulty')}
+                  productTypeLabels={productLabels.filter(p => p.category === 'productType')}
+                  onShowProductImage={handleShowProductImage}
+                  onUpdate={handleOrderUpdate}
+                />
+              ))}
             </div>
           )}
         </CardContent>
@@ -800,19 +800,13 @@ export function OrdersView() {
               {filteredAddOnCards.map((card) => (
                 <OrderCard
                   key={card.cardId}
+                  order={card}
                   fields={orderCardConfig}
-                  realOrderData={{
-                    ...card.shopifyOrderData,
-                    cardId: card.cardId,
-                    // Mark this as an add-on card
-                    isAddOnCard: true,
-                    addOnTitle: card.title,
-                    addOnPrice: card.price
-                  }}
                   users={florists}
-                  difficultyLabels={productLabels.filter(l => l.category === 'difficulty')}
-                  productTypeLabels={productLabels.filter(l => l.category === 'productType')}
-                  currentUserId={currentUser?.id}
+                  difficultyLabels={productLabels.filter(p => p.category === 'difficulty')}
+                  productTypeLabels={productLabels.filter(p => p.category === 'productType')}
+                  onShowProductImage={handleShowProductImage}
+                  onUpdate={handleOrderUpdate}
                 />
               ))}
             </div>
@@ -839,6 +833,14 @@ export function OrdersView() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ProductImageModal
+        isOpen={isProductImageModalOpen}
+        onClose={() => setIsProductImageModalOpen(false)}
+        shopifyProductId={selectedProductId}
+        shopifyVariantId={selectedVariantId}
+        tenantId={tenant?.id}
+      />
     </div>
   )
 }

@@ -5,15 +5,16 @@ This document outlines the logic for OrdersView to properly handle Shopify order
 
 ---
 
-## Updated Architecture (as of 2025-06-24)
+## Updated Architecture (as of 2025-01-24)
 
 ### 1. Shopify Webhook Integration (Primary Source of Truth)
 - Orders are received in real time via the Shopify `orders/create` webhook.
-- Each order is saved to the database, associated with a specific date using a tag in the format `dd/mm/yyyy` (extracted from the order's tags).
+- **Date Extraction**: Delivery date is extracted **ONLY from Shopify order tags** in `dd/mm/yyyy` format.
+- Each order is saved to the database, associated with the extracted date tag.
 - No manual processing is needed for new orders—they appear automatically for the correct date in the UI.
 
 ### 2. Process Orders Button (Manual Sync/Update & Fetch)
-- The "Process Orders" button is retained in the UI.
+- The "Fetch Orders" button is retained in the UI.
 - When clicked, it will:
   - **Fetch new orders from Shopify** for the selected date (using the `dd/mm/yyyy` tag).
   - **Add any new orders** that are not already in the database (prevents duplicates).
@@ -27,76 +28,225 @@ This document outlines the logic for OrdersView to properly handle Shopify order
 
 ---
 
+## Enhanced OrdersView Requirements (2025-01-24)
+
+### 📊 Clickable Stat Cards & Filtering System
+
+#### **Row 1 - Core Metrics (Clickable Filters)**
+1. **Total Orders** - Click to show all orders
+2. **Unassigned Orders** - Click to filter unassigned orders
+3. **Assigned Orders** - Click to filter assigned orders  
+4. **Completed Orders** - Click to filter completed orders
+
+#### **Row 2 - Breakdown Analytics**
+5. **Store Breakdown** - Container with clickable store sub-cards
+   - Each store shows its order count for the selected date
+   - Click any store to filter orders for that store only
+   - Only shows stores with orders for the selected date
+6. **Difficulty Breakdown** - Summary count of each difficulty label
+7. **Product Type Breakdown** - Summary count of each product type label
+
+### 🔄 Sorting Priority System
+
+1. **Time Window Sorting** (Primary Priority)
+   - Extract time windows from order tags (e.g., "10:00-14:00", "14:00-18:00", "18:00-22:00")
+   - Orders sorted by delivery time window priority
+   - Earlier time windows appear first
+
+2. **Store Sorting** (Secondary Priority)
+   - Each store gets its own container
+   - Add-ons have a separate dedicated container
+   - Stores sorted alphabetically or by configuration order
+
+3. **Express Orders** (Visual Priority)
+   - Orders with "express" in any line item title → **Yellow highlight**
+   - Express line items are **excluded** from order card population
+   - Visual indicator for express orders
+
+4. **Product Type Labels** (Priority Level)
+   - Use existing priority levels from Products > Labels
+   - Higher priority labels sorted first
+   - Based on `product_labels.priority` field in database
+
+5. **Difficulty Labels** (Priority Level)
+   - Use existing priority levels from Products > Labels
+   - Higher priority labels sorted first
+   - Based on `product_labels.priority` field in database
+
+### 🎯 Filter Management
+
+- **Replace Current Filter**: When a stat card is clicked, it replaces the current filter
+- **Clear Filter Option**: Provide a way to clear all filters and show all orders
+- **Filter State Persistence**: Maintain filter state during date changes
+- **Visual Feedback**: Highlight active filters and show filter summary
+
+### 📋 Implementation Requirements
+
+#### **Time Window Extraction**
+- Extract time windows from order tags using regex pattern
+- Support formats: "10:00-14:00", "14:00-18:00", "18:00-22:00"
+- Use existing OrderCard field mapping configuration for extraction
+
+#### **Express Order Detection**
+- Check all line items in an order for "express" in the title
+- If found, highlight the entire order card in yellow
+- Exclude express line items from individual order card population
+
+#### **Label Priority System**
+- Query `product_labels` table with `ORDER BY priority ASC`
+- Use priority values for sorting within each category
+- Support both difficulty and product type label priorities
+
+#### **Store Breakdown Logic**
+- Only show stores that have orders for the selected date
+- Calculate order count per store for the selected date
+- Make each store card clickable for filtering
+
+---
+
 ## Technical Flow
 
 ### Webhook Ingestion
 1. Shopify sends an `orders/create` webhook when a new order is placed.
 2. The backend webhook handler:
    - Parses the order payload.
-   - Extracts the `dd/mm/yyyy` date tag from the order's tags.
+   - **Extracts the `dd/mm/yyyy` date tag from the order's tags** (e.g., "25/01/2025").
    - Saves the order to the database, associating it with the extracted date.
    - Ensures no duplicate orders are created (idempotent insert/update logic).
 
 ### Order Retrieval
 - The frontend fetches orders for the selected date by matching the `dd/mm/yyyy` tag.
-- Orders are displayed immediately for the correct date, with no manual processing required.
+- Orders are processed into individual line item cards with proper add-on classification.
 
-### Process Orders Button
-- When clicked, triggers a backend/API call to:
-  - Fetch new orders from Shopify for the selected date.
-  - Add any new orders not already in the database.
-  - Update (refresh) all existing orders for the selected date.
-- No duplicate orders are created; only new or updated ones are saved.
+### Date Extraction Logic (Consistent Across Webhook & Sync)
+```typescript
+// Both webhook and sync use identical date extraction logic
+const extractDeliveryDateFromTags = (tags: string): string | null => {
+  if (!tags) return null;
+  
+  // Split tags and look for date pattern dd/mm/yyyy
+  const tagArray = tags.split(", ");
+  const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+  
+  return dateTag || null;
+};
+```
 
-### Bulk Delete
-- The frontend provides a bulk delete button.
-- When clicked, sends a request to the backend to delete all orders for the selected date (or all currently displayed orders).
-- Confirmation dialog is recommended to prevent accidental deletion.
-
----
-
-## UI/UX Summary
-- **Orders appear automatically** for the correct date as soon as they are received from Shopify.
-- **Process Orders** is now a "sync" action: fetches new orders and updates existing ones, never duplicates.
-- **Bulk Delete** allows for easy clearing of orders for a date.
-- **No duplicates**: All logic ensures that orders are not duplicated, whether via webhook or manual update.
+**Example Shopify Order Tags**: `"25/01/2025, birthday, rush"` → Extracts `"25/01/2025"`
 
 ---
 
-## Implementation Steps
+## Data Flow Summary
 
-1. **Backend**
-   - [ ] Webhook handler for `orders/create` (idempotent save by order ID, date tag extraction)
-   - [ ] Endpoint for updating (refreshing) and fetching new orders for a date (sync logic)
-   - [ ] Endpoint for bulk deleting orders by date
-2. **Frontend**
-   - [ ] Fetch orders for selected date by `dd/mm/yyyy` tag
-   - [ ] Process Orders button triggers sync: fetches new orders and updates existing ones
-   - [ ] Bulk delete button with confirmation dialog
-   - [ ] UI reflects real-time updates and deletion
+### Webhook-Based Orders (Automatic)
+```mermaid
+graph LR
+    A[Shopify Order Created] --> B[Webhook Received]
+    B --> C[Extract Date from Tags dd/mm/yyyy]
+    C --> D[Order Saved to Database]
+    D --> E[OrdersView Shows Order]
+```
+
+### Manual Fetch Orders (Sync)
+```mermaid
+graph LR
+    A[User Clicks Fetch Orders] --> B[syncOrdersByDate Called]
+    B --> C[Fetch All Shopify Orders]
+    C --> D[Filter by Date Tag dd/mm/yyyy]
+    D --> E[Save/Update in Database]
+    E --> F[getOrdersFromDbByDate Called]
+    F --> G[Fetch from Database by delivery_date]
+    G --> H[Process into OrderCards]
+```
+
+### Database Retrieval for OrdersView
+```mermaid
+graph LR
+    A[OrdersView Loads] --> B[getOrdersFromDbByDate]
+    B --> C[Query by delivery_date field]
+    C --> D[Process Line Items]
+    D --> E[Classify Add-Ons]
+    E --> F[Display in UI]
+```
+
+### Enhanced OrdersView Processing
+```mermaid
+graph LR
+    A[Orders Loaded] --> B[Extract Time Windows from Tags]
+    B --> C[Sort by Time Window Priority]
+    C --> D[Group by Store]
+    D --> E[Sort by Label Priority]
+    E --> F[Apply Express Highlighting]
+    F --> G[Display with Stat Cards]
+```
 
 ---
 
-## Notes
-- This architecture ensures real-time, reliable, and duplicate-free order management.
-- Manual processing is only for sync (fetch new + update), not creation only.
-- Bulk delete is a safety/maintenance feature for admins.
+## Key Implementation Details
+
+### Date Consistency
+- **Webhook**: Extracts date from `shopifyOrder.tags` using regex pattern `dd/mm/yyyy`
+- **Sync**: Filters orders by `order.tags.split(", ").includes(dateTag)`
+- **Database**: Stores in `delivery_date` field
+- **Retrieval**: Queries by `delivery_date` field
+
+### Order Processing
+- Each line item is processed individually
+- Quantity flattening (e.g., quantity 3 = 3 separate cards)
+- Add-on classification using saved products API
+- Separate containers for main orders vs add-ons
+
+### Enhanced Features
+- **Time Window Extraction**: From order tags using field mapping config
+- **Express Detection**: Check all line items for "express" in title
+- **Label Priority**: Use `product_labels.priority` field for sorting
+- **Store Filtering**: Clickable store breakdown with order counts
+- **Filter Management**: Replace current filter, clear options
+
+### Error Handling
+- Graceful fallback to created date if no date tag found
+- Robust error handling for missing data
+- Logging for debugging date extraction
+
+---
+
+## Configuration Requirements
+
+### Shopify Setup
+- Orders must have tags in `dd/mm/yyyy` format for proper date extraction
+- Time windows should be included in order tags (e.g., "10:00-14:00")
+- Webhook must be configured for `orders/create` events
+- Store must have proper access token configured
+
+### Database Schema
+- `tenant_orders` table with `delivery_date` field
+- `product_labels` table with `priority` field for sorting
+- Proper indexing on `tenant_id` and `delivery_date` for performance
+
+### Frontend Configuration
+- OrdersView component with proper date selection
+- Add-on classification logic using saved products
+- Real-time updates via webhook ingestion
+- Enhanced stat cards with filtering capabilities
+- Time window extraction using field mapping config
+
+---
 
 ## Current State Analysis
 
-### Existing API Endpoints
-1. **`/api/tenants/:tenantId/saved-products/by-shopify-id`** - Perfect for matching
-   - Parameters: `shopify_product_id`, `shopify_variant_id`
-   - Returns: Full product data including `labelNames` array
-   - Used for: Identifying if a line item is an add-on
+### Issues to Address
+1. **OrderCard Configuration**: Current config doesn't match OrderCardPreview
+2. **Field Mapping**: Need to ensure proper field extraction from order tags
+3. **Time Window Logic**: Implement extraction from order tags
+4. **Express Order Handling**: Add detection and highlighting logic
+5. **Label Priority**: Integrate with existing product labels priority system
 
-2. **`/api/tenants/:tenantId/saved-products`** - General saved products
-   - Returns: All saved products with labels
-   - Used for: General product management
-
-3. **`/api/tenants/:tenantId/orders`** - Current orders endpoint
-   - Returns: Basic order data (missing full Shopify order data)
-   - Issue: `realOrderData` doesn't contain full Shopify order information
+### Next Steps
+1. Fix OrderCard configuration to match OrderCardPreview
+2. Implement enhanced stat cards with filtering
+3. Add time window extraction and sorting
+4. Implement express order detection and highlighting
+5. Integrate label priority sorting system
 
 ## Implementation Plan
 

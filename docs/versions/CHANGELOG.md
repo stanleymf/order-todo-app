@@ -2,6 +2,120 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.12] - 2025-01-24
+
+### 🎯 **OrderCard Component Complete Rewrite & UI Structure Fix**
+
+- **Complete OrderCard Component Rewrite**: Rebuilt OrderCard component from scratch to match OrderCardPreview structure exactly
+  - **Proper Card Container Structure**: Now uses Card, CardHeader, CardContent components like OrderCardPreview
+  - **Exact Field Mapping Logic**: Implements same field extraction, transformation, and rendering logic as OrderCardPreview
+  - **Consistent UI/UX**: Same visual appearance, interactions, and behavior as preview
+  - **Image Modal Integration**: Eye icon functionality works correctly with proper event handling
+
+- **OrdersView Integration**: OrdersView now uses the new OrderCard component for both main orders and add-ons
+  - **Main Orders**: Properly rendered with Card containers and all field functionality
+  - **Add-Ons**: Same Card structure and functionality as main orders
+  - **Field Display**: All configured fields (Product Title, Variant Title, Order ID, Timeslot, Difficulty, etc.) display correctly
+  - **Editable Fields**: Textboxes, selects, and textareas work as configured
+  - **Status Buttons**: Status circles function properly with click handlers
+
+- **Technical Improvements**:
+  - **Component Architecture**: Clean separation of concerns with StatusCircles, FieldRenderer, ExpandedView, and CollapsedView
+  - **Field Value Extraction**: Proper Shopify data mapping and transformation logic
+  - **Product Label Integration**: Fetches and displays difficulty/product type labels from Saved Products
+  - **Event Handling**: Proper click propagation and form interaction handling
+  - **Responsive Design**: Maintains mobile-friendly layout and interactions
+
+### 🚀 **Impact**
+
+- **Complete UI Parity**: OrdersView now matches OrderCardPreview exactly
+- **Proper Card Structure**: All order cards now render within proper Card containers
+- **Full Functionality**: All fields, buttons, and interactions work as expected
+- **Image Modal Access**: Eye icon appears and opens product image modal correctly
+- **Consistent Experience**: Same behavior across preview and live order views
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully
+- **Bundle**: 798.72 kB (225.98 kB gzipped)
+- **No Breaking Changes**: All existing functionality preserved
+- **Ready for Production**: Complete parity between preview and live views achieved
+
+## [1.4.11] - 2025-01-24
+
+### 🎯 **OrdersView OrderCard Rendering Fix & Image Modal Integration**
+
+- **Complete OrderCard Rendering Parity**: Fixed critical issue where OrdersView was not using the same field mapping, transformation, and config logic as OrderCardPreview
+  - OrdersView now uses shared `OrderCardRenderer` component for consistent rendering
+  - All fields (Product Title, Variant Title, Order ID, Timeslot, Difficulty, etc.) now display correctly
+  - Editable textboxes and status buttons now function as configured
+  - Field extraction uses proper `shopifyFields` mapping and transformation logic
+
+- **Product Image Modal Integration**: Added missing eye icon and image modal functionality to OrdersView
+  - Added `ProductImageModal` component to OrdersView
+  - Implemented `handleShowProductImage` handler for eye icon clicks
+  - Eye icon now appears on order cards when product/variant IDs are available
+  - Modal displays product images, details, and allows syncing from Shopify
+  - Consistent behavior with OrderCardPreview image modal
+
+### 🔧 **Technical Implementation**
+
+- **Shared Component Usage**: OrdersView now leverages `OrderCardRenderer` for all order cards:
+  - Passes correct config, users, labels, and order data
+  - Uses same field extraction and transformation logic as preview
+  - Maintains consistent UI/UX across preview and live view
+- **Modal State Management**: Added proper state management for image modal:
+  - `isProductImageModalOpen` state for modal visibility
+  - `selectedProductId` and `selectedVariantId` for modal data
+  - Proper ID extraction (strips `gid://` prefixes)
+- **Event Handler Integration**: Connected eye icon clicks to modal functionality:
+  - Prevents event bubbling for proper modal behavior
+  - Handles both expanded and collapsed card views
+  - Supports both main orders and add-on cards
+
+### 🎨 **UI/UX Improvements**
+
+- **Field Display Consistency**: All configured fields now display correctly:
+  - Product titles and variants from Shopify data
+  - Order IDs, timeslots, and difficulty labels
+  - Custom fields with proper transformations
+  - Status indicators and assignment information
+- **Interactive Elements**: Editable fields and status buttons now functional:
+  - Text inputs for editable fields as per config
+  - Status circles for order status management
+  - Proper event handling and state updates
+- **Visual Consistency**: Order cards now match preview exactly:
+  - Same layout, styling, and component structure
+  - Consistent icon usage and field positioning
+  - Proper spacing and typography
+
+### 📊 **Data Flow Enhancement**
+
+- **Field Mapping**: OrdersView now uses proper field extraction:
+  - `shopifyFields` configuration for data source mapping
+  - Transformation rules (regex, etc.) applied correctly
+  - Fallback to direct order properties when needed
+- **Label Integration**: Difficulty and product type labels display correctly:
+  - Uses saved product data for label information
+  - Proper color coding and badge display
+  - Consistent with preview behavior
+
+### 🚀 **Impact**
+
+- **Complete Feature Parity**: OrdersView now matches OrderCardPreview functionality
+- **Enhanced User Experience**: All fields and interactions work as expected
+- **Image Modal Access**: Users can now view product images directly from order cards
+- **Consistent Behavior**: Same rendering logic across preview and live views
+- **Future-Ready**: Foundation for advanced order management features
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully
+- **Bundle**: 795.71 kB (225.38 kB gzipped)
+- **Version ID**: 8b54a724-2db9-4f22-9150-c8be1cdb4b7e
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **All endpoints functional**: No breaking changes to existing APIs
+
 ## [1.4.10] - 2025-01-24
 
 ### Fixed
