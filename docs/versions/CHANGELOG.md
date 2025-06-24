@@ -2,51 +2,150 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.4.14] - 2025-01-24
+## [1.5.1] - 2025-01-15
 
-### 🎯 **Unified OrderCard Architecture - Single Component for Preview & Production**
+### Enhanced
+- **DashboardCard Redesign**: Complete redesign of DashboardCard component with new specifications
+  - **Collapsed State**: Horizontal layout with product title/variant, eye icon for expansion, and 3 enlarged circle status buttons (Pending, Assigned, Completed)
+  - **Auto-Assignment**: Clicking Blue (Assigned) or Green (Completed) automatically assigns to current user
+  - **Difficulty Badge**: Color-coded difficulty label below status buttons using saved products API
+  - **Expanded State**: Comprehensive view with product title, variant, timeslot, order date, difficulty label, add-ons, status, and editable notes
+  - **Non-Collapsing Notes**: Notes textbox prevents card collapse on click for better UX
+  - **Real-time Product Labels**: Integrated with saved products API for difficulty/product type labels with color coding
+  - **Smart Data Extraction**: Automatic extraction of timeslots, dates, and add-ons from Shopify order data
+  - **Mobile Optimized**: Touch-friendly enlarged circle buttons and responsive design
+  - **Proper Field Mapping**: Uses existing field mapping configuration system from Settings
 
-- **Major Architecture Simplification**: Unified OrderCard component to serve both preview and production needs
-  - **Deleted Legacy OrderCard.tsx**: Removed complex fallback logic and duplicate codebase
-  - **Enhanced OrderCardPreview**: Adapted as unified OrderCard with production-ready features
-  - **Single Source of Truth**: Settings → Preview → Production now use identical component logic
-  - **Perfect Mirror Experience**: What users see in configuration preview exactly matches production display
+### Technical
+- Added product label caching system for improved API performance
+- Implemented proper TypeScript interfaces for Order status types
+- Cleaned up unused imports and functions
+- Updated status values to match Order type schema (pending instead of unassigned)
+- Fixed ProductImageModal prop interfaces
 
-- **Technical Implementation**:
-  - **Unified Props Interface**: Standardized OrderCardProps for consistent data flow
-  - **Status Management**: Maintained status circles (unassigned → assigned → completed) with proper event handling
-  - **Field Mapping**: Preserved robust field configuration system with getValueFromShopifyData()
-  - **Product Image Modal**: Integrated ProductImageModal functionality for both contexts
-  - **Expandable Cards**: Maintained collapsed/expanded view functionality
+## [1.5.0] - 2025-01-15
 
-- **OrdersView Integration**: Updated to use unified OrderCard component
-  - **Proper Event Handling**: Enhanced handleOrderUpdate function with correct tenantId/userId parameters
-  - **TypeScript Compliance**: Fixed all type errors and removed unused variables
-  - **Consistent Behavior**: Same interaction patterns across preview and production
-  - **Performance Optimization**: Reduced bundle size by eliminating duplicate component logic
+### 🎯 **NEW DASHBOARD ROUTE - Enhanced Analytics & UI/UX**
 
-### 🚀 **Benefits & Impact**
+- **Major New Feature**: Added comprehensive Dashboard route as default landing page with advanced analytics
+  - **New `/dashboard` Route**: Now serves as the primary landing page (before `/orders`)
+  - **Enhanced Navigation**: Updated routing structure with Dashboard → Orders → Analytics → Products → AI → Settings
+  - **Dual Card Systems**: Maintains existing OrderCard for `/orders` while introducing new DashboardCard for enhanced visualization
 
-- **Maintenance Simplified**: Single component to maintain instead of two diverging codebases
-- **Configuration Consistency**: Field mappings work identically in preview and production
-- **Developer Experience**: No more debugging differences between preview and live behavior
-- **User Experience**: Perfect WYSIWYG - what you configure is exactly what displays
-- **Future-Proof**: Single codebase easier to enhance and extend
+### 🏠 **DashboardView Component - Advanced Analytics Interface**
 
-### 🔧 **Data Flow Optimization**
+- **Row 1 - Core Metrics (Clickable Filters)**:
+  - **Total Orders**: Click to show all orders
+  - **Unassigned Orders**: Click to filter unassigned orders 
+  - **Assigned Orders**: Click to filter assigned orders
+  - **Completed Orders**: Click to filter completed orders
 
-- **Date-Driven Navigation**: Orders organized by delivery date extracted from tags (dd/mm/yyyy format)
-- **Dual Population Methods**: Automatic via webhooks (order/create) and manual via "Fetch Orders" button
-- **Real-time Collaboration**: Persistent assignment/completion state across multiple florists
-- **Unified Data Processing**: Single getValueFromShopifyData() function handles both REST and GraphQL formats
+- **Row 2 - Breakdown Analytics**:
+  - **Store Breakdown**: Clickable store cards with order counts for selected date
+  - **Difficulty Breakdown**: Visual summary of difficulty label distribution with color coding
+  - **Product Type Breakdown**: Summary count of each product type label
+
+### 🎨 **DashboardCard - Enhanced Order Visualization**
+
+- **Advanced Visual Design**:
+  - **Store Indicators**: Color-coded dots for store identification
+  - **Express Order Highlighting**: Yellow background for express orders with lightning badge
+  - **Time Window Badges**: Blue badges displaying delivery time windows
+  - **Label System**: Color-coded difficulty and product type badges with proper icons
+  - **Expandable Interface**: Clean collapsed view with eye icon for expansion
+
+- **Enhanced Functionality**:
+  - **Smart Status Buttons**: Vertical stack of status circles (unassigned/assigned/completed)
+  - **Auto-Assignment**: Automatically assigns current user when marking assigned/completed
+  - **Product Image Modal**: Integrated with package icon for quick product visualization
+  - **Notes Management**: Real-time notes updating with proper error handling
+
+### 🚀 **Advanced Sorting & Filtering System**
+
+- **Priority-Based Sorting**:
+  1. **Time Window Priority**: Earlier delivery windows appear first
+  2. **Store Grouping**: Orders grouped by store with alphabetical sorting
+  3. **Express Detection**: Express orders prioritized with visual highlighting
+  4. **Label Priority**: Uses `product_labels.priority` field for intelligent sorting
+
+- **Smart Filtering**:
+  - **Status Filters**: Click stat cards to filter by order status
+  - **Store Filters**: Click store breakdown cards to filter by specific store
+  - **Search Integration**: Real-time search across customer names, order numbers, and notes
+  - **Filter Persistence**: Maintains filter state during date navigation
+  - **Clear Filters**: One-click filter reset functionality
+
+### 🔄 **Real-time Updates & Data Management**
+
+- **Live Data Integration**:
+  - **Real-time Connection Status**: Live/Offline indicator with WebSocket status
+  - **Automatic Updates**: Orders update in real-time when other users make changes
+  - **Sync Functionality**: "Update Orders" button for manual Shopify data refresh
+  - **Last Sync Tracking**: Displays timestamp of last successful sync
+
+- **Enhanced Data Processing**:
+  - **Time Window Extraction**: Automatic extraction from order tags using regex patterns
+  - **Express Order Detection**: Scans all line items for "express" keywords
+  - **Label Integration**: Fetches difficulty/product type labels from Saved Products API
+  - **Caching Optimization**: Smart caching for product label API calls
+
+### 🎯 **Mobile-Responsive Design**
+
+- **Adaptive Layout**:
+  - **Mobile Grid**: 2-column stat cards, single-column breakdowns
+  - **Compact Cards**: Optimized card sizing for mobile screens
+  - **Touch-Friendly**: Larger touch targets and proper spacing
+  - **Responsive Text**: Smaller font sizes and condensed layouts for mobile
+
+### 🔧 **Technical Architecture**
+
+- **Component Structure**:
+  - **DashboardView.tsx**: Main dashboard component with analytics and filtering
+  - **DashboardCard.tsx**: Enhanced order card with improved UI/UX
+  - **Shared Logic**: Maintains compatibility with existing API services
+  - **Type Safety**: Full TypeScript integration with proper interfaces
+
+- **Performance Optimizations**:
+  - **Memoized Calculations**: UseMemo for statistics and breakdowns
+  - **Efficient Filtering**: Optimized filtering logic with minimal re-renders
+  - **API Deduplication**: Smart caching prevents duplicate product label API calls
+
+### 🎨 **Enhanced User Experience**
+
+- **Visual Hierarchy**:
+  - **Color-Coded Elements**: Stores, labels, and status have distinct color schemes
+  - **Icon Integration**: Meaningful icons for all UI elements (Clock, Store, User, etc.)
+  - **Badge System**: Informative badges for status, time windows, and express orders
+  - **Hover Effects**: Subtle hover states for interactive elements
+
+- **Interaction Design**:
+  - **Clickable Analytics**: All stat cards and breakdown elements are interactive
+  - **Progressive Disclosure**: Cards start collapsed with option to expand for details
+  - **Context Awareness**: Current filters highlighted with visual feedback
+  - **Error Handling**: Graceful error states with user-friendly messages
+
+### 🚀 **Deployment & Integration**
+
+- **Routing Updates**: Updated App.tsx with new dashboard route structure
+- **Navigation Changes**: Modified Dashboard.tsx with 6-tab layout
+- **Backward Compatibility**: Existing `/orders` route unchanged
+- **Clean Architecture**: Separate components prevent code interference
+
+### 📊 **Impact & Benefits**
+
+- **Enhanced Overview**: Users get immediate visual insights into daily operations
+- **Improved Workflow**: Clickable analytics enable rapid filtering and navigation
+- **Better Visualization**: Enhanced card design improves information scanning
+- **Mobile Optimization**: Better mobile experience for on-the-go usage
+- **Data-Driven Decisions**: Rich analytics support operational insights
 
 ### 🚀 **Deployment**
 
-- **Build**: 2138 modules transformed successfully
-- **Bundle**: 799.59 kB (226.41 kB gzipped) - optimized through code deduplication
-- **Version ID**: eff87dff-fb98-43e9-a3db-395af1537cad
+- **Build**: 2140 modules transformed successfully
+- **Bundle**: 823.30 kB (232.80 kB gzipped)
+- **Version ID**: e857bc7e-8b15-41b3-9a52-0ff198fb42d1
 - **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
-- **Status**: 🟢 **Architecture Unified** - Single component serves all needs
+- **Status**: 🟢 **Dashboard Live** - Enhanced analytics interface ready
 
 ## [1.4.14] - 2025-01-24
 

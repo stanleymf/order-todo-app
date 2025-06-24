@@ -1,27 +1,18 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader } from "./ui/card"
 import { Button } from "./ui/button"
 import { Badge } from "./ui/badge"
 import { Textarea } from "./ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import {
   Eye,
   Clock,
-  User,
-  Package,
-  MapPin,
-  Phone,
   Calendar,
-  Star,
   AlertTriangle,
   CheckCircle,
   UserCheck,
-  Store,
-  Tag,
-  Zap,
 } from "lucide-react"
-import { format } from "date-fns"
 import { ProductImageModal } from "./shared/ProductImageModal"
+import { useAuth } from "../contexts/AuthContext"
 import type { Order, User as UserType } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
 
@@ -32,6 +23,11 @@ interface ProcessedOrder extends Order {
   storeData?: any
   difficultyLabel?: string
   productTypeLabel?: string
+  savedProductData?: {
+    labelNames: string[]
+    labelCategories: string[]
+    labelColors: string[]
+  }
 }
 
 interface DashboardCardProps {
@@ -42,6 +38,10 @@ interface DashboardCardProps {
   currentUser: UserType | null
   isMobileView?: boolean
 }
+
+// Cache for product label API calls
+const productLabelCache = new Map<string, any>()
+const pendingRequests = new Map<string, Promise<any>>()
 
 export function DashboardCard({
   order,
@@ -55,28 +55,34 @@ export function DashboardCard({
   const [isUpdating, setIsUpdating] = useState(false)
   const [notes, setNotes] = useState(order.notes || "")
   const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
+  const [productLabels, setProductLabels] = useState<{
+    difficultyLabel?: string
+    difficultyColor?: string
+    productTypeLabel?: string
+    productTypeColor?: string
+  }>({})
+
+  const { tenant } = useAuth()
 
   // Get field values using config mappings
   const getFieldValue = (field: OrderCardField): string => {
     try {
       // Handle special fields first
-      switch (field.name) {
+      switch (field.id) {
         case 'difficultyLabel':
-          return order.difficultyLabel || "Standard"
+          return productLabels.difficultyLabel || "Standard"
         case 'productTypeLabel':
-          return order.productTypeLabel || "Arrangement"
-        case 'timeWindow':
-          return order.timeWindow || "Time not specified"
-        case 'storeName':
-          return order.storeData?.name || "Unknown Store"
-        case 'customerName':
-          return order.customerName || "No customer name"
-        case 'deliveryDate':
-          return order.deliveryDate || "Date not specified"
+          return productLabels.productTypeLabel || "Arrangement"
+        case 'timeslot':
+          return order.timeWindow || extractTimeslotFromTags() || "Time not specified"
+        case 'orderDate':
+          return order.deliveryDate || extractDateFromTags() || "Date not specified"
+        case 'addOns':
+          return extractAddOnsFromData() || "Not set"
         case 'notes':
-          return order.notes || "No notes added"
-        case 'status':
-          return order.status || "unassigned"
+          return order.notes || "Not set"
+        case 'isCompleted':
+          return order.status === 'completed' ? 'Completed' : 'Pending'
         case 'assignedTo':
           const assignedFlorist = florists.find(f => f.id === order.assignedTo)
           return assignedFlorist?.name || "Unassigned"
@@ -85,12 +91,12 @@ export function DashboardCard({
       // Handle Shopify field mappings
       if (field.shopifyFields && order.shopifyOrderData) {
         for (const shopifyField of field.shopifyFields) {
-          let value = getNestedValue(order.shopifyOrderData, shopifyField.path)
+          let value = getNestedValue(order.shopifyOrderData, shopifyField)
           
           if (value !== undefined && value !== null) {
             // Apply transformation if specified
-            if (shopifyField.transform?.type === 'regex' && shopifyField.transform.pattern) {
-              const regex = new RegExp(shopifyField.transform.pattern, 'i')
+            if (field.transformation === 'extract' && field.transformationRule) {
+              const regex = new RegExp(field.transformationRule, 'i')
               const match = String(value).match(regex)
               value = match ? match[1] || match[0] : value
             }
@@ -100,10 +106,10 @@ export function DashboardCard({
       }
 
       // Fallback to order properties
-      const orderValue = getNestedValue(order, field.name)
+      const orderValue = getNestedValue(order, field.id)
       return orderValue !== undefined && orderValue !== null ? String(orderValue) : "Not specified"
     } catch (error) {
-      console.error(`Error getting field value for ${field.name}:`, error)
+      console.error(`Error getting field value for ${field.id}:`, error)
       return "Error loading field"
     }
   }
@@ -115,6 +121,36 @@ export function DashboardCard({
       }
       return undefined
     }, obj)
+  }
+
+  // Extract timeslot from tags
+  const extractTimeslotFromTags = (): string | null => {
+    if (!order.shopifyOrderData?.tags) return null
+    const timePattern = /\b(\d{1,2}:\d{2}-\d{1,2}:\d{2})\b/
+    const match = order.shopifyOrderData.tags.match(timePattern)
+    return match ? match[1] : null
+  }
+
+  // Extract date from tags
+  const extractDateFromTags = (): string | null => {
+    if (!order.shopifyOrderData?.tags) return null
+    const datePattern = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/
+    const match = order.shopifyOrderData.tags.match(datePattern)
+    return match ? match[1] : null
+  }
+
+  // Extract add-ons from order data
+  const extractAddOnsFromData = (): string | null => {
+    // Check line items for add-ons
+    if (order.shopifyOrderData?.line_items) {
+      const addOns = order.shopifyOrderData.line_items
+        .filter((item: any) => item.title?.toLowerCase().includes('add'))
+        .map((item: any) => item.title)
+      if (addOns.length > 0) {
+        return addOns.join(', ')
+      }
+    }
+    return null
   }
 
   // Get product title and variant for display
@@ -138,8 +174,97 @@ export function DashboardCard({
 
   const productInfo = getProductInfo()
 
+  // Fetch product labels from saved products API
+  const fetchProductLabels = useCallback(async () => {
+    if (!tenant?.id || !productInfo.productId || !productInfo.variantId) return
+
+    const cacheKey = `${productInfo.productId}-${productInfo.variantId}`
+    
+    // Check cache first
+    if (productLabelCache.has(cacheKey)) {
+      const cached = productLabelCache.get(cacheKey)
+      if (cached?.labelNames && cached?.labelCategories && cached?.labelColors) {
+        const difficultyIndex = cached.labelCategories.findIndex((cat: string) => cat === 'difficulty')
+        const productTypeIndex = cached.labelCategories.findIndex((cat: string) => cat === 'productType')
+        
+        setProductLabels({
+          difficultyLabel: difficultyIndex >= 0 ? cached.labelNames[difficultyIndex] : undefined,
+          difficultyColor: difficultyIndex >= 0 ? cached.labelColors[difficultyIndex] : undefined,
+          productTypeLabel: productTypeIndex >= 0 ? cached.labelNames[productTypeIndex] : undefined,
+          productTypeColor: productTypeIndex >= 0 ? cached.labelColors[productTypeIndex] : undefined,
+        })
+      }
+      return
+    }
+
+    // Check if request is already pending
+    if (pendingRequests.has(cacheKey)) {
+      try {
+        const result = await pendingRequests.get(cacheKey)
+        if (result?.labelNames && result?.labelCategories && result?.labelColors) {
+          const difficultyIndex = result.labelCategories.findIndex((cat: string) => cat === 'difficulty')
+          const productTypeIndex = result.labelCategories.findIndex((cat: string) => cat === 'productType')
+          
+          setProductLabels({
+            difficultyLabel: difficultyIndex >= 0 ? result.labelNames[difficultyIndex] : undefined,
+            difficultyColor: difficultyIndex >= 0 ? result.labelColors[difficultyIndex] : undefined,
+            productTypeLabel: productTypeIndex >= 0 ? result.labelNames[productTypeIndex] : undefined,
+            productTypeColor: productTypeIndex >= 0 ? result.labelColors[productTypeIndex] : undefined,
+          })
+        }
+      } catch (error) {
+        console.error("Error waiting for pending request:", error)
+      }
+      return
+    }
+
+    try {
+      const jwt = localStorage.getItem("auth_token")
+      const fetchPromise = fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${productInfo.productId}&shopify_variant_id=${productInfo.variantId}`, {
+        credentials: "include",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json"
+        }
+      }).then(res => res.ok ? res.json() : Promise.reject('Network error'))
+
+      // Store the pending request
+      pendingRequests.set(cacheKey, fetchPromise)
+      
+      const result = await fetchPromise
+      
+      // Cache the result
+      productLabelCache.set(cacheKey, result)
+      
+      // Clean up pending request
+      pendingRequests.delete(cacheKey)
+      
+      if (result?.labelNames && result?.labelCategories && result?.labelColors) {
+        const difficultyIndex = result.labelCategories.findIndex((cat: string) => cat === 'difficulty')
+        const productTypeIndex = result.labelCategories.findIndex((cat: string) => cat === 'productType')
+        
+        setProductLabels({
+          difficultyLabel: difficultyIndex >= 0 ? result.labelNames[difficultyIndex] : undefined,
+          difficultyColor: difficultyIndex >= 0 ? result.labelColors[difficultyIndex] : undefined,
+          productTypeLabel: productTypeIndex >= 0 ? result.labelNames[productTypeIndex] : undefined,
+          productTypeColor: productTypeIndex >= 0 ? result.labelColors[productTypeIndex] : undefined,
+        })
+      }
+      
+    } catch (error) {
+      console.error("Failed to fetch product labels:", error)
+      // Clean up pending request on error
+      pendingRequests.delete(cacheKey)
+    }
+  }, [tenant?.id, productInfo.productId, productInfo.variantId])
+
+  // Fetch product labels on mount
+  useEffect(() => {
+    fetchProductLabels()
+  }, [fetchProductLabels])
+
   // Status update handlers
-  const handleStatusUpdate = async (newStatus: 'unassigned' | 'assigned' | 'completed') => {
+  const handleStatusUpdate = async (newStatus: 'pending' | 'assigned' | 'completed') => {
     if (isUpdating) return
     
     setIsUpdating(true)
@@ -159,21 +284,7 @@ export function DashboardCard({
     }
   }
 
-  const handleAssignmentUpdate = async (floristId: string) => {
-    if (isUpdating) return
-    
-    setIsUpdating(true)
-    try {
-      await onUpdate(order.id, { 
-        assignedTo: floristId,
-        status: floristId ? 'assigned' : 'unassigned'
-      })
-    } catch (error) {
-      console.error("Failed to update assignment:", error)
-    } finally {
-      setIsUpdating(false)
-    }
-  }
+
 
   const handleNotesUpdate = async () => {
     if (isUpdating || notes === order.notes) return
@@ -189,276 +300,232 @@ export function DashboardCard({
     }
   }
 
-  // Get status colors and icons
-  const getStatusConfig = () => {
-    switch (order.status) {
-      case 'completed':
+  // Get status button styles
+  const getStatusButtonStyle = (status: 'pending' | 'assigned' | 'completed') => {
+    const isActive = order.status === status
+    switch (status) {
+      case 'pending':
         return {
-          color: 'bg-green-500 hover:bg-green-600',
-          icon: <CheckCircle className="h-3 w-3" />,
-          text: 'Completed'
+          className: `w-10 h-10 rounded-full ${isActive ? 'bg-gray-400 hover:bg-gray-500' : 'bg-white border-2 border-gray-300 hover:border-gray-400'} transition-colors`,
+          icon: <AlertTriangle className={`h-4 w-4 ${isActive ? 'text-white' : 'text-gray-400'}`} />
         }
       case 'assigned':
         return {
-          color: 'bg-blue-500 hover:bg-blue-600',
-          icon: <UserCheck className="h-3 w-3" />,
-          text: 'Assigned'
+          className: `w-10 h-10 rounded-full ${isActive ? 'bg-blue-500 hover:bg-blue-600' : 'bg-white border-2 border-blue-300 hover:border-blue-400'} transition-colors`,
+          icon: <UserCheck className={`h-4 w-4 ${isActive ? 'text-white' : 'text-blue-400'}`} />
         }
-      default:
+      case 'completed':
         return {
-          color: 'bg-gray-400 hover:bg-gray-500',
-          icon: <AlertTriangle className="h-3 w-3" />,
-          text: 'Unassigned'
+          className: `w-10 h-10 rounded-full ${isActive ? 'bg-green-500 hover:bg-green-600' : 'bg-white border-2 border-green-300 hover:border-green-400'} transition-colors`,
+          icon: <CheckCircle className={`h-4 w-4 ${isActive ? 'text-white' : 'text-green-400'}`} />
         }
     }
   }
 
-  const statusConfig = getStatusConfig()
-
-  // Get difficulty color
-  const getDifficultyColor = () => {
-    const difficulty = order.difficultyLabel?.toLowerCase()
-    switch (difficulty) {
-      case 'easy': return 'text-green-600'
-      case 'medium': return 'text-yellow-600'
-      case 'hard': return 'text-red-600'
-      case 'very hard': return 'text-purple-600'
-      default: return 'text-gray-600'
-    }
-  }
+  // Check if order is express
+  const isExpress = order.shopifyOrderData?.tags?.toLowerCase().includes('express') || false
 
   return (
     <>
       <Card 
         className={`transition-all duration-200 hover:shadow-md border ${
-          order.isExpress ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200'
+          isExpress ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200'
         } ${isExpanded ? 'ring-2 ring-blue-500' : ''}`}
       >
         <CardHeader className={`pb-3 ${isMobileView ? 'p-3' : 'p-4'}`}>
-          {/* Header Row */}
+          {/* Collapsed State */}
           <div className="flex items-center justify-between">
-            {/* Left: Product Info and Labels */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-2">
-                {/* Store Indicator */}
-                {order.storeData && (
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: order.storeData.color || '#3B82F6' }}
-                    />
-                    <span className={`text-xs text-gray-500 ${isMobileView ? 'hidden' : ''}`}>
-                      {order.storeData.name}
-                    </span>
-                  </div>
-                )}
-
-                {/* Express Badge */}
-                {order.isExpress && (
-                  <Badge variant="outline" className="text-yellow-600 border-yellow-600">
-                    <Zap className="h-3 w-3 mr-1" />
-                    Express
-                  </Badge>
-                )}
-
-                {/* Time Window */}
-                {order.timeWindow && (
-                  <Badge variant="outline" className="text-blue-600 border-blue-600">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {order.timeWindow}
-                  </Badge>
-                )}
-              </div>
-
-              {/* Product Title */}
-              <div className="flex items-center gap-2">
-                <h3 className={`font-semibold text-gray-900 truncate ${
-                  isMobileView ? 'text-sm' : 'text-base'
-                }`}>
-                  {productInfo.productTitle}
-                </h3>
-                
-                {/* Eye icon for expansion */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="p-1 h-6 w-6 text-gray-400 hover:text-gray-600"
-                >
-                  <Eye className="h-3 w-3" />
-                </Button>
-
-                {/* Product Image Modal Trigger */}
-                {productInfo.productId && (
+            {/* Left: Product Info and Eye Icon */}
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              {/* Product Title and Variant */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className={`font-semibold text-gray-900 truncate ${
+                    isMobileView ? 'text-sm' : 'text-base'
+                  }`}>
+                    {productInfo.productTitle}
+                  </h3>
+                  
+                  {/* Eye icon for expansion */}
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setIsProductImageModalOpen(true)}
-                    className="p-1 h-6 w-6 text-gray-400 hover:text-gray-600"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="p-1 h-6 w-6 text-gray-400 hover:text-gray-600 flex-shrink-0"
                   >
-                    <Package className="h-3 w-3" />
+                    <Eye className="h-3 w-3" />
                   </Button>
+                </div>
+                
+                {/* Variant Title */}
+                {productInfo.variantTitle && (
+                  <p className={`text-gray-600 truncate ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                    {productInfo.variantTitle}
+                  </p>
                 )}
-              </div>
-
-              {/* Variant Title */}
-              {productInfo.variantTitle && (
-                <p className={`text-gray-600 truncate ${isMobileView ? 'text-xs' : 'text-sm'}`}>
-                  {productInfo.variantTitle}
-                </p>
-              )}
-
-              {/* Labels Row */}
-              <div className="flex items-center gap-2 mt-2">
-                {/* Difficulty Label */}
-                <Badge variant="outline" className={getDifficultyColor()}>
-                  <Star className="h-3 w-3 mr-1" />
-                  {order.difficultyLabel || 'Standard'}
-                </Badge>
-
-                {/* Product Type Label */}
-                <Badge variant="outline" className="text-purple-600 border-purple-600">
-                  <Tag className="h-3 w-3 mr-1" />
-                  {order.productTypeLabel || 'Arrangement'}
-                </Badge>
               </div>
             </div>
 
-            {/* Right: Status Buttons */}
-            <div className="flex flex-col gap-1">
+            {/* Right: Horizontal Status Buttons */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Pending Button */}
               <Button
+                variant="ghost"
                 size="sm"
-                variant={order.status === 'unassigned' ? 'default' : 'outline'}
-                onClick={() => handleStatusUpdate('unassigned')}
+                onClick={() => handleStatusUpdate('pending')}
                 disabled={isUpdating}
-                className={`h-6 px-2 text-xs ${
-                  order.status === 'unassigned' ? 'bg-gray-400 hover:bg-gray-500' : ''
-                }`}
+                className={getStatusButtonStyle('pending').className}
               >
-                {statusConfig.icon}
+                {getStatusButtonStyle('pending').icon}
               </Button>
+
+              {/* Assigned Button */}
               <Button
+                variant="ghost"
                 size="sm"
-                variant={order.status === 'assigned' ? 'default' : 'outline'}
                 onClick={() => handleStatusUpdate('assigned')}
                 disabled={isUpdating}
-                className={`h-6 px-2 text-xs ${
-                  order.status === 'assigned' ? 'bg-blue-500 hover:bg-blue-600' : ''
-                }`}
+                className={getStatusButtonStyle('assigned').className}
               >
-                <UserCheck className="h-3 w-3" />
+                {getStatusButtonStyle('assigned').icon}
               </Button>
+
+              {/* Completed Button */}
               <Button
+                variant="ghost"
                 size="sm"
-                variant={order.status === 'completed' ? 'default' : 'outline'}
                 onClick={() => handleStatusUpdate('completed')}
                 disabled={isUpdating}
-                className={`h-6 px-2 text-xs ${
-                  order.status === 'completed' ? 'bg-green-500 hover:bg-green-600' : ''
-                }`}
+                className={getStatusButtonStyle('completed').className}
               >
-                <CheckCircle className="h-3 w-3" />
+                {getStatusButtonStyle('completed').icon}
               </Button>
             </div>
           </div>
+
+          {/* Difficulty Label (below status buttons) */}
+          {productLabels.difficultyLabel && (
+            <div className="flex justify-end mt-2">
+              <Badge 
+                variant="outline" 
+                style={{ 
+                  backgroundColor: productLabels.difficultyColor ? `${productLabels.difficultyColor}20` : undefined,
+                  borderColor: productLabels.difficultyColor || undefined,
+                  color: productLabels.difficultyColor || undefined
+                }}
+              >
+                {productLabels.difficultyLabel}
+              </Badge>
+            </div>
+          )}
         </CardHeader>
 
         {/* Expanded Content */}
         {isExpanded && (
           <CardContent className={`pt-0 border-t border-gray-100 ${isMobileView ? 'p-3' : 'p-4'}`}>
-            <div className={`grid gap-4 ${isMobileView ? 'grid-cols-1' : 'grid-cols-2'}`}>
-              {/* Customer & Order Info */}
-              <div className="space-y-3">
-                <h4 className={`font-medium text-gray-900 ${isMobileView ? 'text-sm' : ''}`}>
-                  Order Details
-                </h4>
-                
-                {config
-                  .filter(field => field.visible && field.category === 'customer')
-                  .map((field) => (
-                    <div key={field.id} className="flex items-center gap-2">
-                      {field.icon && (
-                        <div className="text-gray-400">
-                          {getFieldIcon(field.icon)}
-                        </div>
-                      )}
-                      <div>
-                        <span className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
-                          {field.label}:
-                        </span>
-                        <span className={`ml-1 font-medium ${isMobileView ? 'text-sm' : ''}`}>
-                          {getFieldValue(field)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+            <div className="space-y-4">
+              {/* Product Title */}
+              <div>
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Product Title:
+                </label>
+                <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                  {productInfo.productTitle}
+                </p>
+              </div>
 
-                {/* Assignment Dropdown */}
-                <div className="space-y-2">
+              {/* Variant Title */}
+              {productInfo.variantTitle && (
+                <div>
                   <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
-                    Assigned To:
+                    Variant Title:
                   </label>
-                  <Select
-                    value={order.assignedTo || ""}
-                    onValueChange={handleAssignmentUpdate}
-                    disabled={isUpdating}
-                  >
-                    <SelectTrigger className={isMobileView ? 'h-8 text-sm' : ''}>
-                      <SelectValue placeholder="Select florist" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Unassigned</SelectItem>
-                      {florists.map((florist) => (
-                        <SelectItem key={florist.id} value={florist.id}>
-                          {florist.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                    {productInfo.variantTitle}
+                  </p>
+                </div>
+              )}
+
+              {/* Timeslot */}
+              <div>
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Timeslot:
+                </label>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-gray-400" />
+                  <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                    {getFieldValue({ id: 'timeslot' } as OrderCardField)}
+                  </p>
                 </div>
               </div>
 
-              {/* Notes & Additional Fields */}
-              <div className="space-y-3">
-                <h4 className={`font-medium text-gray-900 ${isMobileView ? 'text-sm' : ''}`}>
-                  Additional Information
-                </h4>
-
-                {/* Other config fields */}
-                {config
-                  .filter(field => field.visible && field.category !== 'customer' && field.name !== 'notes')
-                  .map((field) => (
-                    <div key={field.id} className="flex items-center gap-2">
-                      {field.icon && (
-                        <div className="text-gray-400">
-                          {getFieldIcon(field.icon)}
-                        </div>
-                      )}
-                      <div>
-                        <span className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
-                          {field.label}:
-                        </span>
-                        <span className={`ml-1 font-medium ${isMobileView ? 'text-sm' : ''}`}>
-                          {getFieldValue(field)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-
-                {/* Notes */}
-                <div className="space-y-2">
-                  <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
-                    Notes:
-                  </label>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    onBlur={handleNotesUpdate}
-                    placeholder="Add notes..."
-                    disabled={isUpdating}
-                    className={`resize-none ${isMobileView ? 'h-16 text-sm' : 'h-20'}`}
-                  />
+              {/* Order Date */}
+              <div>
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Order Date:
+                </label>
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-gray-400" />
+                  <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                    {getFieldValue({ id: 'orderDate' } as OrderCardField)}
+                  </p>
                 </div>
+              </div>
+
+              {/* Difficulty Label */}
+              {productLabels.difficultyLabel && (
+                <div>
+                  <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                    Difficulty Label:
+                  </label>
+                  <Badge 
+                    variant="outline" 
+                    style={{ 
+                      backgroundColor: productLabels.difficultyColor ? `${productLabels.difficultyColor}20` : undefined,
+                      borderColor: productLabels.difficultyColor || undefined,
+                      color: productLabels.difficultyColor || undefined
+                    }}
+                  >
+                    {productLabels.difficultyLabel}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Add-Ons */}
+              <div>
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Add-Ons:
+                </label>
+                <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                  {getFieldValue({ id: 'addOns' } as OrderCardField)}
+                </p>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Status:
+                </label>
+                <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
+                  {order.status === 'completed' ? 'Completed' : order.status === 'assigned' ? `Assigned${currentUser && order.assignedTo === currentUser.id ? ` to ${currentUser.name}` : ''}` : 'Pending'}
+                </p>
+              </div>
+
+              {/* Editable Notes Textbox */}
+              <div className="space-y-2">
+                <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
+                  Notes:
+                </label>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  onBlur={handleNotesUpdate}
+                  onClick={(e) => e.stopPropagation()} // Prevent collapse on click
+                  placeholder="Add notes..."
+                  disabled={isUpdating}
+                  className={`resize-none min-h-[60px] ${isMobileView ? 'text-sm' : ''}`}
+                  style={{ minHeight: '60px' }}
+                />
               </div>
             </div>
           </CardContent>
@@ -469,27 +536,10 @@ export function DashboardCard({
       <ProductImageModal
         isOpen={isProductImageModalOpen}
         onClose={() => setIsProductImageModalOpen(false)}
-        productId={productInfo.productId}
-        variantId={productInfo.variantId}
+        shopifyProductId={productInfo.productId}
+        shopifyVariantId={productInfo.variantId}
       />
     </>
   )
 }
 
-// Helper function to render field icons
-const getFieldIcon = (iconName: string) => {
-  const iconProps = { className: "h-4 w-4" }
-  
-  switch (iconName) {
-    case 'user': return <User {...iconProps} />
-    case 'phone': return <Phone {...iconProps} />
-    case 'map-pin': return <MapPin {...iconProps} />
-    case 'calendar': return <Calendar {...iconProps} />
-    case 'clock': return <Clock {...iconProps} />
-    case 'package': return <Package {...iconProps} />
-    case 'store': return <Store {...iconProps} />
-    case 'tag': return <Tag {...iconProps} />
-    case 'star': return <Star {...iconProps} />
-    default: return <Package {...iconProps} />
-  }
-} 
