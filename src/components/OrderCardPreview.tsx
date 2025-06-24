@@ -82,7 +82,8 @@ const getValueFromShopifyData = (sourcePath: string, data: any): any => {
   const parts = sourcePath.split('.');
   let current: any = data;
 
-  for (const part of parts) {
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
     console.log('getValueFromShopifyData: Processing part', { part, currentType: typeof current, currentKeys: current && typeof current === 'object' ? Object.keys(current) : 'N/A' })
     
     if (current === null || typeof current === 'undefined') {
@@ -91,19 +92,32 @@ const getValueFromShopifyData = (sourcePath: string, data: any): any => {
     }
 
     if (Array.isArray(current)) {
-      // This is for arrays like note_attributes, which are {name, value} pairs
-      // We assume the *next* part of the path is the 'name' we're looking for.
-      const nextPart = parts[parts.indexOf(part) + 1];
-      if (nextPart) {
-        const item = current.find(d => d.name === nextPart);
-        current = item ? item.value : null;
-        console.log('getValueFromShopifyData: Array processing', { nextPart, item, current })
-        // We've used the next part, so we skip it in the next iteration
-        parts.splice(parts.indexOf(part) + 1, 1);
+      // Check if the part is a numeric index
+      const index = parseInt(part);
+      if (!isNaN(index)) {
+        // This is an array index
+        if (index >= 0 && index < current.length) {
+          current = current[index];
+          console.log('getValueFromShopifyData: Array index access', { index, newCurrent: current })
+        } else {
+          console.log('getValueFromShopifyData: Array index out of bounds', { index, arrayLength: current.length })
+          return null;
+        }
       } else {
-        // If there's no next part, it means we're targeting the array itself (like 'tags')
-        console.log('getValueFromShopifyData: Returning array', current)
-        return current;
+        // This is for arrays like note_attributes, which are {name, value} pairs
+        // We assume the *next* part of the path is the 'name' we're looking for.
+        const nextPart = parts[i + 1];
+        if (nextPart) {
+          const item = current.find(d => d.name === nextPart);
+          current = item ? item.value : null;
+          console.log('getValueFromShopifyData: Array name-value processing', { nextPart, item, current })
+          // We've used the next part, so we skip it in the next iteration
+          i++; // Skip the next iteration
+        } else {
+          // If there's no next part, it means we're targeting the array itself (like 'tags')
+          console.log('getValueFromShopifyData: Returning array', current)
+          return current;
+        }
       }
     } else if (typeof current === 'object' && part in current) {
       current = current[part];

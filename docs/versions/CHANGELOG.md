@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.5] - 2025-01-13
+
+### 🔧 **OrderCardPreview Array Access & Date Extraction Fixes**
+
+- **Fixed Array Index Access**: Updated `getValueFromShopifyData` function to properly handle numeric array indices in field paths (e.g., `lineItems.edges.0.node.title`).
+- **Improved Date Extraction**: Fixed regex pattern for date extraction from tags to use proper word boundaries and format validation.
+- **Updated Default Field Mappings**: Corrected default field mappings in `getAllFields()` to use proper Shopify GraphQL response paths.
+- **Enhanced Debugging**: Improved array processing logic with better error handling and logging for array index access.
+
+### 🐛 **Bug Fixes**
+- Fixed issue where product titles and variant titles weren't being extracted due to incorrect array index handling
+- Fixed date extraction regex pattern from `\\d{2}/\\d{2}/\\d{4}` to proper format with word boundaries
+- Updated default field mappings for difficulty and product type labels to use correct paths
+
+### 📊 **Technical Improvements**
+- Enhanced array processing in `getValueFromShopifyData` to distinguish between numeric indices and property names
+- Improved error handling for array bounds checking
+- Better debugging output for array access operations
+
 ## [1.4.4] - 2025-01-13
 
 ### 🔧 **OrderCardPreview Fixes**
