@@ -25,6 +25,7 @@ interface OrderDetailCardProps {
   isExpanded?: boolean
   onToggle?: () => void
   isAddOn?: boolean
+  onStatusChange?: (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => void
 }
 
 export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
@@ -33,6 +34,7 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   isExpanded = false,
   onToggle,
   isAddOn = false,
+  onStatusChange,
 }) => {
   const [expanded, setExpanded] = useState(isExpanded)
   const [status, setStatus] = useState<'unassigned' | 'assigned' | 'completed'>(
@@ -62,11 +64,14 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
   const handleStatusChange = (newStatus: 'unassigned' | 'assigned' | 'completed') => {
     // If clicking the same status button, reset to unassigned
-    if (status === newStatus) {
-      setStatus('unassigned')
-    } else {
-      setStatus(newStatus)
+    const finalStatus = status === newStatus ? 'unassigned' : newStatus
+    setStatus(finalStatus)
+    
+    // Call parent callback to update stats
+    if (onStatusChange) {
+      onStatusChange(order.cardId || order.id, finalStatus)
     }
+    
     // TODO: Update order status in backend
     // For now, just update local state
   }

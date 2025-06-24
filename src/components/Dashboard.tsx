@@ -2,6 +2,7 @@ import { useState, createContext, useContext, useEffect } from "react"
 import { useLocation, useNavigate, Outlet } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import {
   LogOut,
   Calendar,
@@ -12,6 +13,7 @@ import {
   Settings,
   Sparkles,
   ClipboardList,
+  Menu,
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { useIsMobile } from "./hooks/use-mobile"
@@ -35,6 +37,7 @@ export function Dashboard() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const [isMobileView, setIsMobileView] = useState(isMobile)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     setIsMobileView(isMobile)
@@ -51,6 +54,7 @@ export function Dashboard() {
 
   const handleTabChange = (value: string) => {
     navigate(`/${value}`)
+    setSidebarOpen(false) // Close sidebar when navigating
   }
 
   const getActiveTab = () => {
@@ -66,6 +70,40 @@ export function Dashboard() {
     return null // Should be handled by ProtectedRoute
   }
 
+  const navigationItems = [
+    { value: "orders", label: "Orders", icon: ClipboardList },
+    { value: "analytics", label: "Analytics", icon: BarChart3 },
+    ...(user.role === "admin" ? [
+      { value: "products", label: "Products", icon: Package },
+      { value: "ai-integration", label: "AI", icon: Sparkles },
+      { value: "settings", label: "Settings", icon: Settings },
+    ] : [])
+  ]
+
+  const SidebarContent = () => (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b">
+        <h2 className="text-lg font-semibold">Navigation</h2>
+      </div>
+      <nav className="flex-1 p-4">
+        <ul className="space-y-2">
+          {navigationItems.map((item) => (
+            <li key={item.value}>
+              <Button
+                variant={getActiveTab() === item.value ? "default" : "ghost"}
+                className="w-full justify-start"
+                onClick={() => handleTabChange(item.value)}
+              >
+                <item.icon className="h-4 w-4 mr-2" />
+                {item.label}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
+  )
+
   return (
     <MobileViewContext.Provider value={{ isMobileView, toggleMobileView }}>
       <div
@@ -77,6 +115,20 @@ export function Dashboard() {
               className={`flex justify-between items-center h-16 ${isMobileView ? "gap-2" : ""}`}
             >
               <div className="flex items-center">
+                {/* Mobile Sidebar Toggle */}
+                {isMobileView && (
+                  <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+                    <SheetTrigger asChild>
+                      <Button variant="ghost" size="sm" className="mr-2 p-1">
+                        <Menu className="h-4 w-4" />
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="left" className="w-64 p-0">
+                      <SidebarContent />
+                    </SheetContent>
+                  </Sheet>
+                )}
+                
                 <h1
                   className={`font-semibold text-gray-900 ${isMobileView ? "text-base" : "text-xl"}`}
                 >
@@ -136,63 +188,36 @@ export function Dashboard() {
         <main
           className={`mx-auto py-4 ${isMobileView ? "px-2" : "max-w-7xl px-4 sm:px-6 lg:px-8 py-8"}`}
         >
-          <Tabs
-            value={getActiveTab()}
-            onValueChange={handleTabChange}
-            className={`${isMobileView ? "space-y-4" : "space-y-6"}`}
-          >
-            <TabsList
-              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-5"}`}
-            >
-              <TabsTrigger
-                value="orders"
-                className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
-              >
-                <ClipboardList className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                Orders
-              </TabsTrigger>
-              <TabsTrigger
-                value="analytics"
-                className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
-              >
-                <BarChart3 className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                Analytics
-              </TabsTrigger>
-              {user.role === "admin" && (
-                <TabsTrigger
-                  value="products"
-                  className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
-                >
-                  <Package className="h-4 w-4" />
-                  Products
-                </TabsTrigger>
-              )}
-              {user.role === "admin" && (
-                <TabsTrigger
-                  value="ai-integration"
-                  className={`flex items-center gap-2 ${
-                    isMobile ? "flex-1 justify-center" : ""
-                  }`}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  AI
-                </TabsTrigger>
-              )}
-              {user.role === "admin" && (
-                <TabsTrigger
-                  value="settings"
-                  className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
-                >
-                  <Settings className="h-4 w-4" />
-                  Settings
-                </TabsTrigger>
-              )}
-            </TabsList>
-
-            <div className="mt-6">
+          {isMobileView ? (
+            // Mobile: No tabs, just the outlet with sidebar navigation
+            <div className="space-y-4">
               <Outlet />
             </div>
-          </Tabs>
+          ) : (
+            // Desktop: Keep the existing tabs layout
+            <Tabs
+              value={getActiveTab()}
+              onValueChange={handleTabChange}
+              className="space-y-6"
+            >
+              <TabsList className="grid w-full grid-cols-5">
+                {navigationItems.map((item) => (
+                  <TabsTrigger
+                    key={item.value}
+                    value={item.value}
+                    className="flex items-center gap-2"
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              <div className="mt-6">
+                <Outlet />
+              </div>
+            </Tabs>
+          )}
         </main>
       </div>
     </MobileViewContext.Provider>

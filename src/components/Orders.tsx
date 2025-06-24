@@ -48,7 +48,7 @@ export const Orders: React.FC = () => {
   const [addOnOrders, setAddOnOrders] = useState<any[]>([])
   const [orderFields, setOrderFields] = useState<OrderCardField[]>([])
   const [loading, setLoading] = useState(false)
-  const [isStatsOpen, setIsStatsOpen] = useState(true)
+  const [isStatsOpen, setIsStatsOpen] = useState(false)
 
   // Load stores and configuration on mount
   useEffect(() => {
@@ -188,6 +188,21 @@ export const Orders: React.FC = () => {
   }
 
   const stats = getComprehensiveStats()
+
+  // Handle status changes from OrderDetailCard
+  const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => {
+    // Update the order status in all relevant arrays
+    const updateOrderStatus = (orders: any[]) => 
+      orders.map(order => 
+        (order.cardId === orderId || order.id === orderId) 
+          ? { ...order, status: newStatus }
+          : order
+      )
+
+    setAllOrders(prev => updateOrderStatus(prev))
+    setMainOrders(prev => updateOrderStatus(prev))
+    setAddOnOrders(prev => updateOrderStatus(prev))
+  }
 
   return (
     <div className="flex-1 space-y-4 sm:space-y-6 p-2 sm:p-4 md:p-6">
@@ -500,6 +515,7 @@ export const Orders: React.FC = () => {
                       fields={orderFields}
                       isExpanded={false}
                       isAddOn={false}
+                      onStatusChange={handleOrderStatusChange}
                     />
                   ))}
                 </div>
@@ -530,6 +546,7 @@ export const Orders: React.FC = () => {
                       fields={orderFields}
                       isExpanded={false}
                       isAddOn={true}
+                      onStatusChange={handleOrderStatusChange}
                     />
                   ))}
                 </div>
