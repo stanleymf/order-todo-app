@@ -448,7 +448,8 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
                 total_price: order.total_price,
                 currency: order.currency,
                 note: order.notes,
-                status: order.status
+                status: order.status,
+                tags: "" // Add empty tags field for Field Mappings compatibility
               }
             })
           }
