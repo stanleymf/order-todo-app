@@ -2,6 +2,95 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.7] - 2025-01-13
+
+### 🎯 **Complete Saved Products Sync & Label Management System**
+
+- **Full Product Sync Implementation**: Successfully implemented end-to-end product synchronization from Shopify to saved products database with all product details including images.
+- **Database Schema Enhancement**: Added image fields to saved_products table via migration `0015_add_image_fields_to_saved_products.sql`:
+  - `image_url` - Product image URL from Shopify
+  - `image_alt` - Image alt text for accessibility
+  - `image_width` - Image width in pixels
+  - `image_height` - Image height in pixels
+- **Backend API Completion**: Implemented all missing endpoints for saved products management:
+  - `POST /api/tenants/:tenantId/saved-products` - Save products with full details
+  - `DELETE /api/tenants/:tenantId/saved-products/:productId` - Delete single product
+  - `DELETE /api/tenants/:tenantId/saved-products` - Bulk delete all products
+  - `POST /api/tenants/:tenantId/saved-products/:productId/labels/:labelId` - Add label to product
+  - `DELETE /api/tenants/:tenantId/saved-products/:productId/labels/:labelId` - Remove label from product
+- **Frontend Integration**: Updated ProductManagement component with:
+  - Separate "Save Selected" and "Update Selected" buttons for better UX
+  - Proper product data mapping including all image fields
+  - Real-time state updates after save operations
+  - Label management functionality for saved products
+- **Database Verification**: Confirmed 950 saved products in database with proper image URLs and all required fields.
+
+### 🔧 **Technical Implementation**
+
+- **Robust Backend Logging**: Added comprehensive logging throughout the save process:
+  - Product data validation and mapping
+  - Database write operations with verification
+  - Label management operations
+  - Error handling and debugging information
+- **Database Service Enhancement**: Updated `saveProducts` function to:
+  - Handle both new products and updates to existing products
+  - Preserve product IDs for existing products
+  - Include all image fields in database operations
+  - Perform verification queries after saves
+- **API Service Updates**: Enhanced frontend API service with:
+  - Proper error handling for label operations
+  - Authentication for all saved products endpoints
+  - Support for bulk operations and filtering
+
+### 🎯 **Product Data Sync Flow**
+
+- **Frontend → Backend**: Complete product details sent including:
+  - `shopifyProductId`, `shopifyVariantId`, `title`, `variantTitle`
+  - `description`, `price`, `tags`, `productType`, `vendor`, `handle`
+  - `imageUrl`, `imageAlt`, `imageWidth`, `imageHeight`
+- **Backend → Database**: All fields properly mapped and stored with:
+  - Upsert operations (INSERT OR REPLACE) for data integrity
+  - Proper JSON serialization for tags array
+  - Timestamp management for created_at and updated_at
+  - Foreign key relationships maintained
+- **Database Verification**: Confirmed successful storage with:
+  - 950 products in database
+  - Image URLs properly populated
+  - All required fields present and accessible
+
+### 🏷️ **Label Management System**
+
+- **Product Label Mappings**: Implemented complete label management for saved products:
+  - Many-to-many relationship between products and labels
+  - Proper foreign key constraints and cascading deletes
+  - Duplicate prevention with unique constraints
+- **Label Operations**: Full CRUD operations for product labels:
+  - Add labels to products with validation
+  - Remove labels from products
+  - Query products with their associated labels
+  - Label filtering and search capabilities
+
+### 🚀 **Deployment & Testing**
+
+- **Successful Deployment**: Deployed to production with:
+  - Build: 2138 modules transformed
+  - Bundle: 786.58 kB (223.65 kB gzipped)
+  - Version ID: b8571f8f-a9b2-4050-b918-91a0ec8b6414
+  - All endpoints functional and tested
+- **Database Verification**: Confirmed system integrity:
+  - 950 saved products with complete data
+  - Image URLs properly stored and accessible
+  - Label management operations working
+  - All API endpoints responding correctly
+
+### 🎯 **Impact**
+
+- **Complete Product Management**: Users can now fully manage their product catalog from Shopify
+- **Image Support**: All product images are properly synced and displayed
+- **Label Organization**: Products can be organized with custom labels for better management
+- **Data Integrity**: Robust sync system ensures no data loss during operations
+- **User Experience**: Intuitive interface for saving, updating, and organizing products
+
 ## [1.4.6] - 2025-01-13
 
 ### 🔧 **OrderCardPreview Date Parsing Fix**

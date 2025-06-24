@@ -221,7 +221,6 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["product:difficultyLabel"],
     },
     {
       id: "productTypeLabel",
@@ -231,7 +230,6 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["product:productTypeLabel"],
     },
     {
       id: "addOns",

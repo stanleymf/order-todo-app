@@ -689,19 +689,22 @@ const FieldEditor: React.FC<{
       </div>
 
       {/* Column 3: Shopify Field Selection */}
-      <div className="space-y-3">
-        <Label className="text-xs font-medium">Shopify Data Field</Label>
-        <ShopifyFieldCombobox
-          value={field.shopifyFields?.join(',') || ''}
-          onChange={value => onFieldChange(field.id, "shopifyFields", value.split(','))}
-          fieldOptions={shopifyFields}
-        />
-        {field.shopifyFields && (
-          <div className="text-xs text-muted-foreground mt-1">
-            Maps to: {field.shopifyFields.join(', ')}
-          </div>
-        )}
-      </div>
+      {/* Hide Shopify Data Field for label fields */}
+      {!(field.id === "difficultyLabel" || field.id === "productTypeLabel") && (
+        <div className="space-y-3">
+          <Label className="text-xs font-medium">Shopify Data Field</Label>
+          <ShopifyFieldCombobox
+            value={field.shopifyFields?.join(',') || ''}
+            onChange={value => onFieldChange(field.id, "shopifyFields", value.split(','))}
+            fieldOptions={shopifyFields}
+          />
+          {field.shopifyFields && (
+            <div className="text-xs text-muted-foreground mt-1">
+              Maps to: {field.shopifyFields.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

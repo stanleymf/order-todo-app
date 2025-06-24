@@ -80,15 +80,8 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
     setError(null)
 
     try {
-      let url: string
-      if (shopifyVariantId) {
-        const encodedProductId = encodeURIComponent(shopifyProductId)
-        const encodedVariantId = encodeURIComponent(shopifyVariantId)
-        url = `/api/tenants/${user.tenantId}/saved-products/image/${encodedProductId}/${encodedVariantId}`
-      } else {
-        const encodedProductId = encodeURIComponent(shopifyProductId)
-        url = `/api/tenants/${user.tenantId}/saved-products/image/${encodedProductId}`
-      }
+      // Use the correct endpoint that returns complete saved product data
+      const url = `/api/tenants/${user.tenantId}/saved-products/by-shopify-id?shopify_product_id=${encodeURIComponent(shopifyProductId)}&shopify_variant_id=${encodeURIComponent(shopifyVariantId || '')}`
 
       const token = getStoredToken()
       if (!token) {
@@ -112,8 +105,20 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
         return
       }
 
-      const data = await response.json()
-      setProductData(data)
+      const product = await response.json()
+      
+      // Map the saved product data to the expected ProductImageData format
+      setProductData({
+        imageUrl: product.imageUrl,
+        imageAlt: product.imageAlt,
+        title: product.title,
+        variantTitle: product.variantTitle,
+        description: product.description,
+        price: product.price,
+        tags: product.tags,
+        productType: product.productType,
+        vendor: product.vendor,
+      })
     } catch (err) {
       console.error("Error fetching product image:", err)
       setError("Failed to load product image. Please try again.")

@@ -27,6 +27,7 @@ import {
 import { OrderCardField } from "../types/orderCardFields"
 import { useIsMobile } from "./hooks/use-mobile"
 import { ProductImageModal } from "./shared/ProductImageModal"
+import { useAuth } from "../contexts/AuthContext"
 
 // ============================================================================
 // TYPES AND INTERFACES
@@ -430,6 +431,7 @@ interface ExpandedViewProps {
   onCustomisationsChange: (value: string) => void
   realOrderData?: any
   handleShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void
+  productLabel: { name: string; color: string } | null
 }
 
 const ExpandedView: React.FC<ExpandedViewProps> = ({
@@ -443,8 +445,33 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
   onCustomisationsChange,
   realOrderData,
   handleShowProductImage,
+  productLabel,
 }) => {
   const renderField = (field: OrderCardField) => {
+    // If this is the difficultyLabel or productTypeLabel field, use productLabel if available
+    if (field.id === "difficultyLabel" || field.id === "productTypeLabel") {
+      return (
+        <div className="flex items-center gap-2 text-sm">
+          {field.id === "difficultyLabel" ? (
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <Package className="h-4 w-4 text-muted-foreground" />
+          )}
+          <span className="font-medium">{field.label}:</span>
+          {productLabel ? (
+            <Badge
+              variant="secondary"
+              style={{ backgroundColor: productLabel.color, color: "white" }}
+            >
+              {productLabel.name}
+            </Badge>
+          ) : (
+            <span className="text-gray-400">Not set</span>
+          )}
+        </div>
+      )
+    }
+    // Default: use FieldRenderer
     const value = getFieldValue(field.id)
     return (
       <FieldRenderer
@@ -540,6 +567,18 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
             )}
           </div>
         )}
+        {productLabel && (
+          <div className="border-t pt-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Badge
+                variant="secondary"
+                style={{ backgroundColor: productLabel.color, color: "white" }}
+              >
+                {productLabel.name}
+              </Badge>
+            </div>
+          </div>
+        )}
       </CardContent>
     </>
   )
@@ -552,6 +591,7 @@ interface CollapsedViewProps {
   difficultyLabels?: Array<{ id: string; name: string; color: string }>
   realOrderData?: any
   handleShowProductImage: (shopifyProductId?: string, shopifyVariantId?: string) => void
+  productLabel: { name: string; color: string } | null
 }
 
 const CollapsedView: React.FC<CollapsedViewProps> = ({
@@ -561,6 +601,7 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
   difficultyLabels = [],
   realOrderData,
   handleShowProductImage,
+  productLabel,
 }) => {
   const difficultyLabel = difficultyLabels.find((l) => l.id === sampleOrder.priorityLabel)
 
@@ -603,10 +644,10 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
           </TooltipProvider>
         </div>
       </div>
-      {difficultyLabel && (
+      {productLabel && (
         <div className="absolute bottom-3 right-3">
-          <Badge style={{ backgroundColor: difficultyLabel.color, color: "white" }}>
-            {difficultyLabel.name}
+          <Badge style={{ backgroundColor: productLabel.color, color: "white" }}>
+            {productLabel.name}
           </Badge>
         </div>
       )}
@@ -658,6 +699,9 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
     customisations: "Add extra notes and special wrapping",
     isCompleted: false,
   })
+
+  const { tenant } = useAuth();
+  const [productLabel, setProductLabel] = useState<{ name: string; color: string } | null>(null);
 
   // ============================================================================
   // EFFECTS
@@ -743,6 +787,83 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
     }
   }, [previewStatus, currentUserId, users])
 
+  // Effect to fetch product label for the current product/variant
+  useEffect(() => {
+    const fetchProductLabel = async () => {
+      console.log('fetchProductLabel: effect triggered', { tenant, realOrderData });
+      if (!tenant?.id || !realOrderData?.lineItems?.edges?.[0]?.node) {
+        console.log('fetchProductLabel: missing tenant or order data', { tenant, realOrderData });
+        return;
+      }
+      const shopifyProductId = realOrderData.lineItems.edges[0].node.product?.id?.split("/").pop();
+      const shopifyVariantId = realOrderData.lineItems.edges[0].node.variant?.id?.split("/").pop();
+      console.log('fetchProductLabel: extracted IDs', { shopifyProductId, shopifyVariantId });
+      if (!shopifyProductId || !shopifyVariantId) {
+        console.log('fetchProductLabel: missing product or variant ID');
+        return;
+      }
+      try {
+        const jwt = localStorage.getItem("auth_token");
+        console.log('fetchProductLabel: making fetch', { tenantId: tenant.id, shopifyProductId, shopifyVariantId });
+        const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${jwt}`,
+            "Content-Type": "application/json"
+          }
+        });
+        console.log('fetchProductLabel: fetch response', res);
+        if (!res.ok) {
+          console.log('fetchProductLabel: response not ok', res.status, res.statusText);
+          return;
+        }
+        const product = await res.json();
+        console.log('fetchProductLabel: fetched product', product);
+        // Find difficulty label first, then fallback to product type label
+        let label = null;
+        let names = [];
+        let cats = [];
+        let colors = [];
+        if (Array.isArray(product.labelNames)) {
+          names = product.labelNames;
+        } else if (typeof product.labelNames === 'string') {
+          names = product.labelNames.split(',');
+        }
+        if (Array.isArray(product.labelCategories)) {
+          cats = product.labelCategories;
+        } else if (typeof product.labelCategories === 'string') {
+          cats = product.labelCategories.split(',');
+        }
+        if (Array.isArray(product.labelColors)) {
+          colors = product.labelColors;
+        } else if (typeof product.labelColors === 'string') {
+          colors = product.labelColors.split(',');
+        }
+        // Try to find difficulty label
+        for (let i = 0; i < cats.length; i++) {
+          if (cats[i] === 'difficulty') {
+            label = { name: names[i], color: colors[i] || '#e53e3e' };
+            break;
+          }
+        }
+        // Fallback to productType label
+        if (!label) {
+          for (let i = 0; i < cats.length; i++) {
+            if (cats[i] === 'productType') {
+              label = { name: names[i], color: colors[i] || '#3182ce' };
+              break;
+            }
+          }
+        }
+        setProductLabel(label);
+      } catch (e) {
+        console.log('fetchProductLabel: error', e);
+        setProductLabel(null);
+      }
+    };
+    fetchProductLabel();
+  }, [tenant?.id, realOrderData]);
+
   // ============================================================================
   // HANDLERS
   // ============================================================================
@@ -782,6 +903,12 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   const getFieldValue = useCallback((fieldId: string): any => {
     const field = fields.find((f) => f.id === fieldId)
     if (!field) return ""
+
+    // Special handling for label fields - these come from Saved Products, not Shopify
+    if (fieldId === "difficultyLabel" || fieldId === "productTypeLabel") {
+      console.log(`Field ${fieldId} (${field.label}): Using Saved Products data, not Shopify`)
+      return null // Return null so custom rendering can handle it
+    }
 
     let rawValue
 
@@ -865,6 +992,7 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
             difficultyLabels={difficultyLabels}
             realOrderData={realOrderData}
             handleShowProductImage={handleShowProductImage}
+            productLabel={productLabel}
           />
         ) : (
           <ExpandedView
@@ -878,6 +1006,7 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
             onCustomisationsChange={handleCustomisationsChange}
             realOrderData={realOrderData}
             handleShowProductImage={handleShowProductImage}
+            productLabel={productLabel}
           />
         )}
       </Card>

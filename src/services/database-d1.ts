@@ -4,6 +4,11 @@ import bcrypt from "bcryptjs"
 // Declare crypto global for Cloudflare Workers
 declare const crypto: Crypto
 
+// Helper to ensure no undefined values are passed to the database
+function safeValue(val: any) {
+  return typeof val === 'undefined' ? null : val;
+}
+
 export const d1DatabaseService = {
   // Create a new tenant
   async createTenant(env: any, tenantData: CreateTenantRequest): Promise<Tenant> {
@@ -1146,8 +1151,27 @@ export const d1DatabaseService = {
     const savedProducts = []
 
     for (const product of products) {
-      const productId = crypto.randomUUID()
+      // First, check if the product already exists
+      const existingProduct = await env.DB.prepare(`
+        SELECT id FROM saved_products 
+        WHERE tenant_id = ? AND shopify_product_id = ? AND shopify_variant_id = ?
+      `)
+        .bind(tenantId, product.shopifyProductId, product.shopifyVariantId)
+        .first()
+
+      const productId = existingProduct?.id || crypto.randomUUID()
       const now = new Date().toISOString()
+
+      // Debug log for product image fields
+      console.log('[saveProducts] Saving product:', {
+        shopifyProductId: product.shopifyProductId,
+        shopifyVariantId: product.shopifyVariantId,
+        title: product.title,
+        imageUrl: product.imageUrl,
+        imageAlt: product.imageAlt,
+        imageWidth: product.imageWidth,
+        imageHeight: product.imageHeight,
+      })
 
       await env.DB.prepare(`
         INSERT OR REPLACE INTO saved_products (
@@ -1158,26 +1182,45 @@ export const d1DatabaseService = {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .bind(
-          productId,
-          tenantId,
-          product.shopifyProductId,
-          product.shopifyVariantId,
-          product.title,
-          product.variantTitle || null,
-          product.description || null,
-          product.price,
+          safeValue(productId),
+          safeValue(tenantId),
+          safeValue(product.shopifyProductId),
+          safeValue(product.shopifyVariantId),
+          safeValue(product.title),
+          safeValue(product.variantTitle),
+          safeValue(product.description),
+          safeValue(product.price),
           JSON.stringify(product.tags || []),
-          product.productType || null,
-          product.vendor || null,
-          product.handle || null,
-          product.imageUrl || null,
-          product.imageAlt || null,
-          product.imageWidth || null,
-          product.imageHeight || null,
-          now,
-          now
+          safeValue(product.productType),
+          safeValue(product.vendor),
+          safeValue(product.handle),
+          safeValue(product.imageUrl),
+          safeValue(product.imageAlt),
+          safeValue(product.imageWidth),
+          safeValue(product.imageHeight),
+          safeValue(existingProduct ? existingProduct.created_at : now),
+          safeValue(now)
         )
         .run()
+
+      console.log('[saveProducts] Successfully saved product to database:', { 
+        productId, 
+        shopifyProductId: product.shopifyProductId,
+        shopifyVariantId: product.shopifyVariantId,
+        title: product.title,
+        imageUrl: product.imageUrl 
+      })
+
+      // Verify the product was actually saved by querying the database
+      const verificationResult = await env.DB.prepare(`
+        SELECT id, title, image_url, image_alt, image_width, image_height 
+        FROM saved_products 
+        WHERE id = ?
+      `)
+        .bind(productId)
+        .first()
+
+      console.log('[saveProducts] Database verification result:', verificationResult)
 
       savedProducts.push({
         id: productId,
@@ -1196,7 +1239,7 @@ export const d1DatabaseService = {
         imageAlt: product.imageAlt,
         imageWidth: product.imageWidth,
         imageHeight: product.imageHeight,
-        createdAt: now,
+        createdAt: existingProduct ? existingProduct.created_at : now,
         updatedAt: now,
       })
     }
@@ -1214,6 +1257,9 @@ export const d1DatabaseService = {
       hasLabels?: boolean
     }
   ): Promise<any[]> {
+    console.log('[getSavedProducts] Fetching products for tenant:', tenantId)
+    console.log('[getSavedProducts] Filters:', filters)
+    
     let query = `
       SELECT sp.*, 
              GROUP_CONCAT(plm.label_id) as label_ids,
@@ -1249,11 +1295,27 @@ export const d1DatabaseService = {
 
     query += ` GROUP BY sp.id ORDER BY sp.created_at DESC`
 
+    console.log('[getSavedProducts] Executing query:', query)
+    console.log('[getSavedProducts] Query parameters:', params)
+
     const { results } = await env.DB.prepare(query)
       .bind(...params)
       .all()
 
-    return results.map((result: any) => ({
+    console.log('[getSavedProducts] Raw database results count:', results?.length || 0)
+    
+    if (results && results.length > 0) {
+      console.log('[getSavedProducts] Sample raw result:', {
+        id: results[0].id,
+        title: results[0].title,
+        image_url: results[0].image_url,
+        image_alt: results[0].image_alt,
+        image_width: results[0].image_width,
+        image_height: results[0].image_height,
+      })
+    }
+
+    const mappedResults = results.map((result: any) => ({
       id: result.id,
       tenantId: result.tenant_id,
       shopifyProductId: result.shopify_product_id,
@@ -1276,6 +1338,20 @@ export const d1DatabaseService = {
       labelIds: result.label_ids ? result.label_ids.split(",") : [],
       labelNames: result.label_names ? result.label_names.split(",") : [],
     }))
+
+    console.log('[getSavedProducts] Returning mapped results count:', mappedResults.length)
+    if (mappedResults.length > 0) {
+      console.log('[getSavedProducts] Sample mapped result:', {
+        id: mappedResults[0].id,
+        title: mappedResults[0].title,
+        imageUrl: mappedResults[0].imageUrl,
+        imageAlt: mappedResults[0].imageAlt,
+        imageWidth: mappedResults[0].imageWidth,
+        imageHeight: mappedResults[0].imageHeight,
+      })
+    }
+
+    return mappedResults
   },
 
   async getSavedProductsWithLabels(env: any, tenantId: string): Promise<any[]> {
@@ -1396,7 +1472,8 @@ export const d1DatabaseService = {
       SELECT sp.*, 
              GROUP_CONCAT(plm.label_id) as label_ids,
              GROUP_CONCAT(pl.name) as label_names,
-             GROUP_CONCAT(pl.category) as label_categories
+             GROUP_CONCAT(pl.category) as label_categories,
+             GROUP_CONCAT(pl.color) as label_colors
       FROM saved_products sp
       LEFT JOIN product_label_mappings plm ON sp.id = plm.saved_product_id
       LEFT JOIN product_labels pl ON plm.label_id = pl.id
@@ -1428,6 +1505,7 @@ export const d1DatabaseService = {
       labelIds: result.label_ids ? result.label_ids.split(",") : [],
       labelNames: result.label_names ? result.label_names.split(",") : [],
       labelCategories: result.label_categories ? result.label_categories.split(",") : [],
+      labelColors: result.label_colors ? result.label_colors.split(",") : [],
     }
   },
 

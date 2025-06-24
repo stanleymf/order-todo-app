@@ -44,6 +44,7 @@ import {
   deleteSavedProduct,
   addProductLabel,
   updateProductLabel,
+  syncShopifyProduct,
 } from "../services/api"
 import type { ProductLabel, Store, Product, SavedProduct } from "../types"
 import { toast } from "sonner"
@@ -116,6 +117,26 @@ export function ProductManagement() {
   const [editLabelColor, setEditLabelColor] = useState("#3b82f6")
   const [editLabelCategory, setEditLabelCategory] = useState<"difficulty" | "productType" | "custom">("difficulty")
   const [editLabelPriority, setEditLabelPriority] = useState(1)
+
+  // Helper to fetch latest product data from Shopify by productId
+  async function fetchShopifyProductById(shopifyProductId: string) {
+    if (!tenant?.id || !syncStoreId) return null
+    try {
+      const result = await syncShopifyProduct(tenant.id, syncStoreId, shopifyProductId)
+      // The API returns { success: true, ...productData }, so extract the product
+      if (result && result.success && result.product) {
+        return result.product
+      }
+      // Fallback: if the API just returns the product
+      if (result && result.title) {
+        return result
+      }
+      return null
+    } catch (err) {
+      console.error('Failed to fetch product from Shopify:', err)
+      return null
+    }
+  }
 
   // Guard: Don't render until auth and tenant context is ready
   if (authLoading) {
@@ -662,6 +683,57 @@ export function ProductManagement() {
           return !excludeTags.some((excludeTag) => productTags.includes(excludeTag))
         })
       : savedFilteredProducts
+
+  // Handler to update selected saved products
+  const handleUpdateSelectedSavedProducts = async () => {
+    if (!tenant?.id || selectedSavedProducts.size === 0) return
+    setIsSavingProducts(true)
+    try {
+      // Find the selected saved products
+      const productsToUpdate = savedProducts.filter((product) => selectedSavedProducts.has(product.id))
+      // Fetch latest data from Shopify for each product
+      // (Assume you have a function fetchShopifyProductById that returns the latest product data)
+      const updatedProductsData = await Promise.all(productsToUpdate.map(async (product) => {
+        // You may need to implement fetchShopifyProductById in your services
+        const latest = await fetchShopifyProductById(product.shopifyProductId)
+        if (!latest) return null
+        return {
+          shopifyProductId: latest.shopifyId,
+          shopifyVariantId: latest.variants?.[0]?.id || "",
+          title: latest.title,
+          variantTitle: latest.variants?.[0]?.title,
+          description: latest.description,
+          price: parseFloat(latest.variants?.[0]?.price || "0"),
+          tags: latest.tags || [],
+          productType: latest.productType,
+          vendor: latest.vendor,
+          handle: latest.handle,
+          imageUrl: latest.images?.[0]?.src,
+          imageAlt: latest.images?.[0]?.alt,
+          imageWidth: latest.images?.[0]?.width,
+          imageHeight: latest.images?.[0]?.height,
+        }
+      }))
+      // Filter out any nulls (in case a product couldn't be fetched)
+      const validUpdates = updatedProductsData.filter(Boolean)
+      if (validUpdates.length === 0) {
+        toast.info('No products could be updated from Shopify.', { duration: 4000 })
+        setIsSavingProducts(false)
+        return
+      }
+      await saveProducts(tenant.id, validUpdates)
+      // Refresh saved products list
+      const newSavedProducts = await getSavedProducts(tenant.id)
+      setSavedProducts(newSavedProducts)
+      setSelectedSavedProducts(new Set())
+      toast.success(`✅ Updated ${validUpdates.length} products from Shopify!`, { duration: 4000 })
+    } catch (err) {
+      console.error('Error updating saved products:', err)
+      toast.error('❌ Failed to update products. Please try again.', { duration: 5000 })
+    } finally {
+      setIsSavingProducts(false)
+    }
+  }
 
   if (!tenant?.id) {
     return (
@@ -1401,6 +1473,21 @@ export function ProductManagement() {
               >
                 <Trash2 className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Delete ({selectedSavedProducts.size})
+              </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleUpdateSelectedSavedProducts}
+                disabled={selectedSavedProducts.size === 0 || isSavingProducts}
+                className={isMobileView ? "w-full h-9 text-sm" : ""}
+              >
+                {isSavingProducts ? (
+                  <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                ) : (
+                  <RefreshCw className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                )}
+                Update Selected ({selectedSavedProducts.size})
               </Button>
             </div>
           </div>

@@ -3211,11 +3211,30 @@ app.get('/api/tenants/:tenantId/ai/saved-products', async (c) => {
 // --- Saved Products ---
 app.get("/api/tenants/:tenantId/saved-products", async (c) => {
   const tenantId = c.req.param("tenantId")
+  console.log(`[SAVED-PRODUCTS-GET] Fetching saved products for tenant: ${tenantId}`)
+  console.log(`[SAVED-PRODUCTS-GET] Query parameters:`, c.req.query())
+  
   try {
     const products = await d1DatabaseService.getSavedProducts(c.env, tenantId, c.req.query())
+    console.log(`[SAVED-PRODUCTS-GET] Retrieved ${products.length} products from database`)
+    
+    // Log a sample of products to verify data structure
+    if (products.length > 0) {
+      console.log(`[SAVED-PRODUCTS-GET] Sample product:`, {
+        id: products[0].id,
+        title: products[0].title,
+        imageUrl: products[0].imageUrl,
+        imageAlt: products[0].imageAlt,
+        imageWidth: products[0].imageWidth,
+        imageHeight: products[0].imageHeight,
+      })
+    } else {
+      console.log(`[SAVED-PRODUCTS-GET] No products found in database`)
+    }
+    
     return c.json(products)
   } catch (error) {
-    console.error("Error fetching saved products:", error)
+    console.error("[SAVED-PRODUCTS-GET] Error fetching saved products:", error)
     return c.json({ error: "Failed to fetch saved products" }, 500)
   }
 })
@@ -3224,16 +3243,214 @@ app.post("/api/tenants/:tenantId/saved-products", async (c) => {
   const tenantId = c.req.param("tenantId")
   const { products } = await c.req.json()
   
+  console.log(`[SAVED-PRODUCTS-POST] Received request for tenant: ${tenantId}`)
+  console.log(`[SAVED-PRODUCTS-POST] Products array length: ${products?.length || 0}`)
+  
   if (!products || !Array.isArray(products)) {
+    console.log(`[SAVED-PRODUCTS-POST] Error: Invalid products data - products:`, products)
     return c.json({ error: "Products array is required" }, 400)
   }
 
+  // Log each product being saved
+  products.forEach((product, index) => {
+    console.log(`[SAVED-PRODUCTS-POST] Product ${index + 1}:`, {
+      shopifyProductId: product.shopifyProductId,
+      shopifyVariantId: product.shopifyVariantId,
+      title: product.title,
+      imageUrl: product.imageUrl,
+      imageAlt: product.imageAlt,
+      imageWidth: product.imageWidth,
+      imageHeight: product.imageHeight,
+    })
+  })
+
   try {
+    console.log(`[SAVED-PRODUCTS-POST] Calling d1DatabaseService.saveProducts...`)
     const savedProducts = await d1DatabaseService.saveProducts(c.env, tenantId, products)
+    console.log(`[SAVED-PRODUCTS-POST] saveProducts returned ${savedProducts.length} products`)
+    
+    // Log the returned products to verify they have the expected data
+    savedProducts.forEach((product, index) => {
+      console.log(`[SAVED-PRODUCTS-POST] Returned product ${index + 1}:`, {
+        id: product.id,
+        shopifyProductId: product.shopifyProductId,
+        shopifyVariantId: product.shopifyVariantId,
+        title: product.title,
+        imageUrl: product.imageUrl,
+        imageAlt: product.imageAlt,
+        imageWidth: product.imageWidth,
+        imageHeight: product.imageHeight,
+      })
+    })
+    
     return c.json(savedProducts, 201)
   } catch (error) {
-    console.error("Error saving products:", error)
+    console.error("[SAVED-PRODUCTS-POST] Error saving products:", error)
+    console.error("[SAVED-PRODUCTS-POST] Error details:", {
+      message: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     return c.json({ error: "Failed to save products" }, 500)
+  }
+})
+
+// Dedicated endpoint to get a saved product by Shopify product/variant ID
+app.get("/api/tenants/:tenantId/saved-products/by-shopify-id", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const shopifyProductId = c.req.query("shopify_product_id")
+  const shopifyVariantId = c.req.query("shopify_variant_id")
+  if (!shopifyProductId || !shopifyVariantId) {
+    return c.json({ error: "shopify_product_id and shopify_variant_id are required" }, 400)
+  }
+  try {
+    const product = await d1DatabaseService.getProductByShopifyIds(c.env, tenantId, shopifyProductId, shopifyVariantId)
+    if (!product) return c.json({ error: "Product not found" }, 404)
+    return c.json(product)
+  } catch (error) {
+    console.error("Error fetching saved product by Shopify ID:", error)
+    return c.json({ error: "Failed to fetch saved product" }, 500)
+  }
+})
+
+// Delete a single saved product
+app.delete("/api/tenants/:tenantId/saved-products/:productId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  
+  console.log(`[SAVED-PRODUCTS-DELETE] Deleting product ${productId} for tenant: ${tenantId}`)
+  
+  try {
+    const success = await d1DatabaseService.deleteSavedProduct(c.env, tenantId, productId)
+    if (success) {
+      console.log(`[SAVED-PRODUCTS-DELETE] Successfully deleted product ${productId}`)
+      return c.json({ success: true, message: "Product deleted successfully" })
+    } else {
+      console.log(`[SAVED-PRODUCTS-DELETE] Product ${productId} not found`)
+      return c.json({ error: "Product not found" }, 404)
+    }
+  } catch (error) {
+    console.error("[SAVED-PRODUCTS-DELETE] Error deleting saved product:", error)
+    return c.json({ error: "Failed to delete product" }, 500)
+  }
+})
+
+// Bulk delete all saved products for a tenant
+app.delete("/api/tenants/:tenantId/saved-products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  
+  console.log(`[SAVED-PRODUCTS-BULK-DELETE] Deleting all products for tenant: ${tenantId}`)
+  
+  try {
+    // Delete all saved products for this tenant
+    const { success } = await c.env.DB.prepare(
+      "DELETE FROM saved_products WHERE tenant_id = ?"
+    )
+      .bind(tenantId)
+      .run()
+
+    console.log(`[SAVED-PRODUCTS-BULK-DELETE] Bulk delete result:`, { success })
+    
+    if (success) {
+      console.log(`[SAVED-PRODUCTS-BULK-DELETE] Successfully deleted all products for tenant ${tenantId}`)
+      return c.json({ 
+        success: true, 
+        message: "All saved products deleted successfully",
+        deletedCount: "all"
+      })
+    } else {
+      console.log(`[SAVED-PRODUCTS-BULK-DELETE] Failed to delete products for tenant ${tenantId}`)
+      return c.json({ error: "Failed to delete products" }, 500)
+    }
+  } catch (error) {
+    console.error("[SAVED-PRODUCTS-BULK-DELETE] Error bulk deleting saved products:", error)
+    return c.json({ error: "Failed to delete products" }, 500)
+  }
+})
+
+// --- Saved Products Label Management ---
+
+// Add a label to a saved product
+app.post("/api/tenants/:tenantId/saved-products/:productId/labels/:labelId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  const labelId = c.req.param("labelId")
+  
+  console.log(`[SAVED-PRODUCTS-LABELS] Adding label ${labelId} to product ${productId} for tenant: ${tenantId}`)
+  
+  try {
+    // Verify the product exists and belongs to the tenant
+    const product = await d1DatabaseService.getSavedProduct(c.env, tenantId, productId)
+    if (!product) {
+      console.log(`[SAVED-PRODUCTS-LABELS] Product ${productId} not found`)
+      return c.json({ error: "Product not found" }, 404)
+    }
+    
+    // Verify the label exists and belongs to the tenant
+    const label = await d1DatabaseService.getProductLabelById(c.env, tenantId, labelId)
+    if (!label) {
+      console.log(`[SAVED-PRODUCTS-LABELS] Label ${labelId} not found`)
+      return c.json({ error: "Label not found" }, 404)
+    }
+    
+    // Check if the mapping already exists
+    const existingMapping = await c.env.DB.prepare(`
+      SELECT id FROM product_label_mappings 
+      WHERE tenant_id = ? AND saved_product_id = ? AND label_id = ?
+    `)
+      .bind(tenantId, productId, labelId)
+      .first()
+    
+    if (existingMapping) {
+      console.log(`[SAVED-PRODUCTS-LABELS] Label ${labelId} already exists on product ${productId}`)
+      return c.json({ success: true, message: "Label already exists on product" })
+    }
+    
+    // Create the mapping
+    const mappingId = crypto.randomUUID()
+    await c.env.DB.prepare(`
+      INSERT INTO product_label_mappings (id, tenant_id, saved_product_id, label_id, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+      .bind(mappingId, tenantId, productId, labelId, new Date().toISOString())
+      .run()
+    
+    console.log(`[SAVED-PRODUCTS-LABELS] Successfully added label ${labelId} to product ${productId}`)
+    return c.json({ success: true, message: "Label added successfully" })
+    
+  } catch (error) {
+    console.error("[SAVED-PRODUCTS-LABELS] Error adding label to saved product:", error)
+    return c.json({ error: "Failed to add label" }, 500)
+  }
+})
+
+// Remove a label from a saved product
+app.delete("/api/tenants/:tenantId/saved-products/:productId/labels/:labelId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const productId = c.req.param("productId")
+  const labelId = c.req.param("labelId")
+  
+  console.log(`[SAVED-PRODUCTS-LABELS] Removing label ${labelId} from product ${productId} for tenant: ${tenantId}`)
+  
+  try {
+    // Delete the mapping
+    const { success } = await c.env.DB.prepare(`
+      DELETE FROM product_label_mappings 
+      WHERE tenant_id = ? AND saved_product_id = ? AND label_id = ?
+    `)
+      .bind(tenantId, productId, labelId)
+      .run()
+    
+    if (success) {
+      console.log(`[SAVED-PRODUCTS-LABELS] Successfully removed label ${labelId} from product ${productId}`)
+      return c.json({ success: true, message: "Label removed successfully" })
+    } else {
+      console.log(`[SAVED-PRODUCTS-LABELS] Label ${labelId} not found on product ${productId}`)
+      return c.json({ error: "Label not found on product" }, 404)
+    }
+    
+  } catch (error) {
+    console.error("[SAVED-PRODUCTS-LABELS] Error removing label from saved product:", error)
+    return c.json({ error: "Failed to remove label" }, 500)
   }
 })
 
@@ -3487,3 +3704,50 @@ app.onError((err, c) => {
 export default {
   fetch: app.fetch,
 }
+
+// --- Debug endpoint to check saved products directly ---
+app.get("/api/tenants/:tenantId/debug/saved-products", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  console.log(`[DEBUG] Checking saved products directly for tenant: ${tenantId}`)
+  
+  try {
+    // Direct database query to see what's actually stored
+    const { results } = await c.env.DB.prepare(`
+      SELECT id, title, shopify_product_id, shopify_variant_id, image_url, image_alt, image_width, image_height, created_at, updated_at
+      FROM saved_products 
+      WHERE tenant_id = ?
+      ORDER BY created_at DESC
+      LIMIT 10
+    `)
+      .bind(tenantId)
+      .all()
+
+    console.log(`[DEBUG] Direct database query returned ${results?.length || 0} products`)
+    
+    if (results && results.length > 0) {
+      results.forEach((product, index) => {
+        console.log(`[DEBUG] Product ${index + 1}:`, {
+          id: product.id,
+          title: product.title,
+          shopify_product_id: product.shopify_product_id,
+          shopify_variant_id: product.shopify_variant_id,
+          image_url: product.image_url,
+          image_alt: product.image_alt,
+          image_width: product.image_width,
+          image_height: product.image_height,
+          created_at: product.created_at,
+          updated_at: product.updated_at,
+        })
+      })
+    }
+
+    return c.json({
+      count: results?.length || 0,
+      products: results || [],
+      message: "Direct database query results"
+    })
+  } catch (error) {
+    console.error("[DEBUG] Error querying saved products directly:", error)
+    return c.json({ error: "Failed to query database directly" }, 500)
+  }
+})
