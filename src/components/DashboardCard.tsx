@@ -59,25 +59,111 @@ export function DashboardCard({
   const [localNotes, setLocalNotes] = useState(order.notes || "")
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
 
-  // Memoized field value getter
+  // Field Mappings utility functions (from OrderCardPreview)
+  const getValueFromShopifyData = (sourcePath: string, data: any): any => {
+    if (!sourcePath || !data) {
+      console.log('[FIELD-MAPPING] Missing sourcePath or data', { sourcePath, hasData: !!data })
+      return null;
+    }
+
+    console.log('[FIELD-MAPPING] Starting extraction', { sourcePath, dataKeys: Object.keys(data) })
+
+    const parts = sourcePath.split('.');
+    let current: any = data;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      console.log('[FIELD-MAPPING] Processing part', { part, currentType: typeof current, currentKeys: current && typeof current === 'object' ? Object.keys(current) : 'N/A' })
+      
+      if (current === null || typeof current === 'undefined') {
+        console.log('[FIELD-MAPPING] Current is null/undefined, returning null')
+        return null;
+      }
+
+      if (Array.isArray(current)) {
+        // Check if the part is a numeric index
+        const index = parseInt(part);
+        if (!isNaN(index)) {
+          // This is an array index
+          if (index >= 0 && index < current.length) {
+            current = current[index];
+            console.log('[FIELD-MAPPING] Array index access', { index, newCurrent: current })
+          } else {
+            console.log('[FIELD-MAPPING] Array index out of bounds', { index, arrayLength: current.length })
+            return null;
+          }
+        } else {
+          // This is for arrays like note_attributes, which are {name, value} pairs
+          // We assume the *next* part of the path is the 'name' we're looking for.
+          const nextPart = parts[i + 1];
+          if (nextPart) {
+            const item = current.find(d => d.name === nextPart);
+            current = item ? item.value : null;
+            console.log('[FIELD-MAPPING] Array name-value processing', { nextPart, item, current })
+            // We've used the next part, so we skip it in the next iteration
+            i++; // Skip the next iteration
+          } else {
+            // If there's no next part, it means we're targeting the array itself (like 'tags')
+            console.log('[FIELD-MAPPING] Returning array', current)
+            return current;
+          }
+        }
+      } else if (typeof current === 'object' && part in current) {
+        current = current[part];
+        console.log('[FIELD-MAPPING] Object property access', { part, newCurrent: current })
+      } else {
+        console.log('[FIELD-MAPPING] Property not found', { part, currentType: typeof current, currentKeys: current && typeof current === 'object' ? Object.keys(current) : 'N/A' })
+        return null;
+      }
+    }
+
+    console.log('[FIELD-MAPPING] Final result', current)
+    return current;
+  };
+
+  const applyTransformation = (value: any, field: OrderCardField): any => {
+    if (field.transformation === "extract" && field.transformationRule) {
+      // If the value is an array (like tags), search for the pattern in each element
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string') {
+            const match = item.match(new RegExp(field.transformationRule));
+            if (match) return match[0];
+          }
+        }
+        return "Not set"; // No match found in the array
+      }
+      // Original logic for string values
+      if (typeof value === "string") {
+        try {
+          const regex = new RegExp(field.transformationRule);
+          const match = value.match(regex);
+          return match ? match[0] : "Not set";
+        } catch (e) {
+          console.error("Invalid regex:", e);
+          return "Invalid Regex";
+        }
+      }
+      return "Not set"; // Can't apply regex to non-string, non-array
+    }
+
+    if (Array.isArray(value)) {
+      return value.join(', ');
+    }
+
+    return value ?? "Not set";
+  };
+
+  // Field value getter using Field Mappings configuration
   const getFieldValue = (field: OrderCardField): string => {
     try {
       if (!order.shopifyOrderData) return "N/A"
       
-      // Handle special cases
-      if (field.id === 'timeslot') {
-        return extractTimeslotFromTags() || "No timeslot"
-      }
-      if (field.id === 'orderDate') {
-        return extractDateFromTags() || order.deliveryDate || "No date"
-      }
-      if (field.id === 'addOns') {
-        return extractAddOnsFromData() || "None"
-      }
+      // Handle order-level fields first (not from Shopify data)
       if (field.id === 'customerName') {
         return order.customerName || "N/A"
       }
-      if (field.id === 'orderNumber') {
+      if (field.id === 'orderNumber' || field.id === 'orderId') {
         return order.shopifyOrderId || "N/A"
       }
       if (field.id === 'status') {
@@ -91,12 +177,35 @@ export function DashboardCard({
         return order.notes || "No notes"
       }
       
-      // Handle Shopify fields
+      // Handle label fields from saved products
+      if (field.id === 'difficultyLabel') {
+        return productLabels.difficultyLabel || "Standard"
+      }
+      if (field.id === 'productTypeLabel') {
+        return productLabels.productTypeLabel || "Arrangement"
+      }
+      
+      // Handle Shopify fields using Field Mappings configuration
       if (field.shopifyFields && field.shopifyFields.length > 0) {
         for (const shopifyField of field.shopifyFields) {
-          const value = getNestedValue(order.shopifyOrderData, shopifyField)
+          let value = getValueFromShopifyData(shopifyField, order.shopifyOrderData)
+          
           if (value !== undefined && value !== null && value !== "") {
-            return String(value)
+            // Apply transformation based on field configuration
+            const transformedValue = applyTransformation(value, field)
+            
+            console.log(`[FIELD-MAPPING] ${field.id}:`, {
+              fieldId: field.id,
+              shopifyField,
+              rawValue: value,
+              transformation: field.transformation,
+              transformationRule: field.transformationRule,
+              transformedValue
+            })
+            
+            if (transformedValue !== "Not set" && transformedValue !== null && transformedValue !== undefined) {
+              return String(transformedValue)
+            }
           }
         }
       }
@@ -105,49 +214,6 @@ export function DashboardCard({
     } catch (error) {
       console.error(`Error getting field value for ${field.id}:`, error)
       return "Error"
-    }
-  }
-
-  // Helper function to get nested values from objects
-  const getNestedValue = (obj: any, path: string): any => {
-    return path.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined
-    }, obj)
-  }
-
-  // Extract timeslot from tags
-  const extractTimeslotFromTags = (): string | null => {
-    const tags = order.shopifyOrderData?.tags || ""
-    const timeRegex = /\b(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\b/
-    const match = tags.match(timeRegex)
-    return match ? match[0] : null
-  }
-
-  // Extract date from tags
-  const extractDateFromTags = (): string | null => {
-    const tags = order.shopifyOrderData?.tags || ""
-    const dateRegex = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/
-    const match = tags.match(dateRegex)
-    return match ? match[0] : null
-  }
-
-  // Extract add-ons from line items
-  const extractAddOnsFromData = (): string | null => {
-    try {
-      const lineItems = order.shopifyOrderData?.lineItems?.edges || order.shopifyOrderData?.line_items || []
-      if (lineItems.length === 0) return null
-      
-      const addOns = lineItems
-        .filter((item: any) => {
-          const title = item.node?.title || item.title || ""
-          return title.toLowerCase().includes('add-on') || title.toLowerCase().includes('addon')
-        })
-        .map((item: any) => item.node?.title || item.title)
-      
-      return addOns.length > 0 ? addOns.join(', ') : null
-    } catch (error) {
-      console.error('Error extracting add-ons:', error)
-      return null
     }
   }
 

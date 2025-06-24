@@ -435,22 +435,37 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               quantity: 1, // Individual quantity
               price: parseFloat(lineItem.price || '0'),
               variantTitle: lineItem.variant_title,
-              // Shopify order data (reconstructed)
-              shopifyOrderData: {
-                id: order.shopify_order_id,
-                name: order.shopify_order_id, // Use shopify order ID as name
-                customer: {
-                  first_name: order.customer_name.split(' ')[0] || '',
-                  last_name: order.customer_name.split(' ').slice(1).join(' ') || '',
-                  email: order.customer_email
-                },
-                line_items: lineItems,
-                total_price: order.total_price,
-                currency: order.currency,
-                note: order.notes,
-                status: order.status,
-                tags: "" // Add empty tags field for Field Mappings compatibility
-              }
+              // Shopify order data (preserve original GraphQL data if available)
+              shopifyOrderData: (() => {
+                try {
+                  // Try to parse stored GraphQL data first
+                  if (order.shopify_order_data && order.shopify_order_data.trim() !== '') {
+                    const parsedData = JSON.parse(order.shopify_order_data as string);
+                    console.log('[GRAPHQL-PRESERVATION] Using original GraphQL data for order:', order.shopify_order_id);
+                    return parsedData;
+                  }
+                } catch (e) {
+                  console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data, using fallback:', e);
+                }
+                
+                // Fallback to reconstructed data
+                console.log('[GRAPHQL-PRESERVATION] Using reconstructed data for order:', order.shopify_order_id);
+                return {
+                  id: order.shopify_order_id,
+                  name: order.shopify_order_id,
+                  customer: {
+                    first_name: order.customer_name?.split(' ')[0] || '',
+                    last_name: order.customer_name?.split(' ').slice(1).join(' ') || '',
+                    email: order.customer_email
+                  },
+                  line_items: lineItems,
+                  total_price: order.total_price,
+                  currency: order.currency,
+                  note: order.notes,
+                  status: order.status,
+                  tags: "" // Empty for fallback
+                };
+              })()
             })
           }
         }
