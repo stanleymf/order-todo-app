@@ -557,7 +557,7 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
                   value={getFieldValue("customisations")}
                   onChange={(e) => onCustomisationsChange(e.target.value)}
                   placeholder="Add extra notes..."
-                  className="mt-1 min-h-[80px] whitespace-pre-wrap"
+                  className="mt-1 resize-none overflow-y-auto max-h-[500px] whitespace-pre-wrap"
                   onClick={(e) => e.stopPropagation()}
                   onFocus={(e) => e.stopPropagation()}
                   onMouseDown={(e) => e.stopPropagation()}
@@ -565,18 +565,6 @@ const ExpandedView: React.FC<ExpandedViewProps> = ({
                 />
               </div>
             )}
-          </div>
-        )}
-        {productLabel && (
-          <div className="border-t pt-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm">
-              <Badge
-                variant="secondary"
-                style={{ backgroundColor: productLabel.color, color: "white" }}
-              >
-                {productLabel.name}
-              </Badge>
-            </div>
           </div>
         )}
       </CardContent>
@@ -603,7 +591,8 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
   handleShowProductImage,
   productLabel,
 }) => {
-  const difficultyLabel = difficultyLabels.find((l) => l.id === sampleOrder.priorityLabel)
+  // Use the fetched difficulty label for consistency with expanded view
+  const difficultyLabel = productLabel && productLabel.name && productLabel.color ? productLabel : null;
 
   return (
     <CardContent className="p-3 cursor-pointer relative min-h-[90px]">
@@ -642,15 +631,16 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
               <TooltipContent>Status: {previewStatus}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          {difficultyLabel && (
+            <Badge
+              style={{ backgroundColor: difficultyLabel.color, color: "white", marginTop: 8 }}
+              className="text-xs"
+            >
+              {difficultyLabel.name}
+            </Badge>
+          )}
         </div>
       </div>
-      {productLabel && (
-        <div className="absolute bottom-3 right-3">
-          <Badge style={{ backgroundColor: productLabel.color, color: "white" }}>
-            {productLabel.name}
-          </Badge>
-        </div>
-      )}
     </CardContent>
   )
 }
@@ -683,6 +673,7 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
   const [selectedProductId, setSelectedProductId] = useState<string | undefined>()
   const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>()
+  const [productImageUrl, setProductImageUrl] = useState<string | null>(null);
 
   // Sample data for preview
   const [sampleOrder, setSampleOrder] = useState<SampleOrder>({
@@ -702,6 +693,7 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
 
   const { tenant } = useAuth();
   const [productLabel, setProductLabel] = useState<{ name: string; color: string } | null>(null);
+  const [orderCardLabels, setOrderCardLabels] = useState<{ difficulty?: { name: string, color: string }, productType?: { name: string, color: string } }>({});
 
   // ============================================================================
   // EFFECTS
@@ -789,22 +781,44 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
 
   // Effect to fetch product label for the current product/variant
   useEffect(() => {
-    const fetchProductLabel = async () => {
-      console.log('fetchProductLabel: effect triggered', { tenant, realOrderData });
-      if (!tenant?.id || !realOrderData?.lineItems?.edges?.[0]?.node) {
-        console.log('fetchProductLabel: missing tenant or order data', { tenant, realOrderData });
-        return;
-      }
-      const shopifyProductId = realOrderData.lineItems.edges[0].node.product?.id?.split("/").pop();
-      const shopifyVariantId = realOrderData.lineItems.edges[0].node.variant?.id?.split("/").pop();
-      console.log('fetchProductLabel: extracted IDs', { shopifyProductId, shopifyVariantId });
+    const fetchProductLabelAndImage = async () => {
+      if (!tenant?.id || !realOrderData) return;
+      
+      // Extract product and variant IDs from the Shopify GraphQL response structure
+      let shopifyProductId = realOrderData.shopifyProductId || realOrderData.product_id || realOrderData.productId;
+      let shopifyVariantId = realOrderData.shopifyVariantId || realOrderData.variant_id || realOrderData.variantId;
+      
+      // If not found in direct properties, try to extract from lineItems structure
       if (!shopifyProductId || !shopifyVariantId) {
-        console.log('fetchProductLabel: missing product or variant ID');
+        const lineItem = realOrderData.lineItems?.edges?.[0]?.node;
+        if (lineItem) {
+          shopifyProductId = lineItem.product?.id;
+          shopifyVariantId = lineItem.variant?.id;
+        }
+      }
+      
+      // If we have GID format (gid://shopify/Product/123456789), extract the numeric ID
+      if (shopifyProductId && shopifyProductId.includes('/')) {
+        shopifyProductId = shopifyProductId.split('/').pop();
+      }
+      if (shopifyVariantId && shopifyVariantId.includes('/')) {
+        shopifyVariantId = shopifyVariantId.split('/').pop();
+      }
+      
+      if (!shopifyProductId || !shopifyVariantId) {
+        console.log('OrderCardPreview: Missing product or variant ID', { 
+          shopifyProductId, 
+          shopifyVariantId, 
+          realOrderDataKeys: Object.keys(realOrderData),
+          lineItems: realOrderData.lineItems 
+        });
         return;
       }
+      
+      console.log('OrderCardPreview: Fetching product label for', { shopifyProductId, shopifyVariantId });
+      
       try {
         const jwt = localStorage.getItem("auth_token");
-        console.log('fetchProductLabel: making fetch', { tenantId: tenant.id, shopifyProductId, shopifyVariantId });
         const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
           credentials: "include",
           headers: {
@@ -812,15 +826,27 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
             "Content-Type": "application/json"
           }
         });
-        console.log('fetchProductLabel: fetch response', res);
         if (!res.ok) {
-          console.log('fetchProductLabel: response not ok', res.status, res.statusText);
+          console.log('OrderCardPreview: API response not ok', { status: res.status, statusText: res.statusText });
           return;
         }
         const product = await res.json();
-        console.log('fetchProductLabel: fetched product', product);
-        // Find difficulty label first, then fallback to product type label
-        let label = null;
+        console.log('OrderCardPreview: Received product data', product);
+        
+        // Set image URL for modal/preview
+        setProductImageUrl(product.imageUrl || product.image_url || null);
+
+        // PATCH: Merge label fields into realOrderData as localProduct
+        if (product && realOrderData) {
+          realOrderData.localProduct = {
+            labelNames: product.labelNames,
+            labelCategories: product.labelCategories,
+            labelColors: product.labelColors,
+            // Add more fields if needed
+          };
+        }
+
+        // --- New: Extract both difficulty and productType labels ---
         let names = [];
         let cats = [];
         let colors = [];
@@ -839,14 +865,28 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
         } else if (typeof product.labelColors === 'string') {
           colors = product.labelColors.split(',');
         }
-        // Try to find difficulty label
+        let difficulty: { name: string, color: string } | undefined = undefined;
+        let productType: { name: string, color: string } | undefined = undefined;
+        for (let i = 0; i < cats.length; i++) {
+          if (cats[i] === 'difficulty') {
+            difficulty = { name: names[i], color: colors[i] || '#e53e3e' };
+          }
+          if (cats[i] === 'productType') {
+            productType = { name: names[i], color: colors[i] || '#3182ce' };
+          }
+        }
+        setOrderCardLabels({ difficulty, productType });
+        console.log('OrderCardPreview: orderCardLabels', { difficulty, productType });
+        // --- End new ---
+
+        // Keep existing logic for UI display
+        let label = null;
         for (let i = 0; i < cats.length; i++) {
           if (cats[i] === 'difficulty') {
             label = { name: names[i], color: colors[i] || '#e53e3e' };
             break;
           }
         }
-        // Fallback to productType label
         if (!label) {
           for (let i = 0; i < cats.length; i++) {
             if (cats[i] === 'productType') {
@@ -857,11 +897,12 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
         }
         setProductLabel(label);
       } catch (e) {
-        console.log('fetchProductLabel: error', e);
+        console.error('OrderCardPreview: Error fetching product label', e);
         setProductLabel(null);
+        setProductImageUrl(null);
       }
     };
-    fetchProductLabel();
+    fetchProductLabelAndImage();
   }, [tenant?.id, realOrderData]);
 
   // ============================================================================
@@ -880,8 +921,11 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
 
   // Product image modal handler
   const handleShowProductImage = useCallback((shopifyProductId?: string, shopifyVariantId?: string) => {
-    setSelectedProductId(shopifyProductId)
-    setSelectedVariantId(shopifyVariantId)
+    // Always pass only the numeric ID (strip gid://.../)
+    const numericProductId = shopifyProductId ? shopifyProductId.split('/').pop() : undefined;
+    const numericVariantId = shopifyVariantId ? shopifyVariantId.split('/').pop() : undefined;
+    setSelectedProductId(numericProductId)
+    setSelectedVariantId(numericVariantId)
     setIsProductImageModalOpen(true)
   }, [])
 
@@ -1017,6 +1061,7 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
         onClose={() => setIsProductImageModalOpen(false)}
         shopifyProductId={selectedProductId}
         shopifyVariantId={selectedVariantId}
+        tenantId={tenant?.id}
       />
     </div>
   )
