@@ -272,6 +272,33 @@ export const d1DatabaseService = {
       product_type?: string
     }
   ): Promise<Order> {
+    // 1. Check if order already exists
+    if (orderData.shopifyOrderId) {
+      const existingOrder = await env.DB.prepare(
+        "SELECT * FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
+      )
+        .bind(tenantId, orderData.shopifyOrderId)
+        .first()
+
+      if (existingOrder) {
+        console.log(`Order with Shopify ID ${orderData.shopifyOrderId} already exists. Skipping creation.`)
+        // The result from D1 needs to be mapped to the Order type
+        return {
+          id: existingOrder.id,
+          tenantId: existingOrder.tenant_id,
+          shopifyOrderId: existingOrder.shopify_order_id,
+          customerName: existingOrder.customer_name,
+          deliveryDate: existingOrder.delivery_date,
+          status: existingOrder.status,
+          priority: existingOrder.priority,
+          assignedTo: existingOrder.assigned_to,
+          notes: existingOrder.notes,
+          createdAt: existingOrder.created_at,
+          updatedAt: existingOrder.updated_at,
+        }
+      }
+    }
+    
     const id = orderData.shopifyOrderId ? `shopify-${orderData.shopifyOrderId}` : crypto.randomUUID()
     const now = new Date().toISOString()
     
@@ -608,27 +635,67 @@ export const d1DatabaseService = {
     return result.success
   },
 
-  // Get stores for a tenant
-  async getStores(env: any, tenantId: string): Promise<any[]> {
+    // Get stores for a tenant
+    async getStores(env: any, tenantId: string): Promise<any[]> {
+      const { results } = await env.DB.prepare(
+        "SELECT * FROM shopify_stores WHERE tenant_id = ? ORDER BY created_at DESC"
+      ).bind(tenantId).all();
+
+      if (!results) {
+        return [];
+      }
+
+      return results.map((result: any) => {
+        let parsedSettings: any = {};
+        try {
+          if (result.settings) {
+            parsedSettings = JSON.parse(result.settings);
+          }
+        } catch (e) {
+          console.error(`Failed to parse settings for store ${result.id}`, e);
+        }
+
+        return {
+          id: result.id,
+          tenantId: result.tenant_id,
+          name: result.shopify_domain,
+          type: "shopify",
+          status: result.sync_enabled ? "active" : "inactive",
+          settings: {
+            domain: result.shopify_domain,
+            address: result.shopify_domain,
+            accessToken: result.access_token,
+            apiSecretKey: result.webhook_secret,
+            timezone: "UTC",
+            currency: "USD",
+            businessHours: { start: "09:00", end: "17:00" },
+            webhooks: parsedSettings.webhooks || [],
+            ...parsedSettings,
+          },
+          lastSyncAt: result.last_sync_at,
+          createdAt: result.created_at,
+          updatedAt: result.updated_at,
+        };
+      });
+    },
+
+  // Get all stores across all tenants (for webhook processing)
+  async getAllStores(env: any): Promise<any[]> {
     const { results } = await env.DB.prepare(
-      "SELECT * FROM shopify_stores WHERE tenant_id = ? ORDER BY created_at DESC"
+      "SELECT * FROM shopify_stores ORDER BY created_at DESC"
     )
-      .bind(tenantId)
       .all()
     return results.map((result: any) => {
-      // Parse settings from JSON string, defaulting to empty object
       let settings: any = {}
       try {
         settings = result.settings ? JSON.parse(result.settings) : {}
-      } catch (error) {
-        console.error('Error parsing store settings:', error)
-        settings = {}
+      } catch (e) {
+        console.error(`Failed to parse settings for store ${result.id}`, e)
       }
-
       return {
         id: result.id,
         tenantId: result.tenant_id,
-        name: result.shopify_domain, // Use domain as name for now
+        name: result.shopify_domain,
         type: "shopify",
         status: "active",
         settings: {
@@ -639,8 +706,8 @@ export const d1DatabaseService = {
           timezone: "UTC",
           currency: "USD",
           businessHours: { start: "09:00", end: "17:00" },
-          webhooks: settings.webhooks || [], // Use stored webhooks or empty array
-          ...settings, // Include any other settings
+          webhooks: settings.webhooks || [],
+          ...settings,
         },
         createdAt: result.created_at,
         updatedAt: result.updated_at,
@@ -672,22 +739,27 @@ export const d1DatabaseService = {
       ...storeData.settings
     }
 
-    await env.DB.prepare(
-      `INSERT INTO shopify_stores (id, tenant_id, shopify_domain, access_token, webhook_secret, sync_enabled, settings, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        storeId,
-        tenantId,
-        storeData.shopifyDomain,
-        storeData.accessToken,
-        storeData.webhookSecret || null,
-        storeData.syncEnabled !== false, // Default to true
-        JSON.stringify(defaultSettings),
-        now,
-        now
+    try {
+      await env.DB.prepare(
+        `INSERT INTO shopify_stores (id, tenant_id, shopify_domain, access_token, webhook_secret, sync_enabled, settings, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run()
+        .bind(
+          storeId,
+          tenantId,
+          storeData.shopifyDomain,
+          storeData.accessToken,
+          storeData.webhookSecret || null,
+          storeData.syncEnabled !== false, // Default to true
+          JSON.stringify(defaultSettings),
+          now,
+          now
+        )
+        .run()
+    } catch (error) {
+      console.error("Failed to insert store into database:", error)
+      throw new Error("Database insertion for store failed.")
+    }
 
     // Return the store in the expected format
     return {
@@ -730,7 +802,7 @@ export const d1DatabaseService = {
     return {
       id: result.id,
       tenantId: result.tenant_id,
-      name: result.shopify_domain, // Use domain as name for now
+      name: result.shopify_domain,
       type: "shopify",
       status: "active",
       settings: {
@@ -741,8 +813,8 @@ export const d1DatabaseService = {
         timezone: "UTC",
         currency: "USD",
         businessHours: { start: "09:00", end: "17:00" },
-        webhooks: settings.webhooks || [], // Use stored webhooks or empty array
-        ...settings, // Include any other settings
+        webhooks: settings.webhooks || [],
+        ...settings,
       },
       createdAt: result.created_at,
       updatedAt: result.updated_at,
@@ -1211,11 +1283,11 @@ export const d1DatabaseService = {
       SELECT
         p.id, p.shopify_product_id, p.shopify_variant_id,
         (SELECT json_group_array(json_object('id', pl.id, 'name', pl.name, 'category', pl.category))
-         FROM saved_product_labels spl
-         JOIN product_labels pl ON spl.label_id = pl.id
-         WHERE spl.product_id = p.id) as labels
+         FROM product_label_mappings plm
+         JOIN product_labels pl ON plm.label_id = pl.id
+         WHERE plm.saved_product_id = p.id) as labels
       FROM saved_products p
-      WHERE p.tenant_id = ? AND EXISTS (SELECT 1 FROM saved_product_labels spl WHERE spl.product_id = p.id)
+      WHERE p.tenant_id = ? AND EXISTS (SELECT 1 FROM product_label_mappings plm WHERE plm.saved_product_id = p.id)
     `
     const { results } = await env.DB.prepare(query).bind(tenantId).all()
 

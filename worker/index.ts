@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { jwt, sign } from "hono/jwt"
+import { streamSSE } from "hono/streaming"
 import bcrypt from "bcryptjs"
 import { d1DatabaseService, getFloristPhotos } from "../src/services/database-d1"
 import { ShopifyApiService } from "../src/services/shopify/shopifyApi"
@@ -20,6 +21,122 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 // CORS middleware
 app.use("/api/*", cors())
+
+// --- Realtime Order Status (PUBLIC) ---
+app.get("/api/tenants/:tenantId/orders/realtime-status", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const lastUpdate = c.req.query("lastUpdate")
+  
+  try {
+    let query = `
+      SELECT id, status, updated_at, customer_name, delivery_date, priority, assigned_to
+      FROM tenant_orders 
+      WHERE tenant_id = ?
+    `
+    const params = [tenantId]
+    
+    if (lastUpdate) {
+      query += ` AND updated_at > ?`
+      params.push(lastUpdate)
+    }
+    
+    query += ` ORDER BY updated_at DESC LIMIT 50`
+    
+    const { results } = await c.env.DB.prepare(query).bind(...params).all()
+    
+    const updates = results.map((order: any) => ({
+      id: order.id,
+      status: order.status,
+      updatedAt: order.updated_at,
+      customerName: order.customer_name,
+      deliveryDate: order.delivery_date,
+      priority: order.priority,
+      assignedTo: order.assigned_to
+    }))
+    
+    return c.json({
+      updates,
+      lastUpdate: new Date().toISOString(),
+      count: updates.length
+    })
+  } catch (error) {
+    console.error("Error fetching realtime order status:", error)
+    return c.json({ error: "Failed to fetch order updates" }, 500)
+  }
+})
+
+// --- Realtime Orders SSE (PUBLIC) ---
+app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
+  const tenantId = c.req.param("tenantId")
+
+  return streamSSE(c, async (stream) => {
+    // Send initial connection message
+    await stream.writeSSE({
+      data: JSON.stringify({
+        type: "connected",
+        message: "SSE connection established",
+        timestamp: new Date().toISOString(),
+      }),
+      event: "connected",
+    })
+
+    while (true) {
+      try {
+        // Fetch recent order updates
+        const query = `
+            SELECT id, status, updated_at, customer_name, delivery_date, priority, assigned_to
+            FROM tenant_orders 
+            WHERE tenant_id = ?
+            ORDER BY updated_at DESC 
+            LIMIT 10
+          `
+
+        const { results } = await c.env.DB.prepare(query).bind(tenantId).all()
+
+        if (results && results.length > 0) {
+          const updates = results.map((order: any) => ({
+            id: order.id,
+            status: order.status,
+            updatedAt: order.updated_at,
+            customerName: order.customer_name,
+            deliveryDate: order.delivery_date,
+            priority: order.priority,
+            assignedTo: order.assigned_to,
+          }))
+
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: "order_updates",
+              data: updates,
+              timestamp: new Date().toISOString(),
+            }),
+            event: "order_update",
+          })
+        } else {
+          // Send heartbeat to keep connection alive
+          await stream.writeSSE({
+            data: JSON.stringify({
+              type: "heartbeat",
+              timestamp: new Date().toISOString(),
+            }),
+            event: "heartbeat",
+          })
+        }
+      } catch (error) {
+        console.error("Error in SSE polling:", error)
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: "error",
+            message: "Failed to fetch order updates",
+            timestamp: new Date().toISOString(),
+          }),
+          event: "error",
+        })
+      }
+      await stream.sleep(5000) // Poll every 5 seconds
+    }
+  })
+})
 
 // --- AI Florist - Get Knowledge Base Analytics (PUBLIC) ---
 app.get('/api/tenants/:tenantId/ai/knowledge-base-analytics', async (c) => {
@@ -82,13 +199,13 @@ app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
 
   try {
     // 1. Fetch all data needed for processing
-    const [savedProductsWithLabels, shopifyStores, orderCardConfig] = await Promise.all([
+    const [savedProductsWithLabels, stores, orderCardConfig] = await Promise.all([
       d1DatabaseService.getSavedProductsWithLabels(c.env, tenantId),
-      d1DatabaseService.getShopifyStores(c.env, tenantId),
+      d1DatabaseService.getStores(c.env, tenantId),
       d1DatabaseService.getOrderCardConfig(c.env, tenantId),
     ])
 
-    if (!shopifyStores || shopifyStores.length === 0) {
+    if (!stores || stores.length === 0) {
       return c.json({ error: "No Shopify store configured for this tenant" }, 404)
     }
 
@@ -108,40 +225,17 @@ app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
     // 3. Fetch Shopify orders from all configured stores
     // For now, we'll fetch from the first store. A more robust solution would iterate
     // over all stores or have the UI specify which store to use.
-    const store = shopifyStores[0]
+    const store = stores[0]
     
     console.log("Shopify store data:", {
       id: store.id,
-      domain: store.shopifyDomain,
-      hasAccessToken: !!store.accessToken,
-      accessTokenLength: store.accessToken?.length,
+      domain: store.settings.domain,
+      hasAccessToken: !!store.settings.accessToken,
+      accessTokenLength: store.settings.accessToken?.length,
     })
     
-    // Construct the store object in the format expected by ShopifyApiService
-    const storeForApi = {
-      id: store.id,
-      tenantId: tenantId,
-      name: store.shopifyDomain,
-      type: "shopify" as const,
-      status: "active" as const,
-      settings: {
-        domain: store.shopifyDomain,
-        accessToken: store.accessToken,
-        timezone: "UTC",
-        currency: "USD",
-        businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [],
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-    
-    console.log("Constructed store for API:", {
-      domain: storeForApi.settings.domain,
-      hasAccessToken: !!storeForApi.settings.accessToken,
-    })
-    
-    const shopifyApi = new ShopifyApiService(storeForApi, store.accessToken)
+    // Use the store object directly since it's already in the correct format
+    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken)
     const shopifyOrders = await shopifyApi.getOrders()
 
     // 4. Filter Shopify orders by date tag
@@ -293,13 +387,30 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
   // Skip JWT verification for public endpoints
   const path = c.req.path
   const publicEndpoints = [
+    // Core public endpoints
     '/api/tenants/:tenantId/orders-by-date',
     '/api/tenants/:tenantId/analytics',
     '/api/tenants/:tenantId/analytics/florist-stats',
+    '/api/tenants/:tenantId/orders/realtime-status',
+    '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/test-shopify',
+    
+    // AI Florist public endpoints (for customer-facing AI)
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',
     '/api/tenants/:tenantId/ai/knowledge-base-analytics',
-    '/api/tenants/:tenantId/orders/realtime-status'
+    '/api/tenants/:tenantId/ai/flowers',
+    '/api/tenants/:tenantId/ai/styles',
+    '/api/tenants/:tenantId/ai/occasions',
+    '/api/tenants/:tenantId/ai/arrangement-types',
+    '/api/tenants/:tenantId/ai/budget-tiers',
+    '/api/tenants/:tenantId/ai/prompt-templates',
+    '/api/tenants/:tenantId/ai/model-configs',
+    
+    // Global AI endpoints (no tenant required)
+    '/api/ai/chat',
+    '/api/ai/generate-bouquet-image',
+    '/api/ai/create-bouquet-product'
   ]
   
   // Check if this is a public endpoint
@@ -321,6 +432,67 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
   } catch (error) {
     console.error("JWT middleware error:", error)
     return c.json({ error: "Invalid token" }, 401)
+  }
+})
+
+// Add tenant isolation middleware for protected routes
+app.use("/api/tenants/:tenantId/*", async (c, next) => {
+  // Skip tenant isolation for public endpoints (already handled above)
+  const path = c.req.path
+  const publicEndpoints = [
+    '/api/tenants/:tenantId/orders-by-date',
+    '/api/tenants/:tenantId/analytics',
+    '/api/tenants/:tenantId/analytics/florist-stats',
+    '/api/tenants/:tenantId/orders/realtime-status',
+    '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/test-shopify',
+    '/api/tenants/:tenantId/ai/saved-products',
+    '/api/tenants/:tenantId/ai/knowledge-base',
+    '/api/tenants/:tenantId/ai/knowledge-base-analytics',
+    '/api/tenants/:tenantId/ai/flowers',
+    '/api/tenants/:tenantId/ai/styles',
+    '/api/tenants/:tenantId/ai/occasions',
+    '/api/tenants/:tenantId/ai/arrangement-types',
+    '/api/tenants/:tenantId/ai/budget-tiers',
+    '/api/tenants/:tenantId/ai/prompt-templates',
+    '/api/tenants/:tenantId/ai/model-configs'
+  ]
+  
+  const isPublicEndpoint = publicEndpoints.some(endpoint => {
+    const pattern = endpoint.replace(':tenantId', '[^/]+')
+    const regex = new RegExp(`^${pattern}$`)
+    return regex.test(path)
+  })
+  
+  if (isPublicEndpoint) {
+    return next()
+  }
+  
+  // For protected routes, ensure tenant isolation
+  try {
+    const jwtPayload = c.get('jwtPayload')
+    const requestedTenantId = c.req.param('tenantId')
+    
+    if (!jwtPayload || !jwtPayload.tenantId) {
+      return c.json({ error: "Invalid token - missing tenant information" }, 401)
+    }
+    
+    // Ensure user can only access their own tenant's data
+    if (jwtPayload.tenantId !== requestedTenantId) {
+      console.error(`Tenant isolation violation: User ${jwtPayload.sub} (tenant ${jwtPayload.tenantId}) attempted to access tenant ${requestedTenantId}`)
+      return c.json({ error: "Access denied - tenant mismatch" }, 403)
+    }
+    
+    // Verify tenant still exists and is active
+    const tenant = await d1DatabaseService.getTenant(c.env, requestedTenantId)
+    if (!tenant || tenant.status !== 'active') {
+      return c.json({ error: "Tenant not found or inactive" }, 404)
+    }
+    
+    return next()
+  } catch (error) {
+    console.error("Tenant isolation middleware error:", error)
+    return c.json({ error: "Authentication failed" }, 401)
   }
 })
 
@@ -678,24 +850,8 @@ app.get("/api/tenants/:tenantId/stores", async (c) => {
   const tenantId = c.req.param("tenantId")
   
   try {
-    const stores = await d1DatabaseService.getShopifyStores(c.env, tenantId)
-    
-    // Adapt the data from shopify_stores to the generic Store type
-    const adaptedStores = stores.map((store: any) => ({
-      id: store.id,
-      tenantId: store.tenant_id,
-      name: store.shopifyDomain, // Use domain as name for now
-      type: 'shopify',
-      status: 'active', // Assuming active if it exists
-      settings: {
-        domain: store.shopifyDomain,
-        accessToken: store.accessToken,
-      },
-      createdAt: store.created_at,
-      updatedAt: store.updated_at,
-    }));
-
-    return c.json(adaptedStores)
+    const stores = await d1DatabaseService.getStores(c.env, tenantId)
+    return c.json(stores)
   } catch (error) {
     console.error("Error fetching stores:", error)
     return c.json({ error: "Failed to fetch stores" }, 500)
@@ -1277,17 +1433,355 @@ app.post("/api/init-db", async (c) => {
     ).run();
 
     await c.env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS saved_product_labels (
-        product_id TEXT NOT NULL,
-        label_id TEXT NOT NULL,
+      `CREATE TABLE IF NOT EXISTS product_label_mappings (
+        id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
-        PRIMARY KEY (product_id, label_id),
-        FOREIGN KEY (product_id) REFERENCES saved_products(id) ON DELETE CASCADE,
+        saved_product_id TEXT NOT NULL,
+        label_id TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (saved_product_id) REFERENCES saved_products(id) ON DELETE CASCADE,
         FOREIGN KEY (label_id) REFERENCES product_labels(id) ON DELETE CASCADE,
+        UNIQUE(saved_product_id, label_id)
+      )`
+    ).run();
+
+    // --- AI Tables ---
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_usage_analytics (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        model_type TEXT NOT NULL,
+        generation_count INTEGER DEFAULT 0,
+        total_tokens INTEGER DEFAULT 0,
+        total_cost REAL DEFAULT 0,
+        average_rating REAL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (tenant_id) REFERENCES tenants(id)
       )`
     ).run();
 
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_generated_designs (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        generated_image_url TEXT,
+        style_parameters TEXT,
+        model_version TEXT DEFAULT 'v1.0',
+        cost REAL DEFAULT 0,
+        status TEXT DEFAULT 'pending',
+        quality_rating REAL,
+        feedback TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        generation_metadata TEXT,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_styles (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        characteristics TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_occasions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        flower_preferences TEXT,
+        color_preferences TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_arrangement_types (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        complexity_level TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_budget_tiers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        min_price REAL,
+        max_price REAL,
+        description TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_flowers (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        variety TEXT,
+        color TEXT,
+        seasonality TEXT,
+        availability BOOLEAN DEFAULT true,
+        price_range TEXT,
+        description TEXT,
+        image_url TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_model_configs (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        model_type TEXT NOT NULL,
+        parameters TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_prompt_templates (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        template TEXT NOT NULL,
+        category TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_training_data (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        data_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        metadata TEXT,
+        source_type TEXT,
+        source_id TEXT,
+        quality_score REAL DEFAULT 1.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_training_sessions (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        session_name TEXT NOT NULL,
+        model_config_id TEXT,
+        training_data_ids TEXT,
+        status TEXT DEFAULT 'pending',
+        progress REAL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_style_templates (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        template_data TEXT NOT NULL,
+        category TEXT,
+        is_active BOOLEAN DEFAULT true,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_customer_data (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        customer_id TEXT,
+        preferences TEXT,
+        purchase_history TEXT,
+        feedback TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
+
+    // --- Photo Upload Tables ---
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS florist_photo_uploads (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        original_file_size INTEGER NOT NULL,
+        compressed_file_size INTEGER,
+        image_url TEXT NOT NULL,
+        thumbnail_url TEXT,
+        image_metadata TEXT,
+        upload_status TEXT DEFAULT 'pending',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (user_id) REFERENCES tenant_users(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS photo_descriptions (
+        id TEXT PRIMARY KEY,
+        photo_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        title TEXT,
+        description TEXT,
+        flowers_used TEXT,
+        colors TEXT,
+        style TEXT,
+        occasion TEXT,
+        arrangement_type TEXT,
+        difficulty_level TEXT,
+        special_techniques TEXT,
+        materials_used TEXT,
+        customer_preferences TEXT,
+        price_range TEXT,
+        season TEXT,
+        tags TEXT,
+        is_public BOOLEAN DEFAULT false,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (photo_id) REFERENCES florist_photo_uploads(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (user_id) REFERENCES tenant_users(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS photo_quality_assessment (
+        id TEXT PRIMARY KEY,
+        photo_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        assessed_by TEXT NOT NULL,
+        technical_quality INTEGER NOT NULL,
+        composition_quality INTEGER NOT NULL,
+        design_quality INTEGER NOT NULL,
+        training_value INTEGER NOT NULL,
+        overall_score REAL NOT NULL,
+        quality_notes TEXT,
+        improvement_suggestions TEXT,
+        is_approved_for_training BOOLEAN DEFAULT false,
+        assessment_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (photo_id) REFERENCES florist_photo_uploads(id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (assessed_by) REFERENCES tenant_users(id)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS photo_training_mapping (
+        id TEXT PRIMARY KEY,
+        photo_id TEXT NOT NULL,
+        training_data_id TEXT NOT NULL,
+        mapping_type TEXT DEFAULT 'example',
+        confidence_score REAL DEFAULT 1.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (photo_id) REFERENCES florist_photo_uploads(id) ON DELETE CASCADE,
+        FOREIGN KEY (training_data_id) REFERENCES ai_training_data(id) ON DELETE CASCADE
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS daily_upload_goals (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        target_count INTEGER DEFAULT 1,
+        actual_count INTEGER DEFAULT 0,
+        goal_status TEXT DEFAULT 'pending',
+        streak_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (user_id) REFERENCES tenant_users(id),
+        UNIQUE(tenant_id, user_id, date)
+      )`
+    ).run();
+
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS upload_statistics (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        upload_count INTEGER DEFAULT 0,
+        total_size INTEGER DEFAULT 0,
+        average_quality_score REAL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+        FOREIGN KEY (user_id) REFERENCES tenant_users(id)
+      )`
+    ).run();
+
+    // --- Camera Widget Templates ---
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS camera_widget_templates (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        template_data TEXT NOT NULL,
+        is_active BOOLEAN DEFAULT true,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+      )`
+    ).run();
 
     return c.json({ success: true, message: "Database initialized successfully" })
   } catch (error) {
@@ -1381,42 +1875,35 @@ app.get("/api/tenants/:tenantId/test-shopify", async (c) => {
   const tenantId = c.req.param("tenantId")
   
   try {
-    const shopifyStores = await d1DatabaseService.getShopifyStores(c.env, tenantId)
+    const stores = await d1DatabaseService.getStores(c.env, tenantId)
     
-    if (!shopifyStores || shopifyStores.length === 0) {
+    if (!stores || stores.length === 0) {
       return c.json({ error: "No Shopify stores configured for this tenant" }, 404)
     }
     
-    const store = shopifyStores[0]
+    const store = stores[0]
     
     // Test the store configuration
     const storeForApi = {
       id: store.id,
       tenantId: tenantId,
-      name: store.shopifyDomain,
+      name: store.name,
       type: "shopify" as const,
       status: "active" as const,
-      settings: {
-        domain: store.shopifyDomain,
-        accessToken: store.accessToken,
-        timezone: "UTC",
-        currency: "USD",
-        businessHours: { start: "09:00", end: "17:00" },
-        webhooks: [],
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      settings: store.settings,
+      createdAt: store.createdAt,
+      updatedAt: store.updatedAt,
     }
     
-    const shopifyApi = new ShopifyApiService(storeForApi, store.accessToken)
+    const shopifyApi = new ShopifyApiService(storeForApi, store.settings.accessToken)
     
     // Test a simple API call to verify credentials
-    const testUrl = `https://${store.shopifyDomain}/admin/api/2023-10/shop.json`
+    const testUrl = `https://${store.settings.domain}/admin/api/2023-10/shop.json`
     const response = await fetch(testUrl, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": store.accessToken,
+        "X-Shopify-Access-Token": store.settings.accessToken,
       },
     })
     
@@ -1428,9 +1915,9 @@ app.get("/api/tenants/:tenantId/test-shopify", async (c) => {
         statusText: response.statusText,
         details: errorText,
         storeConfig: {
-          domain: store.shopifyDomain,
-          hasAccessToken: !!store.accessToken,
-          accessTokenLength: store.accessToken?.length,
+          domain: store.settings.domain,
+          hasAccessToken: !!store.settings.accessToken,
+          accessTokenLength: store.settings.accessToken?.length,
         }
       }, 400)
     }
@@ -1440,9 +1927,9 @@ app.get("/api/tenants/:tenantId/test-shopify", async (c) => {
     return c.json({
       success: true,
       storeConfig: {
-        domain: store.shopifyDomain,
-        hasAccessToken: !!store.accessToken,
-        accessTokenLength: store.accessToken?.length,
+        domain: store.settings.domain,
+        hasAccessToken: !!store.settings.accessToken,
+        accessTokenLength: store.settings.accessToken?.length,
       },
       shopInfo: {
         name: shopData.shop?.name,
@@ -2008,6 +2495,33 @@ app.post("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
   const designData = await c.req.json();
   const newDesign = await d1DatabaseService.saveAIGeneratedDesign(c.env, tenantId, designData);
   return c.json(newDesign, 201);
+});
+
+app.put("/api/tenants/:tenantId/ai/generated-designs/:designId", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const designId = c.req.param("designId");
+  const updateData = await c.req.json();
+  
+  try {
+    // Update the design with rating and feedback
+    await c.env.DB.prepare(`
+      UPDATE ai_generated_designs 
+      SET quality_rating = ?, feedback = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND tenant_id = ?
+    `).bind(
+      updateData.quality_rating || updateData.rating,
+      updateData.feedback,
+      designId,
+      tenantId
+    ).run();
+    
+    // Get the updated design
+    const updatedDesign = await d1DatabaseService.getAIGeneratedDesign(c.env, tenantId, designId);
+    return c.json(updatedDesign);
+  } catch (error) {
+    console.error("Error updating AI generated design:", error);
+    return c.json({ error: "Failed to update design" }, 500);
+  }
 });
 
 // --- AI Style Templates Endpoints ---
@@ -2706,186 +3220,226 @@ app.get("/api/tenants/:tenantId/saved-products", async (c) => {
   }
 })
 
-// --- Missing endpoints that frontend expects ---
-app.get("/api/tenants/:tenantId/order-card-config", async (c) => {
+app.post("/api/tenants/:tenantId/saved-products", async (c) => {
   const tenantId = c.req.param("tenantId")
+  const { products } = await c.req.json()
+  
+  if (!products || !Array.isArray(products)) {
+    return c.json({ error: "Products array is required" }, 400)
+  }
+
   try {
-    const config = await d1DatabaseService.getOrderCardConfig(c.env, tenantId)
-    return c.json({ config: config || [] })
+    const savedProducts = await d1DatabaseService.saveProducts(c.env, tenantId, products)
+    return c.json(savedProducts, 201)
   } catch (error) {
-    console.error("Error fetching order card config:", error)
-    return c.json({ error: "Failed to fetch order card config" }, 500)
+    console.error("Error saving products:", error)
+    return c.json({ error: "Failed to save products" }, 500)
   }
 })
 
-app.post("/api/tenants/:tenantId/order-card-config", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const configData = await c.req.json()
+// --- AI Florist - Get Knowledge Base (PUBLIC) ---
+app.get('/api/tenants/:tenantId/ai/knowledge-base', async (c) => {
   try {
-    await d1DatabaseService.saveOrderCardConfig(c.env, tenantId, configData)
-    return c.json({ success: true, message: "Configuration saved successfully" })
-  } catch (error) {
-    console.error("Error saving order card config:", error)
-    return c.json({ error: "Failed to save order card config" }, 500)
-  }
-})
+    const { tenantId } = c.req.param();
+    const db = c.env.DB;
 
-// --- Missing AI endpoints ---
-app.get("/api/tenants/:tenantId/ai/flowers", async (c) => {
-  const tenantId = c.req.param("tenantId")
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required.' }, 400);
+    }
+
+    // Fetch all knowledge base data in parallel
+    const [
+      products,
+      styles,
+      occasions,
+      arrangementTypes,
+      budgetTiers,
+      flowers,
+      modelConfigs,
+      promptTemplates
+    ] = await Promise.all([
+      db.prepare(`SELECT id, title, variant_title, description, price, tags, product_type FROM saved_products WHERE tenant_id = ? AND status = 'active' LIMIT 200`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_styles WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_occasions WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_arrangement_types WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_budget_tiers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_flowers WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_model_configs WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+      db.prepare(`SELECT * FROM ai_prompt_templates WHERE tenant_id = ? AND is_active = true`).bind(tenantId).all(),
+    ]);
+
+    const knowledgeBase = {
+      products: products?.results || [],
+      styles: styles?.results || [],
+      occasions: occasions?.results || [],
+      arrangementTypes: arrangementTypes?.results || [],
+      budgetTiers: budgetTiers?.results || [],
+      flowers: flowers?.results || [],
+      aiConfig: modelConfigs?.results || [],
+      promptTemplates: promptTemplates?.results || [],
+    };
+
+    return c.json(knowledgeBase);
+
+  } catch (error) {
+    console.error('Error fetching knowledge base:', error);
+    return c.json({ error: 'Failed to fetch knowledge base.' }, 500);
+  }
+});
+
+// --- AI Florist - Chat Endpoint (PUBLIC) ---
+app.post('/api/ai/chat', async (c) => {
   try {
-    const flowers = await d1DatabaseService.getFlowers(c.env, tenantId)
-    return c.json(flowers)
+    const { messages, knowledgeBase, tenantId } = await c.req.json();
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return c.json({ error: 'Invalid chat history provided.' }, 400);
+    }
+    if (!knowledgeBase) {
+      return c.json({ error: 'Knowledge base is required for context.' }, 400);
+    }
+    if (!tenantId) {
+      return c.json({ error: 'Tenant ID is required to use the AI service.' }, 400);
+    }
+
+    // --- Fetch Tenant-Specific OpenAI API Key ---
+    const tenantSettingsRaw = await c.env.DB.prepare("SELECT settings FROM tenants WHERE id = ?").bind(tenantId).first<{ settings: string }>();
+    if (!tenantSettingsRaw?.settings) {
+        return c.json({ error: 'Could not find settings for this tenant.' }, 404);
+    }
+
+    const tenantSettings = JSON.parse(tenantSettingsRaw.settings);
+    const openaiApiKey = tenantSettings.openaiApiKey;
+
+    if (!openaiApiKey) {
+      return c.json({ error: 'OpenAI API key not configured for this tenant.' }, 503);
+    }
+
+    // Get the last user message
+    const lastUserMessage = messages.filter(msg => msg.sender === 'user').pop();
+    if (!lastUserMessage) {
+      return c.json({ error: 'No user message found in conversation.' }, 400);
+    }
+
+    // Create a system prompt with knowledge base context
+    const systemPrompt = createSystemPrompt(knowledgeBase);
+
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'assistant',
+            content: msg.text
+          }))
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('OpenAI API Error:', error);
+      throw new Error(`OpenAI API error: ${error.error?.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    const aiResponse = data.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response right now.";
+
+    // Record the AI usage
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO ai_usage_analytics (
+          id, tenant_id, date, model_type, generation_count, total_tokens, total_cost, average_rating, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(
+        `usage_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        tenantId,
+        new Date().toISOString().split('T')[0],
+        'gpt-4',
+        1,
+        data.usage?.total_tokens || 0,
+        (data.usage?.total_tokens || 0) * 0.00003, // Approximate cost per token
+        0 // No rating for chat
+      ).run();
+    } catch (error) {
+      console.error('Failed to log AI usage:', error);
+    }
+
+    return c.json({
+      response: aiResponse,
+      usage: data.usage,
+      model: 'gpt-4'
+    });
+
   } catch (error) {
-    console.error("Error fetching flowers:", error)
-    return c.json({ error: "Failed to fetch flowers" }, 500)
+    console.error('Error in AI chat:', error);
+    
+    // Return fallback response
+    return c.json({
+      response: "I'm having trouble connecting right now. Please try again in a moment, or check your OpenAI API configuration.",
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, 200);
   }
-})
+});
 
-app.get("/api/tenants/:tenantId/ai/prompt-templates", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const templates = await d1DatabaseService.getPromptTemplates(c.env, tenantId)
-    return c.json(templates)
-  } catch (error) {
-    console.error("Error fetching prompt templates:", error)
-    return c.json({ error: "Failed to fetch prompt templates" }, 500)
+// Helper function to create system prompt with knowledge base context
+function createSystemPrompt(knowledgeBase: any): string {
+  let prompt = `You are an expert AI Florist assistant. You help customers design beautiful flower arrangements and bouquets. 
+
+You have access to the following knowledge base:
+
+`;
+
+  // Add products context
+  if (knowledgeBase.products && knowledgeBase.products.length > 0) {
+    prompt += `\nAvailable Products (${knowledgeBase.products.length} items):\n`;
+    knowledgeBase.products.slice(0, 10).forEach((product: any) => {
+      prompt += `- ${product.title}${product.variant_title ? ` (${product.variant_title})` : ''}: $${product.price}\n`;
+    });
+    if (knowledgeBase.products.length > 10) {
+      prompt += `... and ${knowledgeBase.products.length - 10} more products\n`;
+    }
   }
-})
 
-app.get("/api/tenants/:tenantId/ai/model-configs", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const configs = await d1DatabaseService.getModelConfigs(c.env, tenantId)
-    return c.json(configs)
-  } catch (error) {
-    console.error("Error fetching model configs:", error)
-    return c.json({ error: "Failed to fetch model configs" }, 500)
+  // Add styles context
+  if (knowledgeBase.styles && knowledgeBase.styles.length > 0) {
+    prompt += `\nAvailable Styles: ${knowledgeBase.styles.map((style: any) => style.name).join(', ')}\n`;
   }
-})
 
-app.get("/api/tenants/:tenantId/ai/training-data", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const data = await d1DatabaseService.getAITrainingData(c.env, tenantId)
-    return c.json(data)
-  } catch (error) {
-    console.error("Error fetching training data:", error)
-    return c.json({ error: "Failed to fetch training data" }, 500)
+  // Add occasions context
+  if (knowledgeBase.occasions && knowledgeBase.occasions.length > 0) {
+    prompt += `\nAvailable Occasions: ${knowledgeBase.occasions.map((occasion: any) => occasion.name).join(', ')}\n`;
   }
-})
 
-app.get("/api/tenants/:tenantId/ai/training-data/stats", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const stats = await d1DatabaseService.getAITrainingDataStats(c.env, tenantId)
-    return c.json(stats)
-  } catch (error) {
-    console.error("Error fetching training data stats:", error)
-    return c.json({ error: "Failed to fetch training data stats" }, 500)
+  // Add flowers context
+  if (knowledgeBase.flowers && knowledgeBase.flowers.length > 0) {
+    prompt += `\nAvailable Flowers: ${knowledgeBase.flowers.map((flower: any) => flower.name).join(', ')}\n`;
   }
-})
 
-app.get("/api/tenants/:tenantId/ai/training-sessions", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const sessions = await d1DatabaseService.getAITrainingSessions(c.env, tenantId)
-    return c.json(sessions)
-  } catch (error) {
-    console.error("Error fetching training sessions:", error)
-    return c.json({ error: "Failed to fetch training sessions" }, 500)
-  }
-})
+  prompt += `
 
-app.get("/api/tenants/:tenantId/ai/generated-designs", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const designs = await d1DatabaseService.getAIGeneratedDesigns(c.env, tenantId)
-    return c.json(designs)
-  } catch (error) {
-    console.error("Error fetching generated designs:", error)
-    return c.json({ error: "Failed to fetch generated designs" }, 500)
-  }
-})
+Guidelines:
+- Be friendly, professional, and knowledgeable about flowers
+- Ask clarifying questions to understand the customer's needs
+- Suggest specific flowers and arrangements based on their preferences
+- Consider budget, occasion, style, and color preferences
+- Provide helpful advice about flower care and arrangement tips
+- Keep responses conversational and engaging
+- If you don't have specific information, use your general flower knowledge
 
-app.get("/api/tenants/:tenantId/ai/style-templates", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const templates = await d1DatabaseService.getAIStyleTemplates(c.env, tenantId)
-    return c.json(templates)
-  } catch (error) {
-    console.error("Error fetching style templates:", error)
-    return c.json({ error: "Failed to fetch style templates" }, 500)
-  }
-})
+Remember: You're helping customers create beautiful, personalized flower arrangements!`;
 
-app.get("/api/tenants/:tenantId/ai/usage-analytics", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const analytics = await d1DatabaseService.getAIUsageAnalytics(c.env, tenantId)
-    return c.json(analytics)
-  } catch (error) {
-    console.error("Error fetching usage analytics:", error)
-    return c.json({ error: "Failed to fetch usage analytics" }, 500)
-  }
-})
-
-app.get("/api/tenants/:tenantId/ai/styles", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const styles = await d1DatabaseService.getAIStyles(c.env, tenantId)
-    return c.json(styles)
-  } catch (error) {
-    console.error("Error fetching AI styles:", error)
-    return c.json({ error: "Failed to fetch AI styles" }, 500)
-  }
-})
-
-app.get("/api/tenants/:tenantId/ai/arrangement-types", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const types = await d1DatabaseService.getAIArrangementTypes(c.env, tenantId)
-    return c.json(types)
-  } catch (error) {
-    console.error("Error fetching arrangement types:", error)
-    return c.json({ error: "Failed to fetch arrangement types" }, 500)
-  }
-})
-
-app.get("/api/tenants/:tenantId/ai/occasions", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const occasions = await d1DatabaseService.getAIOccasions(c.env, tenantId)
-    return c.json(occasions)
-  } catch (error) {
-    console.error("Error fetching occasions:", error)
-    return c.json({ error: "Failed to fetch occasions" }, 500)
-  }
-})
-
-app.get("/api/tenants/:tenantId/ai/budget-tiers", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const tiers = await d1DatabaseService.getAIBudgetTiers(c.env, tenantId)
-    return c.json(tiers)
-  } catch (error) {
-    console.error("Error fetching budget tiers:", error)
-    return c.json({ error: "Failed to fetch budget tiers" }, 500)
-  }
-})
-
-app.get("/api/tenants/:tenantId/ai/customer-data", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  try {
-    const data = await d1DatabaseService.getAICustomerData(c.env, tenantId)
-    return c.json(data)
-  } catch (error) {
-    console.error("Error fetching customer data:", error)
-    return c.json({ error: "Failed to fetch customer data" }, 500)
-  }
-})
-
-
+  return prompt;
+}
 
 // SPA routing - handle all non-API routes
 app.get('*', async (c) => {

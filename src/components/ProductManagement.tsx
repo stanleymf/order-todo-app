@@ -27,6 +27,7 @@ import {
   Download,
   Save,
   Eye,
+  Edit,
 } from "lucide-react"
 import { useMobileView } from "./Dashboard"
 import { useAuth } from "../contexts/AuthContext"
@@ -42,6 +43,7 @@ import {
   saveProducts,
   deleteSavedProduct,
   addProductLabel,
+  updateProductLabel,
 } from "../services/api"
 import type { ProductLabel, Store, Product, SavedProduct } from "../types"
 import { toast } from "sonner"
@@ -106,6 +108,14 @@ export function ProductManagement() {
   const [savedProductsPerPage] = useState(100)
 
   const [nextPageInfo, setNextPageInfo] = useState<string | undefined>(undefined)
+
+  // Edit label state
+  const [isEditingLabel, setIsEditingLabel] = useState(false)
+  const [editingLabel, setEditingLabel] = useState<ProductLabel | null>(null)
+  const [editLabelName, setEditLabelName] = useState("")
+  const [editLabelColor, setEditLabelColor] = useState("#3b82f6")
+  const [editLabelCategory, setEditLabelCategory] = useState<"difficulty" | "productType" | "custom">("difficulty")
+  const [editLabelPriority, setEditLabelPriority] = useState(1)
 
   // Guard: Don't render until auth and tenant context is ready
   if (authLoading) {
@@ -250,6 +260,10 @@ export function ProductManagement() {
   const handleDeleteLabel = async (labelId: string) => {
     if (!tenant?.id) return
 
+    if (!confirm("Are you sure you want to delete this label? This action cannot be undone.")) {
+      return
+    }
+
     try {
       await deleteProductLabel(tenant.id, labelId)
       loadData() // Reload data
@@ -257,6 +271,51 @@ export function ProductManagement() {
       console.error("Error deleting label:", err)
       setError("Failed to delete label. Please try again.")
     }
+  }
+
+  const handleEditLabel = (label: ProductLabel) => {
+    setEditingLabel(label)
+    setEditLabelName(label.name)
+    setEditLabelColor(label.color)
+    setEditLabelCategory(label.category)
+    setEditLabelPriority(label.priority)
+    setIsEditingLabel(true)
+  }
+
+  const handleSaveEditLabel = async () => {
+    if (!tenant?.id || !editingLabel || !editLabelName.trim()) return
+
+    try {
+      await updateProductLabel(tenant.id, editingLabel.id, {
+        name: editLabelName.trim(),
+        color: editLabelColor,
+        category: editLabelCategory,
+        priority: editLabelPriority,
+      })
+
+      // Reset edit state
+      setIsEditingLabel(false)
+      setEditingLabel(null)
+      setEditLabelName("")
+      setEditLabelColor("#3b82f6")
+      setEditLabelCategory("difficulty")
+      setEditLabelPriority(1)
+      
+      loadData() // Reload data
+      toast.success("Label updated successfully!")
+    } catch (err) {
+      console.error("Error updating label:", err)
+      toast.error("Failed to update label. Please try again.")
+    }
+  }
+
+  const handleCancelEditLabel = () => {
+    setIsEditingLabel(false)
+    setEditingLabel(null)
+    setEditLabelName("")
+    setEditLabelColor("#3b82f6")
+    setEditLabelCategory("difficulty")
+    setEditLabelPriority(1)
   }
 
   const handleUpdateProductDifficultyLabel = async (productId: string, newLabel: string) => {
@@ -748,6 +807,90 @@ export function ProductManagement() {
             </div>
           </div>
         </CardHeader>
+
+        {/* Edit Label Modal */}
+        <Dialog open={isEditingLabel} onOpenChange={setIsEditingLabel}>
+          <DialogContent className={isMobileView ? "w-[95vw] max-w-[95vw]" : ""}>
+            <DialogHeader>
+              <DialogTitle className={`flex items-center gap-2 ${isMobileView ? "text-lg" : ""}`}>
+                <Edit className={`${isMobileView ? "h-4 w-4" : "h-5 w-5"}`} />
+                Edit Label
+              </DialogTitle>
+              <DialogDescription className={isMobileView ? "text-sm" : ""}>
+                Update the label properties below.
+              </DialogDescription>
+            </DialogHeader>
+            <div className={`space-y-4 ${isMobileView ? "space-y-3" : ""}`}>
+              <div>
+                <Label htmlFor="editLabelName" className={isMobileView ? "text-sm" : ""}>Label Name</Label>
+                <Input
+                  id="editLabelName"
+                  value={editLabelName}
+                  onChange={(e) => setEditLabelName(e.target.value)}
+                  placeholder="Enter label name"
+                  className={isMobileView ? "h-9 text-sm" : ""}
+                />
+              </div>
+              <div>
+                <Label htmlFor="editLabelCategory" className={isMobileView ? "text-sm" : ""}>Category</Label>
+                <Select
+                  value={editLabelCategory}
+                  onValueChange={(value: "difficulty" | "productType" | "custom") =>
+                    setEditLabelCategory(value)
+                  }
+                >
+                  <SelectTrigger className={isMobileView ? "h-9 text-sm" : ""}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="difficulty">Difficulty</SelectItem>
+                    <SelectItem value="productType">Product Type</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="editLabelColor" className={isMobileView ? "text-sm" : ""}>Color</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="editLabelColor"
+                    type="color"
+                    value={editLabelColor}
+                    onChange={(e) => setEditLabelColor(e.target.value)}
+                    className={`rounded border ${isMobileView ? "w-10 h-8" : "w-12 h-10"}`}
+                  />
+                  <Input
+                    value={editLabelColor}
+                    onChange={(e) => setEditLabelColor(e.target.value)}
+                    placeholder="#3b82f6"
+                    className={isMobileView ? "h-9 text-sm" : ""}
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="editLabelPriority" className={isMobileView ? "text-sm" : ""}>
+                  Priority (lower numbers = higher priority)
+                </Label>
+                <Input
+                  id="editLabelPriority"
+                  type="number"
+                  min="1"
+                  value={editLabelPriority}
+                  onChange={(e) => setEditLabelPriority(parseInt(e.target.value) || 1)}
+                  placeholder="1"
+                  className={isMobileView ? "h-9 text-sm" : ""}
+                />
+              </div>
+              <div className={`flex justify-end gap-2 ${isMobileView ? "pt-2" : ""}`}>
+                <Button variant="outline" onClick={handleCancelEditLabel} className={isMobileView ? "text-sm" : ""}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveEditLabel} className={isMobileView ? "text-sm" : ""}>Save Changes</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         <CardContent className={`${isMobileView ? "pt-2" : ""}`}>
           <div className={`${isMobileView ? "space-y-3" : "space-y-4"}`}>
             {/* Difficulty Labels */}
@@ -768,6 +911,16 @@ export function ProductManagement() {
                       >
                         {label.name} ({label.priority})
                       </Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleEditLabel(label)}
+                        className={`p-0 hover:bg-blue-100 ${isMobileView ? "h-5 w-5" : "h-6 w-6"}`}
+                      >
+                        <Edit
+                          className={`text-blue-500 ${isMobileView ? "h-2 w-2" : "h-3 w-3"}`}
+                        />
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -801,6 +954,16 @@ export function ProductManagement() {
                       >
                         {label.name} ({label.priority})
                       </Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleEditLabel(label)}
+                        className={`p-0 hover:bg-blue-100 ${isMobileView ? "h-5 w-5" : "h-6 w-6"}`}
+                      >
+                        <Edit
+                          className={`text-blue-500 ${isMobileView ? "h-2 w-2" : "h-3 w-3"}`}
+                        />
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"

@@ -256,9 +256,23 @@ export class ShopifyApiService {
   }
 
   // Fetch all orders from Shopify
-  async getOrders(): Promise<any[]> {
+  async getOrders(filters?: { name?: string; status?: string }): Promise<any[]> {
     try {
-      const url = `${this.getBaseUrl()}/orders.json?status=any`
+      const params = new URLSearchParams()
+      
+      // Add status filter if provided
+      if (filters?.status) {
+        params.append("status", filters.status)
+      } else {
+        params.append("status", "any") // Default to all orders
+      }
+      
+      // Add name filter if provided (for order lookup)
+      if (filters?.name) {
+        params.append("name", filters.name)
+      }
+      
+      const url = `${this.getBaseUrl()}/orders.json?${params.toString()}`
       const response = await fetch(url, {
         method: "GET",
         headers: this.getHeaders(),

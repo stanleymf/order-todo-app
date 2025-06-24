@@ -97,6 +97,7 @@ export interface Store {
   type: "shopify" | "manual" | "other"
   status: "active" | "inactive"
   settings: StoreSettings
+  lastSyncAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -113,6 +114,8 @@ export interface StoreSettings {
   phone?: string
   email?: string
   webhooks?: WebhookConfig[]
+  accessToken?: string
+  apiSecretKey?: string
 }
 
 export interface WebhookConfig {

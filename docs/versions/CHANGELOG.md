@@ -2,6 +2,241 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.3] - 2025-01-13
+
+### 🔄 **Saved Products Sync System**
+
+- **New Sync Script**: Created comprehensive sync system to sync saved products from local SQLite database to D1 database.
+- **Upsert Operations**: Implemented safe "upsert" (insert or update) operations that preserve existing data and only add/update products as needed.
+- **Missing POST Endpoint**: Added the missing `/api/tenants/:tenantId/saved-products` POST endpoint to the worker that was preventing product saving functionality.
+- **Sync Script Features**:
+  - Generates SQL scripts for safe database operations
+  - Supports tenant-specific syncing with `--tenant-id` parameter
+  - Dry-run mode for testing without making changes
+  - Batch processing for large datasets
+  - Comprehensive logging and progress tracking
+- **Script Usage**: Added `npm run sync-saved-products` command for easy execution.
+- **Data Preservation**: Sync operations use `INSERT OR REPLACE` to ensure no data loss unless explicitly requested.
+
+### 🔧 **Technical Implementation**
+
+- **Worker Endpoint**: Added POST endpoint for saving products that was missing from the worker implementation.
+- **Database Service**: Leverages existing `d1DatabaseService.saveProducts()` method for consistent data handling.
+- **Script Architecture**: Created modular sync system with:
+  - `SavedProductsSync` class for core sync logic
+  - SQL script generation for safe execution
+  - Command-line argument parsing
+  - Comprehensive error handling and logging
+
+### 🎯 **Impact**
+
+- **Product Management**: Users can now successfully save products from Shopify to their local database.
+- **Data Synchronization**: Provides safe way to sync local product data to production D1 database.
+- **Development Workflow**: Enables local development with SQLite and production deployment with D1.
+- **Data Integrity**: Ensures no existing product data is lost during sync operations.
+
+## [1.4.2] - 2025-01-13
+
+### 🔧 **Critical Webhook Display Fix**
+
+- **Fixed Webhook Count Display Issue**: Resolved critical issue where webhook registration was working but the UI showed "0 webhooks" after registration.
+- **Root Cause Identified**: The problem was caused by inconsistent database function usage across API endpoints:
+  - Webhook registration used `getStore()` → returned correct data with webhooks ✅
+  - Frontend refresh used `/api/tenants/:tenantId/stores` → called `getShopifyStores()` → returned incomplete data ❌
+- **Database Function Consistency**: Updated all store-related endpoints to use `getStores()` instead of `getShopifyStores()`:
+  - `/api/tenants/:tenantId/stores` - Now returns complete store objects with parsed settings
+  - `/api/tenants/:tenantId/test-shopify` - Updated for consistency
+  - `/api/tenants/:tenantId/orders-by-date` - Updated for proper store data structure
+- **Settings Parsing**: The `getStores()` function properly parses the JSON `settings` column from the database, including the `webhooks` array.
+- **Data Structure Consistency**: All endpoints now return consistent store objects with:
+  - Properly parsed settings including webhooks
+  - Complete store configuration data
+  - Consistent field naming and structure
+
+### 🔧 **Technical Details**
+
+- **Function Difference**: 
+  - `getShopifyStores()` - Returns raw database fields, no settings parsing, no webhooks
+  - `getStores()` - Returns complete Store objects with parsed settings including webhooks
+- **Database Schema**: The `shopify_stores` table stores webhook configurations in the JSON `settings` column
+- **API Response**: Store objects now include `settings.webhooks` array with registration status and timestamps
+
+### 🎯 **Impact**
+
+- **Webhook Status Display**: UI now correctly shows the number of registered webhooks
+- **Store Management**: All store-related functionality now uses consistent data structures
+- **API Reliability**: Eliminated data inconsistency between different store endpoints
+- **User Experience**: Users can now see accurate webhook registration status after setup
+
+## [1.4.1] - 2025-01-13
+
+### 🔧 **Critical Runtime Error Fixes**
+
+- **Fixed 500 Internal Server Errors**: Resolved critical runtime errors that were causing all application routes to return 500 Internal Server Errors.
+- **Removed Problematic Code**: Cleaned up worker code by removing:
+  - Development environment checks using `process.env` (not available in Cloudflare Workers)
+  - Unimplemented database service methods (`resetDailyUploadGoals`, `syncProductFromWebhook`, etc.)
+  - Missing type definitions (`ExportedHandler`, `DurableObjectState`, `WebSocketPair`)
+  - Unused webhook handling functions and Durable Object classes
+- **Simplified Static Asset Serving**: Streamlined static asset serving to use only the Cloudflare Workers `ASSETS` binding.
+- **Error Handling**: Improved error handling to prevent unhandled exceptions from crashing the worker.
+
+### 🔧 **Critical Static Asset Serving Fix**
+
+- **Fixed 404 Errors for All Routes**: Resolved critical issue where all application routes were returning 404 errors due to incorrect static asset serving configuration.
+- **Cloudflare Workers Asset Binding**: Fixed static asset serving to properly use the `ASSETS` binding instead of incorrect `serveStatic` configuration.
+- **SPA Routing Support**: Implemented proper SPA routing that serves `index.html` for client-side routes while allowing API routes to pass through.
+- **Asset Fallback Logic**: Added fallback logic to serve `index.html` when static assets are not found, enabling proper client-side routing.
+
+### 🔧 **Shopify Order Fetching Fix**
+
+- **Fixed "Fetch Orders from Shopify" Functionality**: Resolved critical issue in Settings > Order Card where the "Fetch Orders from Shopify" feature was not working due to API parameter mismatch.
+- **ShopifyApiService Update**: Updated `getOrders()` method in `ShopifyApiService` to accept optional filtering parameters (`name` and `status`) to support order lookup functionality.
+- **API Parameter Support**: The `getOrders()` method now properly handles:
+  - Order name filtering for specific order lookup
+  - Status filtering (any, open, closed, cancelled)
+  - Backward compatibility with existing calls
+- **Worker Endpoint Fix**: Fixed the `/api/tenants/:tenantId/stores/:storeId/orders/by_name` endpoint to properly use the updated `getOrders()` method.
+- **Import Statement Fix**: Corrected import statement for `d1DatabaseService` to use the proper export name.
+
+### 🚀 **Deployment Information**
+
+- **Build Status**: ✅ Successful build with 2138 modules transformed
+- **Bundle Size**: 781.96 kB (222.37 kB gzipped)
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **Version ID**: f7767ffa-08e3-48b9-a980-dd72c5f6704b
+- **All Bindings**: Properly configured (DB, ASSETS, JWT_SECRET, NODE_ENV, OPENAI_API_KEY)
+
+### 🔧 **Technical Details**
+
+- **Worker Startup Time**: 15ms
+- **Asset Upload**: 333.78 KiB / gzip: 65.54 KiB
+- **Environment**: Production
+- **Database**: D1 Database (order-todo-db) properly connected
+
+### 🐛 **Bug Fixes**
+
+- **Import Error Resolution**: Fixed import error in `worker/index.ts` where `D1DatabaseService` was incorrectly imported as a class instead of the exported `d1DatabaseService` object.
+- **Linter Error Cleanup**: Resolved TypeScript compilation errors that were preventing successful builds.
+
+### 🎯 **Impact**
+
+- **Application Accessibility**: All application routes are now accessible and functional
+- **SPA Functionality**: Client-side routing now works correctly for all pages
+- **Order Card Testing**: Users can now successfully test their order card configurations with real Shopify order data
+- **Field Mapping Validation**: The live preview now properly displays how configured field mappings and transformations work with actual order data
+- **Store Integration**: Complete end-to-end testing of Shopify store integration is now functional
+
+## [0.2.4] - 2025-06-23
+
+### 🗄️ **Critical Database Fix**
+
+- **Missing `shopify_stores` Table**: Fixed a critical issue where the `shopify_stores` table was missing from the database, causing all store management functionality to fail.
+- **Database Migration**: Created and applied migration `0009_create_shopify_stores_table.sql` to create the missing table with proper schema:
+  - `id` - Primary key
+  - `tenant_id` - Foreign key to tenants table
+  - `shopify_domain` - Store domain (e.g., my-store.myshopify.com)
+  - `access_token` - Shopify API access token
+  - `webhook_secret` - Webhook verification secret
+  - `sync_enabled` - Boolean flag for sync status
+  - `settings` - JSON field for webhook configurations and other settings
+  - `created_at`, `updated_at`, `last_sync_at` - Timestamps
+- **Performance Indexes**: Added proper indexes for efficient querying:
+  - Index on `tenant_id` for tenant-specific queries
+  - Index on `shopify_domain` for domain lookups
+  - Index on `sync_enabled` for filtering active stores
+  - Unique constraint on `(tenant_id, shopify_domain)` to prevent duplicates
+- **Foreign Key Constraints**: Added proper foreign key relationship to `tenants` table with CASCADE delete
+
+### 🔧 **Impact**
+
+- **Store Management**: Users can now successfully add, edit, and manage Shopify stores
+- **Webhook Registration**: Store webhook registration now works properly
+- **API Testing**: "Test Connection" functionality is now operational
+- **Multi-tenant Support**: Proper tenant isolation for store configurations
+
+### 🐛 **Root Cause**
+
+- The `shopify_stores` table was referenced in multiple migrations (0012, etc.) but never actually created
+- Backend code expected the table to exist, causing 401 errors and failed store operations
+- This was a critical infrastructure issue that prevented core functionality
+
+## [0.2.3] - 2025-06-23
+
+### 🔧 **Webhook System Overhaul**
+
+- **Comprehensive Webhook Handler**: Completely rewrote the webhook system with a unified endpoint at `/api/webhooks/shopify` that handles all Shopify webhook topics:
+  - `orders/create` - Creates new orders automatically
+  - `orders/updated` - Updates existing orders
+  - `orders/fulfilled` - Marks orders as completed
+  - `orders/cancelled` - Marks orders as cancelled
+  - `products/create` & `products/update` - Handles product changes
+  - `products/delete` - Removes products from saved list
+  - `inventory_levels/update` - Tracks inventory changes
+  - `app/uninstalled` - Handles app uninstallation
+
+- **Enhanced Webhook Registration**: Improved webhook registration process with:
+  - Automatic cleanup of existing webhooks before registration
+  - Comprehensive error handling and status tracking
+  - Support for 9 different webhook topics
+  - Webhook status monitoring with last trigger timestamps
+
+- **Webhook Status Monitoring**: Added webhook status section to Settings > General page showing:
+  - Real-time webhook status (active/error/inactive)
+  - Last trigger timestamps for each webhook
+  - Visual status indicators (green/red/gray dots)
+  - One-click webhook registration and connection testing
+
+### 🔐 **Authentication Fixes**
+
+- **JWT Middleware Improvements**: Fixed persistent JWT authentication errors by:
+  - Adding realtime status endpoint to public endpoints list
+  - Improved error handling in JWT middleware
+  - Better logging for authentication issues
+
+### 🏪 **Store Management Enhancements**
+
+- **Store Connection Testing**: Added "Test Connection" button to verify Shopify API credentials
+- **Enhanced Store Settings**: Improved store configuration with better validation and error handling
+- **Webhook Status Tracking**: Store settings now include webhook registration timestamps and status
+
+### 🗄️ **Database Improvements**
+
+- **New Database Method**: Added `getAllStores()` method to support webhook processing across all tenants
+- **Enhanced Store Data**: Store objects now include comprehensive webhook information and status tracking
+
+### 📊 **API Improvements**
+
+- **Unified Webhook Endpoint**: Single endpoint handles all webhook types with proper routing
+- **Better Error Handling**: Comprehensive error handling and logging for all webhook operations
+- **Status Tracking**: Webhook status is automatically updated when webhooks are triggered
+
+## [0.2.2] - 2025-06-23
+
+### ✨ Features & Fixes
+
+- **Restored Settings > General Page**: Completely restored the General settings page with full Shopify store management functionality that was previously missing.
+- **Shopify Store Management**: Added comprehensive store CRUD operations including:
+  - Add new Shopify stores with API credentials
+  - Edit existing store configurations
+  - Delete stores with confirmation
+  - View store status and last sync information
+  - Register webhooks for automatic order/product sync
+- **API Configuration Help**: Added detailed step-by-step guide for setting up Shopify API credentials.
+- **Store Status Monitoring**: Display store status, last sync time, and webhook registration status.
+- **Mobile Responsive**: All store management features are fully responsive and mobile-optimized.
+
+### 🐛 Bug Fixes
+
+- **TypeScript Errors**: Fixed missing properties in Store and StoreSettings types (`lastSyncAt`, `accessToken`, `apiSecretKey`).
+- **Settings Page Restoration**: Recovered the complete General settings functionality that was accidentally removed.
+
+### ♻️ Improvements
+
+- **Enhanced UI**: Improved store management interface with better visual hierarchy and status indicators.
+- **Error Handling**: Added proper error handling and user feedback for store operations.
+- **Security**: API credentials are properly masked in password fields.
+
 ## [0.2.1] - 2025-06-22
 
 ### ✨ Features & Fixes
@@ -204,11 +439,25 @@ A major feature and UI enhancement release focused on improving product manageme
 - Resolved `ReferenceError` issues on the Settings page caused by the refactor.
 - Updated the AI navigation and page icons to `Sparkles` for a more intuitive UI.
 
-## [0.2.2] - 2025-06-23
+## [0.2.3] - 2025-06-23
 
 ### 🐛 Bug Fixes
 
 -   **SPA Routing Fix for /products**: Removed the explicit `/products` route from the worker. This allows the SPA catch-all to handle `/products` and resolves the persistent 404 error on that route. Now all non-API routes are handled consistently by the SPA router. 
+
+## [1.4.1] - 2025-06-23
+
+### Fixed
+- **React Error #130**: Fixed persistent React error #130 in Order Card Settings by removing problematic `icon` and `processor` properties from OrderCardField interface that were causing serialization issues
+- **Order Card Preview**: Restored working Order Card Preview functionality by reverting to stable component structure from commit acd761b
+- **Field Mapping**: Simplified field mapping structure to use `transformation` and `transformationRule` instead of complex `processor` objects
+- **Type Safety**: Improved type safety by removing non-serializable React component references from field definitions
+
+### Technical
+- Replaced complex `processor` objects with simple `transformation` and `transformationRule` properties
+- Removed `icon` property from OrderCardField interface to prevent React serialization errors
+- Updated OrderCardPreview component to use stable, working structure
+- Maintained all existing functionality while fixing the React error
 
 ## [1.4.0] - 2025-06-23
 

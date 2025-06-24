@@ -31,12 +31,15 @@ import {
   Users,
   CheckCircle,
   CalendarDays,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
 import { format } from "date-fns"
 import { OrderCard } from "./OrderCard"
 import { StoreSelector } from "./StoreSelector"
 import { useMobileView } from "./Dashboard"
 import { useAuth } from "../contexts/AuthContext"
+import { useRealtimeUpdates } from "../hooks/use-realtime-updates"
 import {
   getOrders,
   getUsers,
@@ -91,75 +94,70 @@ export function OrdersView() {
   // Get mobile view context
   const { isMobileView } = useMobileView()
 
-  // Load data from D1 API
+  // Define data fetching functions first
   const loadData = useCallback(async () => {
     if (!tenant?.id) {
       setError("No tenant found")
       setLoading(false)
       return
     }
+    setLoading(true)
+    setError(null)
 
-    try {
-      setLoading(true)
-      setError(null)
+    const [usersData, storesData, labelsData, configData] = await Promise.all([
+      getUsers(tenant.id),
+      getStores(tenant.id),
+      getProductLabels(tenant.id),
+      getOrderCardConfig(tenant.id)
+    ]);
 
-      // Fetch users for the current tenant
-      const usersData = await getUsers(tenant.id)
-      setFlorists(usersData)
-
-      // Fetch stores for the current tenant
-      const storesData = await getStores(tenant.id)
-      setStores(storesData)
-
-      // Fetch product labels for the current tenant
-      const labelsData = await getProductLabels(tenant.id)
-      setProductLabels(labelsData)
-
-      // Fetch order card config
-      const configData = await getOrderCardConfig(tenant.id)
-      setOrderCardConfig(configData.fields)
-    } catch (err) {
-      console.error("Error loading data:", err)
-      setError("Failed to load data. Please try again.")
-      setOrders([])
-      setFlorists([])
-      setStores([])
-      setProductLabels([])
-    } finally {
-      setLoading(false)
-    }
+    setFlorists(usersData)
+    setStores(storesData)
+    setProductLabels(labelsData)
+    setOrderCardConfig(configData.fields || [])
+    setLoading(false)
   }, [tenant?.id])
 
-  useEffect(() => {
-    loadData()
-  }, [loadData])
-
-  const handleOrderUpdate = () => {
-    loadData()
-  }
-
-  // Separate function to process orders
-  const processOrders = async () => {
+  const processOrders = useCallback(async () => {
     if (!tenant?.id) {
       setError("No tenant found")
       return
     }
+    setProcessingOrders(true)
+    setError(null)
+    const todoData = await getOrdersByDate(tenant.id, selectedDate)
+    setTodoCards(todoData)
+    setProcessingOrders(false)
+  }, [tenant?.id, selectedDate])
 
-    try {
-      setProcessingOrders(true)
-      setError(null)
-      console.log(`Processing orders for date: ${selectedDate}`)
+  // Now define the handler that uses them
+  const handleRealtimeUpdate = useCallback((update: any) => {
+    if (update.type === 'order_updated') {
+      if (todoCards.length > 0) {
+        processOrders();
+      } else {
+        loadData();
+      }
+    }
+  }, [todoCards.length, loadData, processOrders])
 
-      // Fetch orders for the current tenant
-      const todoData = await getOrdersByDate(tenant.id, selectedDate)
-      console.log(`Processed orders result:`, todoData)
-      setTodoCards(todoData)
-    } catch (err) {
-      console.error("Error processing orders:", err)
-      setError("Failed to process orders. Please try again.")
-      setTodoCards([])
-    } finally {
-      setProcessingOrders(false)
+  // Finally, use the handler in the hook
+  const { isConnected, updates } = useRealtimeUpdates({
+    enabled: true,
+    pollInterval: 3000,
+    onUpdate: handleRealtimeUpdate,
+  });
+
+  // Initial data load effect
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleOrderUpdate = () => {
+    if (todoCards.length > 0) {
+      processOrders();
+    } else {
+      loadData();
     }
   }
 
@@ -257,6 +255,28 @@ export function OrdersView() {
 
   return (
     <div className={`space-y-6 ${isMobileView ? "space-y-4" : ""}`}>
+      {/* Real-time Connection Status */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h1 className={`font-bold ${isMobileView ? "text-lg" : "text-2xl"}`}>Orders</h1>
+          <div className="flex items-center gap-1">
+            {isConnected ? (
+              <Wifi className="h-4 w-4 text-green-500" />
+            ) : (
+              <WifiOff className="h-4 w-4 text-gray-400" />
+            )}
+            <span className={`text-xs ${isConnected ? "text-green-600" : "text-gray-500"}`}>
+              {isConnected ? "Live" : "Offline"}
+            </span>
+          </div>
+        </div>
+        {updates.length > 0 && (
+          <Badge variant="secondary" className="text-xs">
+            {updates.length} update{updates.length !== 1 ? 's' : ''}
+          </Badge>
+        )}
+      </div>
+
       {/* Header with stats */}
       <div className={`grid grid-cols-1 ${isMobileView ? "grid-cols-2 gap-2" : "md:grid-cols-4 gap-4"}`}>
         <Card className={isMobileView ? "p-3" : ""}>

@@ -3,6 +3,9 @@ import type { LoginRequest, LoginResponse, User, Tenant } from "../types"
 import { login as authLogin, getStoredToken, removeStoredToken } from "../services/auth"
 import { register } from "../services/api"
 
+// API configuration
+const API_BASE_URL = "https://order-to-do.stanleytan92.workers.dev"
+
 interface AuthState {
   isAuthenticated: boolean
   user: User | null
@@ -102,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (token && userData && tenantData) {
           // Validate token with backend
           try {
-            const response = await fetch('/api/auth/validate', {
+            const response = await fetch(`${API_BASE_URL}/api/auth/validate`, {
               headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'

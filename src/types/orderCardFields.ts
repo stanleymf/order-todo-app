@@ -62,6 +62,9 @@ export const ORDER_CARD_FIELDS: OrderCardField[] = [
     isVisible: false, // Hidden by default
     isSystem: false,
     isEditable: false,
+    shopifyFields: ["tags"],
+    transformation: "extract",
+    transformationRule: "\\d{2}/\\d{2}/\\d{4}",
   },
   {
     id: "orderTags",
@@ -144,7 +147,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["line_items.title"],
+      shopifyFields: ["lineItems.edges.0.node.title"],
     },
     {
       id: "productVariantTitle",
@@ -154,7 +157,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["line_items.variant_title"],
+      shopifyFields: ["lineItems.edges.0.node.variant.title"],
     },
     {
       id: "timeslot",
@@ -164,7 +167,9 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: true,
-      shopifyFields: [],
+      shopifyFields: ["tags"],
+      transformation: "extract",
+      transformationRule: "\\d{2}:\\d{2}-\\d{2}:\\d{2}",
     },
     {
       id: "orderId",
@@ -184,7 +189,9 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["created_at"],
+      shopifyFields: ["tags"],
+      transformation: "extract",
+      transformationRule: "\\d{2}/\\d{2}/\\d{4}",
     },
     {
       id: "orderTags",
@@ -214,7 +221,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["product:difficultyLabel"],
+      shopifyFields: ["localProduct.labelNames"],
     },
     {
       id: "productTypeLabel",
@@ -224,7 +231,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: false,
-      shopifyFields: ["product:productTypeLabel"],
+      shopifyFields: ["localProduct.labelNames"],
     },
     {
       id: "addOns",
@@ -234,7 +241,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: true,
-      shopifyFields: ["note_attributes"],
+      shopifyFields: ["note"],
     },
     {
       id: "customisations",
@@ -254,7 +261,7 @@ export function getAllFields(): OrderCardField[] {
       isVisible: true,
       isSystem: false,
       isEditable: true,
-      shopifyFields: ["fulfillment_status"],
+      shopifyFields: ["displayFulfillmentStatus"],
     },
   ]
 }

@@ -34,7 +34,6 @@ import { ProductImageModal } from "./shared/ProductImageModal"
 
 interface OrderCardPreviewProps {
   fields: OrderCardField[]
-  onToggleFieldVisibility: (fieldId: string) => void
   onSave?: () => void
   isSaving?: boolean
   users?: Array<{ id: string; name: string }>
@@ -73,102 +72,73 @@ interface SampleOrder {
 // ============================================================================
 
 const getValueFromShopifyData = (sourcePath: string, data: any): any => {
-  if (!sourcePath || !data) return undefined
-
-  if (sourcePath.startsWith("product:")) {
-    const productField = sourcePath.split(":")[1]
-    const productValue = data.localProduct?.[productField]
-    
-    // Handle labelNames array - return the first label name
-    if (productField === "labelNames" && Array.isArray(productValue)) {
-      return productValue[0] || null
-    }
-    
-    // Handle the new separated label fields
-    if (productField === "difficultyLabel" || productField === "productTypeLabel") {
-      const labelNames = data.localProduct?.labelNames || []
-      const labelCategories = data.localProduct?.labelCategories || []
-      
-      console.log(`🔍 Looking for ${productField} labels:`, {
-        allLabelNames: labelNames,
-        allLabelCategories: labelCategories,
-        localProduct: data.localProduct
-      })
-      
-      if (productField === "difficultyLabel") {
-        const difficultyLabels = labelNames.filter((name: string, index: number) => 
-          labelCategories[index] === 'difficulty'
-        )
-        console.log(`🎯 Found difficulty labels:`, difficultyLabels)
-        return difficultyLabels[0] || null
-      }
-      if (productField === "productTypeLabel") {
-        const productTypeLabels = labelNames.filter((name: string, index: number) => 
-          labelCategories[index] === 'productType'
-        )
-        console.log(`🎯 Found product type labels:`, productTypeLabels)
-        return productTypeLabels[0] || null
-      }
-      return productValue || null
-    }
-    
-    return productValue
+  if (!sourcePath || !data) {
+    return null;
   }
 
-  if (sourcePath === "tags") {
-    return Array.isArray(data.tags) ? data.tags.join(", ") : data.tags
+  const parts = sourcePath.split('.');
+  let current: any = data;
+
+  for (const part of parts) {
+    if (current === null || typeof current === 'undefined') {
+      return null;
+    }
+
+    if (Array.isArray(current)) {
+      // This is for arrays like note_attributes, which are {name, value} pairs
+      // We assume the *next* part of the path is the 'name' we're looking for.
+      const nextPart = parts[parts.indexOf(part) + 1];
+      if (nextPart) {
+        const item = current.find(d => d.name === nextPart);
+        current = item ? item.value : null;
+        // We've used the next part, so we skip it in the next iteration
+        parts.splice(parts.indexOf(part) + 1, 1);
+      } else {
+        // If there's no next part, it means we're targeting the array itself (like 'tags')
+        return current;
+      }
+    } else if (typeof current === 'object' && part in current) {
+      current = current[part];
+    } else {
+      return null;
+    }
   }
-  if (sourcePath === "line_items.title") {
-    return data.lineItems?.edges?.[0]?.node?.title
-  }
-  if (sourcePath === "line_items.variant_title") {
-    return data.lineItems?.edges?.[0]?.node?.variant?.title
-  }
-  // For direct properties like 'name', 'createdAt', 'note'
-  return data[sourcePath]
-}
+
+  return current;
+};
 
 const applyTransformation = (value: any, field: OrderCardField): any => {
   if (field.transformation === "extract" && field.transformationRule) {
-    if (typeof value !== "string") {
-      return null
-    }
-    try {
-      const regex = new RegExp(field.transformationRule)
-      const match = value.match(regex)
-      if (match && match[0]) {
-        const extractedValue = match[0]
-
-        if (field.type === "date") {
-          const parts = extractedValue.split("/")
-          let date
-          // Handle dd/mm/yyyy format specifically
-          if (parts.length === 3 && parts[2].length === 4) {
-            const reformattedDate = `${parts[2]}-${parts[1]}-${parts[0]}`
-            date = new Date(reformattedDate)
-          } else {
-            // Fallback for other formats
-            date = new Date(extractedValue)
-          }
-
-          if (date && !isNaN(date.getTime())) {
-            // Return a standard ISO string for reliable parsing later
-            return date.toISOString()
-          } else {
-            return "Invalid Date"
-          }
+    // If the value is an array (like tags), search for the pattern in each element
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') {
+          const match = item.match(new RegExp(field.transformationRule));
+          if (match) return match[0];
         }
-        return extractedValue
-      } else {
-        return "No match"
       }
-    } catch (e) {
-      console.error("Invalid regex:", e)
-      return "Invalid Regex"
+      return "Not set"; // No match found in the array
     }
+    // Original logic for string values
+    if (typeof value === "string") {
+      try {
+        const regex = new RegExp(field.transformationRule);
+        const match = value.match(regex);
+        return match ? match[0] : "Not set";
+      } catch (e) {
+        console.error("Invalid regex:", e);
+        return "Invalid Regex";
+      }
+    }
+    return "Not set"; // Can't apply regex to non-string, non-array
   }
-  return null
-}
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  return value ?? "Not set";
+};
 
 // ============================================================================
 // SUB-COMPONENTS
@@ -414,40 +384,6 @@ const FetchOrderControls: React.FC<FetchOrderControlsProps> = ({
   )
 }
 
-interface FieldVisibilityControlsProps {
-  fields: OrderCardField[]
-  onToggleFieldVisibility: (fieldId: string) => void
-}
-
-const FieldVisibilityControls: React.FC<FieldVisibilityControlsProps> = ({
-  fields,
-  onToggleFieldVisibility,
-}) => (
-  <div className="space-y-3">
-    <h4 className="font-medium">Field Visibility Controls</h4>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {fields.map((field) => (
-        <div key={field.id} className="flex items-center justify-between p-3 border rounded-lg">
-          <div className="flex items-center gap-2">
-            {field.isVisible ? (
-              <Eye className="h-4 w-4 text-green-600" />
-            ) : (
-              <EyeOff className="h-4 w-4 text-gray-400" />
-            )}
-            <span className="text-sm font-medium">{field.label}</span>
-            {!field.isVisible && (
-              <Badge variant="outline" className="text-xs">Hidden</Badge>
-            )}
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => onToggleFieldVisibility(field.id)} className="text-xs">
-            {field.isVisible ? "Hide" : "Show"}
-          </Button>
-        </div>
-      ))}
-    </div>
-  </div>
-)
-
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -649,7 +585,6 @@ const CollapsedView: React.FC<CollapsedViewProps> = ({
 
 export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   fields,
-  onToggleFieldVisibility,
   onSave,
   isSaving,
   users = [],
@@ -760,7 +695,11 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
     }
   }, [previewStatus, currentUserId, users])
 
-  // Memoized status change handler to prevent unnecessary re-renders
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  // Memoized status change handler
   const handleStatusChange = useCallback((status: PreviewStatus) => {
     setPreviewStatus(status)
   }, [])
@@ -797,68 +736,19 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
     if (!field) return ""
 
     let rawValue
-    let valueFromShopify = false
 
     // If there is real data, try to get the value from it based on the mapping
     if (realOrderData && field.shopifyFields && field.shopifyFields.length > 0) {
+      // Use the first mapping for now. Can be enhanced later.
       const sourcePath = field.shopifyFields[0]
-      
-      // Use getValueFromShopifyData for all Shopify field mappings
       rawValue = getValueFromShopifyData(sourcePath, realOrderData)
-      
-      if (rawValue !== undefined && rawValue !== null) {
-        valueFromShopify = true
-      }
+    } else {
+      // Fallback to sample data if no real order is present
+      rawValue = (sampleOrder as any)[fieldId]
     }
 
-    // If no value was derived from Shopify data, fall back to the sample data
-    if (rawValue === undefined) {
-      // Only fallback to sample data if there is NO real order data.
-      if (!realOrderData) {
-        rawValue = (sampleOrder as any)[fieldId]
-      } else {
-        rawValue = null // Explicitly set to null if real data is present but field has no value
-      }
-    }
-
-    // Ensure array values (like tags) are joined into a string before transformation
-    if (Array.isArray(rawValue)) {
-      rawValue = rawValue.join(", ")
-    }
-
-    const transformedValue = applyTransformation(rawValue, field)
-
-    if (transformedValue) {
-      return transformedValue
-    }
-
-    // If transformation was attempted but failed, show N/A for clarity
-    if (valueFromShopify && field.transformation === "extract") {
-      return "N/A"
-    }
-
-    return rawValue
+    return applyTransformation(rawValue, field)
   }, [fields, realOrderData, sampleOrder])
-
-  // ============================================================================
-  // RENDER FUNCTIONS
-  // ============================================================================
-
-  const renderField = useCallback(
-    (field: OrderCardField) => {
-      const value = getFieldValue(field.id)
-      return (
-        <FieldRenderer
-          key={field.id}
-          field={field}
-          value={value}
-          difficultyLabels={difficultyLabels}
-          users={users}
-        />
-      )
-    },
-    [getFieldValue, difficultyLabels, users]
-  )
 
   // ============================================================================
   // MAIN RENDER
@@ -923,11 +813,6 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
         )}
       </Card>
       
-      <FieldVisibilityControls
-        fields={fields}
-        onToggleFieldVisibility={onToggleFieldVisibility}
-      />
-      
       {/* Product Image Modal */}
       <ProductImageModal
         isOpen={isProductImageModalOpen}
@@ -938,3 +823,4 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
     </div>
   )
 }
+

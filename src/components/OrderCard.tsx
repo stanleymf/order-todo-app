@@ -79,6 +79,52 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   }
 
   const applyTransformation = (value: any, field: OrderCardField): any => {
+    if (!value) return value
+
+    // Apply regex processing if configured
+    if (field.processor && field.processor.type === "regex" && field.processor.pattern) {
+      if (typeof value === "string") {
+        try {
+          const regex = new RegExp(field.processor.pattern, 'g')
+          const matches = value.match(regex)
+          
+          if (matches && matches.length > 0) {
+            let result = matches[0]
+            
+            // Apply output formatting if specified
+            if (field.processor.outputFormat) {
+              switch (field.processor.outputFormat) {
+                case "date":
+                  const dateMatch = result.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+                  if (dateMatch) {
+                    const [, day, month, year] = dateMatch
+                    result = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+                  }
+                  break
+                case "timeslot":
+                  // Keep timeslot as-is
+                  break
+                case "time":
+                  // Extract just the time part
+                  const timeMatch = result.match(/(\d{1,2}:\d{2})/)
+                  if (timeMatch) {
+                    result = timeMatch[1]
+                  }
+                  break
+              }
+            }
+            
+            return result
+          }
+          return "No match found"
+        } catch (error) {
+          console.error("Regex processing error:", error)
+          return "Regex error"
+        }
+      }
+    }
+
+    // Apply existing transformation logic
     if (field.transformation === "extract" && field.transformationRule) {
       if (typeof value !== "string") return null
       try {
@@ -272,6 +318,34 @@ export const OrderCard: React.FC<OrderCardProps> = ({
             )}
           </div>
         ))}
+        
+        {/* Editable Notes Field */}
+        <div className="pt-4 border-t">
+          <div className="flex items-start gap-2">
+            <div className="w-5 h-5 flex-shrink-0 text-muted-foreground mt-1">
+              <MessageSquare className="h-4 w-4" />
+            </div>
+            <div className="flex-1">
+              <Label className="text-sm font-medium">Notes</Label>
+              <Textarea
+                placeholder="Add notes about this order..."
+                value={order.notes || ""}
+                onChange={(e) => {
+                  if (onUpdate && order.id) {
+                    onUpdate(order.id, { notes: e.target.value })
+                  }
+                }}
+                onBlur={() => {
+                  // Auto-save on blur
+                  if (onUpdate && order.id) {
+                    onUpdate(order.id, { notes: order.notes })
+                  }
+                }}
+                className="mt-1 min-h-[80px] resize-none"
+              />
+            </div>
+          </div>
+        </div>
       </CardContent>
     </>
   )

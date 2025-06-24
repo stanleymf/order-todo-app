@@ -192,6 +192,23 @@ export async function getUserById(tenantId: string, userId: string): Promise<Use
   return authenticatedRequest<User>(`/api/tenants/${tenantId}/users/${userId}`)
 }
 
+export async function updateUser(
+  tenantId: string,
+  userId: string,
+  userData: Partial<User>
+): Promise<User> {
+  return authenticatedRequest<User>(`/api/tenants/${tenantId}/users/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify(userData),
+  })
+}
+
+export async function deleteUser(tenantId: string, userId: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/users/${userId}`, {
+    method: "DELETE",
+  })
+}
+
 // Order management
 export async function getOrders(tenantId: string, filters?: OrderFilters): Promise<Order[]> {
   const queryParams = filters
@@ -225,11 +242,17 @@ export async function createOrder(tenantId: string, orderData: CreateOrderReques
 export async function updateOrder(
   tenantId: string,
   orderId: string,
-  orderData: Partial<Order>
+  orderData: Partial<Order>,
+  currentUserId?: string
 ): Promise<Order> {
+  const updateData = {
+    ...orderData,
+    updatedBy: currentUserId // Track who made the update
+  }
+  
   return authenticatedRequest<Order>(`/api/tenants/${tenantId}/orders/${orderId}`, {
     method: "PUT",
-    body: JSON.stringify(orderData),
+    body: JSON.stringify(updateData),
   })
 }
 
@@ -271,13 +294,14 @@ export async function deleteStore(tenantId: string, storeId: string): Promise<vo
   })
 }
 
+export async function testShopifyConnection(tenantId: string): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/test-shopify`)
+}
+
 export async function registerShopifyWebhooks(tenantId: string, storeId: string): Promise<Store> {
-  return authenticatedRequest<Store>(
-    `/api/tenants/${tenantId}/stores/${storeId}/register-webhooks`,
-    {
-      method: "POST",
-    }
-  )
+  return authenticatedRequest<Store>(`/api/tenants/${tenantId}/stores/${storeId}/register-webhooks`, {
+    method: "POST",
+  })
 }
 
 // Product management
@@ -528,14 +552,12 @@ export const fetchShopifyOrder = async (
   storeId: string,
   orderName: string,
 ): Promise<any> => {
-  // Ensure orderName is just the number, without prefixes like '#' or 'WF'
-  const numericOrderName = orderName.replace(/[^0-9]/g, "")
-  if (!numericOrderName) {
-    throw new Error("Invalid order name format. Please use a valid order number.")
+  if (!orderName) {
+    throw new Error("Order name is required.")
   }
 
   return authenticatedRequest<any>(
-    `/api/tenants/${tenantId}/stores/${storeId}/orders/lookup?name=${numericOrderName}`
+    `/api/tenants/${tenantId}/stores/${storeId}/orders/lookup?name=${encodeURIComponent(orderName)}`
   )
 }
 

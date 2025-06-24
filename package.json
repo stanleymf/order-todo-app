@@ -1,6 +1,6 @@
 {
   "name": "starter-react",
-  "version": "1.4.0",
+  "version": "1.4.3",
   "description": "A starter template for building React applications with Vite",
   "type": "module",
   "private": true,
@@ -14,7 +14,8 @@
     "format": "biome format --write",
     "lint:rest": "biome lint --write",
     "migrate:to-multi-tenant": "tsx scripts/migrate-to-multi-tenant.ts",
-    "test:migration": "tsx scripts/test-migration.ts"
+    "test:migration": "tsx scripts/test-migration.ts",
+    "sync-saved-products": "tsx scripts/run-sync.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -56,6 +57,7 @@
     "input-otp": "^1.4.2",
     "lucide-react": "^0.263.1",
     "next-themes": "^0.4.6",
+    "node-fetch": "^3.3.2",
     "react": "^18.3.1",
     "react-day-picker": "^9.7.0",
     "react-dom": "^18.3.1",
