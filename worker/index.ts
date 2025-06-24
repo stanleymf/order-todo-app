@@ -457,6 +457,12 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             lineItem.variant_id?.toString() || ''
           )
 
+          // Get difficulty label
+          const difficultyLabel = getDifficultyLabel(
+            lineItem.product_id?.toString() || '', 
+            lineItem.variant_id?.toString() || ''
+          )
+
           // Create individual cards for each quantity
           for (let i = 0; i < (lineItem.quantity || 1); i++) {
             const cardId = `${order.shopify_order_id}-${lineItem.id || lineItem.product_id}-${i}`
@@ -486,6 +492,8 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               quantity: 1, // Individual quantity
               price: parseFloat(lineItem.price || '0'),
               variantTitle: lineItem.variant_title,
+              // Labels from product_labels database
+              difficultyLabel: difficultyLabel,
               // Add-on classification
               isAddOn: isAddOn,
               productCategory: isAddOn ? "add-on" : "main-order",
