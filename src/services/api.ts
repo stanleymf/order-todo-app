@@ -1084,6 +1084,18 @@ export async function syncAllOrders(
   );
 }
 
+export async function updateExistingOrders(
+  tenantId: string,
+  storeId: string
+): Promise<any> {
+  return authenticatedRequest<any>(
+    `/api/tenants/${tenantId}/stores/${storeId}/orders/update-existing`,
+    {
+      method: "POST",
+    }
+  );
+}
+
 export async function deleteOrdersByDate(
   tenantId: string,
   date: string

@@ -2,6 +2,98 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.14] - 2025-01-24
+
+### 🎯 **Unified OrderCard Architecture - Single Component for Preview & Production**
+
+- **Major Architecture Simplification**: Unified OrderCard component to serve both preview and production needs
+  - **Deleted Legacy OrderCard.tsx**: Removed complex fallback logic and duplicate codebase
+  - **Enhanced OrderCardPreview**: Adapted as unified OrderCard with production-ready features
+  - **Single Source of Truth**: Settings → Preview → Production now use identical component logic
+  - **Perfect Mirror Experience**: What users see in configuration preview exactly matches production display
+
+- **Technical Implementation**:
+  - **Unified Props Interface**: Standardized OrderCardProps for consistent data flow
+  - **Status Management**: Maintained status circles (unassigned → assigned → completed) with proper event handling
+  - **Field Mapping**: Preserved robust field configuration system with getValueFromShopifyData()
+  - **Product Image Modal**: Integrated ProductImageModal functionality for both contexts
+  - **Expandable Cards**: Maintained collapsed/expanded view functionality
+
+- **OrdersView Integration**: Updated to use unified OrderCard component
+  - **Proper Event Handling**: Enhanced handleOrderUpdate function with correct tenantId/userId parameters
+  - **TypeScript Compliance**: Fixed all type errors and removed unused variables
+  - **Consistent Behavior**: Same interaction patterns across preview and production
+  - **Performance Optimization**: Reduced bundle size by eliminating duplicate component logic
+
+### 🚀 **Benefits & Impact**
+
+- **Maintenance Simplified**: Single component to maintain instead of two diverging codebases
+- **Configuration Consistency**: Field mappings work identically in preview and production
+- **Developer Experience**: No more debugging differences between preview and live behavior
+- **User Experience**: Perfect WYSIWYG - what you configure is exactly what displays
+- **Future-Proof**: Single codebase easier to enhance and extend
+
+### 🔧 **Data Flow Optimization**
+
+- **Date-Driven Navigation**: Orders organized by delivery date extracted from tags (dd/mm/yyyy format)
+- **Dual Population Methods**: Automatic via webhooks (order/create) and manual via "Fetch Orders" button
+- **Real-time Collaboration**: Persistent assignment/completion state across multiple florists
+- **Unified Data Processing**: Single getValueFromShopifyData() function handles both REST and GraphQL formats
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully
+- **Bundle**: 799.59 kB (226.41 kB gzipped) - optimized through code deduplication
+- **Version ID**: eff87dff-fb98-43e9-a3db-395af1537cad
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **Status**: 🟢 **Architecture Unified** - Single component serves all needs
+
+## [1.4.14] - 2025-01-24
+
+### 🎯 **Unified OrderCard Architecture - Single Component for Preview & Production**
+
+- **Major Architecture Simplification**: Unified OrderCard component to serve both preview and production needs
+  - **Deleted Legacy OrderCard.tsx**: Removed complex fallback logic and duplicate codebase
+  - **Enhanced OrderCardPreview**: Adapted as unified OrderCard with production-ready features
+  - **Single Source of Truth**: Settings → Preview → Production now use identical component logic
+  - **Perfect Mirror Experience**: What users see in configuration preview exactly matches production display
+
+- **Technical Implementation**:
+  - **Unified Props Interface**: Standardized OrderCardProps for consistent data flow
+  - **Status Management**: Maintained status circles (unassigned → assigned → completed) with proper event handling
+  - **Field Mapping**: Preserved robust field configuration system with getValueFromShopifyData()
+  - **Product Image Modal**: Integrated ProductImageModal functionality for both contexts
+  - **Expandable Cards**: Maintained collapsed/expanded view functionality
+
+- **OrdersView Integration**: Updated to use unified OrderCard component
+  - **Proper Event Handling**: Enhanced handleOrderUpdate function with correct tenantId/userId parameters
+  - **TypeScript Compliance**: Fixed all type errors and removed unused variables
+  - **Consistent Behavior**: Same interaction patterns across preview and production
+  - **Performance Optimization**: Reduced bundle size by eliminating duplicate component logic
+
+### 🚀 **Benefits & Impact**
+
+- **Maintenance Simplified**: Single component to maintain instead of two diverging codebases
+- **Configuration Consistency**: Field mappings work identically in preview and production
+- **Developer Experience**: No more debugging differences between preview and live behavior
+- **User Experience**: Perfect WYSIWYG - what you configure is exactly what displays
+- **Future-Proof**: Single codebase easier to enhance and extend
+
+### 🔧 **Data Flow Optimization**
+
+- **Date-Driven Navigation**: Orders organized by delivery date extracted from tags (dd/mm/yyyy format)
+- **Dual Population Methods**: Automatic via webhooks (order/create) and manual via "Fetch Orders" button
+- **Real-time Collaboration**: Persistent assignment/completion state across multiple florists
+- **Unified Data Processing**: Single getValueFromShopifyData() function handles both REST and GraphQL formats
+
+### 🚀 **Deployment**
+
+- **Build**: 2138 modules transformed successfully
+- **Bundle**: 799.59 kB (226.41 kB gzipped) - optimized through code deduplication
+- **Version ID**: eff87dff-fb98-43e9-a3db-395af1537cad
+- **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
+- **Status**: 🟢 **Architecture Unified** - Single component serves all needs
+
 ## [1.4.13] - 2025-01-24
 
 ### 🎯 **Critical Field Mapping & Data Format Resolution**

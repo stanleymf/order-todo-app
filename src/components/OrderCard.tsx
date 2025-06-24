@@ -26,6 +26,10 @@ import { useIsMobile } from "./hooks/use-mobile"
 import { ProductImageModal } from "./shared/ProductImageModal"
 import { useAuth } from "../contexts/AuthContext"
 
+// Simple cache for product labels to prevent duplicate API calls
+const productLabelCache = new Map<string, any>();
+const pendingRequests = new Map<string, Promise<any>>();
+
 interface OrderCardProps {
   order: any
   fields: OrderCardField[]
@@ -57,13 +61,22 @@ const getValueFromShopifyData = (sourcePath: string, data: any): any => {
         const difficultyLabels = labelNames.filter((_name: string, index: number) => 
           labelCategories[index] === 'difficulty'
         );
-        return difficultyLabels[0] || null;
+        if (difficultyLabels.length > 0) {
+          return difficultyLabels[0];
+        }
+        // Return a sensible default for difficulty if no label exists
+        return "Standard";
       }
+      
       if (productField === "productTypeLabel") {
         const productTypeLabels = labelNames.filter((_name: string, index: number) => 
           labelCategories[index] === 'productType'
         );
-        return productTypeLabels[0] || null;
+        if (productTypeLabels.length > 0) {
+          return productTypeLabels[0];
+        }
+        // Return a sensible default for product type if no label exists
+        return "Arrangement";
       }
     }
     
@@ -109,6 +122,12 @@ const getValueFromShopifyData = (sourcePath: string, data: any): any => {
 };
 
 const applyTransformation = (value: any, field: OrderCardField): any => {
+  // Handle special product label fields that depend on saved product data
+  if (field.id === "difficultyLabel" || field.id === "productTypeLabel") {
+    // These will be handled by the product label fetching logic
+    return value || null;
+  }
+
   if (field.transformation === "extract" && field.transformationRule) {
     if (Array.isArray(value)) {
       for (const item of value) {
@@ -117,26 +136,26 @@ const applyTransformation = (value: any, field: OrderCardField): any => {
           if (match) return match[0];
         }
       }
-      return "Not set";
+      return null; // Return null instead of "Not set" to let component handle display
     }
     if (typeof value === "string") {
       try {
         const regex = new RegExp(field.transformationRule);
         const match = value.match(regex);
-        return match ? match[0] : "Not set";
+        return match ? match[0] : null; // Return null instead of "Not set"
       } catch (e) {
         console.error("Invalid regex:", e);
         return "Invalid Regex";
       }
     }
-    return "Not set";
+    return null; // Return null instead of "Not set"
   }
 
   if (Array.isArray(value)) {
     return value.join(', ');
   }
 
-  return value ?? "Not set";
+  return value; // Let the component handle null/undefined display
 };
 
 const StatusCircles: React.FC<{
@@ -290,7 +309,7 @@ const FieldRenderer: React.FC<{
             />
           )
         }
-        return <p className="text-sm text-muted-foreground">{value || "Not set"}</p>
+        return <p className="text-sm text-muted-foreground">{value || "No notes added"}</p>
 
       case "tags":
         if (Array.isArray(value)) {
@@ -314,7 +333,32 @@ const FieldRenderer: React.FC<{
             </Badge>
           )
         }
-        return <span className="text-sm text-muted-foreground">{value || "Not set"}</span>
+        
+        // Handle specific field fallbacks to avoid "Not set"
+        if (!value || value === "") {
+          switch (field.id) {
+            case "orderDate":
+            case "deliveryDate":
+              return <span className="text-sm text-muted-foreground italic">Date not specified</span>
+            case "customerName":
+              return <span className="text-sm text-muted-foreground italic">No customer name</span>
+            case "orderNumber":
+            case "orderId":
+              return <span className="text-sm text-muted-foreground italic">No order number</span>
+            case "notes":
+              return <span className="text-sm text-muted-foreground italic">No notes</span>
+            case "timeslot":
+              return <span className="text-sm text-muted-foreground italic">No timeslot</span>
+            case "deliveryTimeSlot":
+              return <span className="text-sm text-muted-foreground italic">No delivery time</span>
+            case "productVariantTitle":
+              return <span className="text-sm text-muted-foreground italic">Standard</span>
+            default:
+              return <span className="text-sm text-muted-foreground italic">Not specified</span>
+          }
+        }
+        
+        return <span className="text-sm text-muted-foreground">{value}</span>
     }
   }
 
@@ -396,35 +440,81 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 
       if (!shopifyProductId || !shopifyVariantId) return
 
+      // Check if we already have saved product data to avoid unnecessary API calls
+      if (order.shopifyOrderData.savedProductData) return
+
+      // Create cache key
+      const cacheKey = `${tenant.id}-${shopifyProductId}-${shopifyVariantId}`;
+
+      // Check cache first
+      if (productLabelCache.has(cacheKey)) {
+        const cachedProduct = productLabelCache.get(cacheKey);
+        if (order.shopifyOrderData && !order.shopifyOrderData.savedProductData) {
+          order.shopifyOrderData.savedProductData = {
+            labelNames: cachedProduct.labelNames || [],
+            labelCategories: cachedProduct.labelCategories || [],
+            labelColors: cachedProduct.labelColors || [],
+          }
+        }
+        return;
+      }
+
+      // Check if request is already pending
+      if (pendingRequests.has(cacheKey)) {
+        try {
+          const product = await pendingRequests.get(cacheKey);
+          if (order.shopifyOrderData && !order.shopifyOrderData.savedProductData) {
+            order.shopifyOrderData.savedProductData = {
+              labelNames: product.labelNames || [],
+              labelCategories: product.labelCategories || [],
+              labelColors: product.labelColors || [],
+            }
+          }
+        } catch (error) {
+          console.error("Failed to fetch product label from pending request:", error)
+        }
+        return;
+      }
+
       try {
         const jwt = localStorage.getItem("auth_token")
-        const res = await fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
+        const fetchPromise = fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${shopifyProductId}&shopify_variant_id=${shopifyVariantId}`, {
           credentials: "include",
           headers: {
             Authorization: `Bearer ${jwt}`,
             "Content-Type": "application/json"
           }
-        })
+        }).then(res => res.ok ? res.json() : Promise.reject('Network error'));
+
+        // Store the pending request
+        pendingRequests.set(cacheKey, fetchPromise);
         
-        if (!res.ok) return
+        const product = await fetchPromise;
         
-        const product = await res.json()
+        // Cache the result
+        productLabelCache.set(cacheKey, product);
         
-        if (order.shopifyOrderData) {
+        // Clean up pending request
+        pendingRequests.delete(cacheKey);
+        
+        if (order.shopifyOrderData && !order.shopifyOrderData.savedProductData) {
           order.shopifyOrderData.savedProductData = {
-            labelNames: product.labelNames,
-            labelCategories: product.labelCategories,
-            labelColors: product.labelColors,
+            labelNames: product.labelNames || [],
+            labelCategories: product.labelCategories || [],
+            labelColors: product.labelColors || [],
           }
         }
         
       } catch (error) {
         console.error("Failed to fetch product label:", error)
+        // Clean up pending request on error
+        pendingRequests.delete(cacheKey);
       }
     }
 
+    // Fetch product label data with caching
     fetchProductLabel()
-  }, [tenant?.id, order])
+  }, [tenant?.id, order?.id])
 
   const handleStatusChange = (newStatus: OrderStatus) => {
     setStatus(newStatus)
@@ -472,6 +562,16 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   const difficultyLabel = getFieldValue('difficultyLabel')
   const visibleFields = fields.filter(field => field.isVisible && field.id !== 'productTitle' && field.id !== 'productVariantTitle')
 
+  // Error boundary to prevent white screen
+  const safeRender = (renderFn: () => React.ReactNode) => {
+    try {
+      return renderFn()
+    } catch (error) {
+      console.error('OrderCard render error:', error)
+      return <span className="text-red-500 text-sm">Error rendering field</span>
+    }
+  }
+
   const getDifficultyBadge = () => {
     if (!difficultyLabel) return null
     
@@ -492,65 +592,82 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 
   return (
     <Card 
-      className={`transition-all duration-200 cursor-pointer hover:shadow-md ${getCardStyle()}`}
-      onClick={() => setIsExpanded(!isExpanded)}
+      className={`transition-all duration-200 hover:shadow-md ${getCardStyle()}`}
     >
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">
-              {productTitle}
-            </CardTitle>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsExpanded(!isExpanded)
-            }}
-          >
-            {isExpanded ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </Button>
-        </div>
-      </CardHeader>
-
       {isExpanded ? (
-        <CardContent className="pt-0">
-          <div className="space-y-4">
-            <div className="flex justify-center">
-              <StatusCircles status={status} onStatusChange={handleStatusChange} />
+        <>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">
+                  {productTitle}
+                </CardTitle>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsExpanded(!isExpanded)}
+              >
+                <EyeOff className="h-4 w-4" />
+              </Button>
             </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="space-y-4">
+              <div className="flex justify-center">
+                <StatusCircles status={status} onStatusChange={handleStatusChange} />
+              </div>
 
-            <div className="space-y-2">
-              {visibleFields.map((field) => (
-                <FieldRenderer
-                  key={field.id}
-                  field={field}
-                  value={getFieldValue(field.id)}
-                  difficultyLabels={difficultyLabels}
-                  users={users}
-                  onUpdate={handleFieldUpdate}
-                />
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      ) : (
-        <CardContent className="pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h3 className="font-medium text-sm">{productTitle}</h3>
-              {productVariant && (
-                <p className="text-xs text-muted-foreground">{productVariant}</p>
-              )}
-              <div className="flex items-center gap-2 mt-1">
-                {getDifficultyBadge()}
+              <div className="space-y-2">
+                {visibleFields.map((field) => (
+                  <div key={field.id}>
+                    {safeRender(() => (
+                      <FieldRenderer
+                        field={field}
+                        value={getFieldValue(field.id)}
+                        difficultyLabels={difficultyLabels}
+                        users={users}
+                        onUpdate={handleFieldUpdate}
+                      />
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
+          </CardContent>
+        </>
+      ) : (
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Package className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <h3 className="font-medium text-sm truncate">{productTitle}</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 flex-shrink-0"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                >
+                  <Eye className="h-3 w-3" />
+                </Button>
+              </div>
+              
+              {productVariant && (
+                <p className="text-xs text-muted-foreground truncate mb-1">{productVariant}</p>
+              )}
+              
+              {getDifficultyBadge() && (
+                <div className="mt-1">
+                  {getDifficultyBadge()}
+                </div>
+              )}
+            </div>
             
-            <StatusCircles status={status} onStatusChange={handleStatusChange} />
+            <div className="flex-shrink-0">
+              <StatusCircles status={status} onStatusChange={handleStatusChange} />
+            </div>
           </div>
         </CardContent>
       )}

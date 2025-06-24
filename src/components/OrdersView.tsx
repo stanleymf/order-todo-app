@@ -57,6 +57,7 @@ import {
   getProductByShopifyIds,
   syncOrdersByDate,
   syncAllOrders,
+  updateExistingOrders,
   deleteOrdersByDate,
   clearAllOrders,
 } from "../services/api"
@@ -379,8 +380,8 @@ export function OrdersView() {
     }
   }, [tenant?.id, selectedStore, selectedDate, stores, processOrdersReload]);
 
-  // --- Sync All Orders and Categorize by Delivery Date ---
-  const syncAllOrdersByDate = useCallback(async () => {
+  // --- Update Orders with Latest Shopify Data ---
+  const updateOrdersFromShopify = useCallback(async () => {
     if (!tenant?.id) {
       setError("No tenant found");
       return;
@@ -391,30 +392,37 @@ export function OrdersView() {
     try {
       let responses = [];
       if (!selectedStore || selectedStore === "all") {
-        // Sync all orders for all stores
+        // Update orders for all stores
         if (!stores.length) throw new Error("No stores configured");
         for (const store of stores) {
           const resp = await syncAllOrders(tenant.id, store.id);
           responses.push({ store: store.name, ...resp });
         }
       } else {
-        // Sync all orders for specific store
+        // Update orders for specific store
         const store = stores.find(s => s.id === selectedStore);
         if (!store) throw new Error("Selected store not found");
-        const resp = await syncAllOrders(tenant.id, selectedStore);
+                  const resp = await syncAllOrders(tenant.id, selectedStore);
         responses.push({ store: store.name, ...resp });
       }
       
-      setFetchFeedback(`Synced all orders for ${selectedStore === "all" ? "all stores" : stores.find(s => s.id === selectedStore)?.name || "store"}. Orders categorized by delivery date.`);
+      // After updating, refresh the current view to show updated data
+      const [year, month, day] = selectedDate.split("-");
+      const dateTag = `${day}/${month}/${year}`;
+      await processOrdersReload(dateTag);
+      
+      const totalSynced = responses.reduce((sum, resp) => sum + (resp.newOrders?.length || 0) + (resp.updatedOrders?.length || 0), 0);
+      setFetchFeedback(`Synced ${totalSynced} orders and refreshed current view.`);
+      
       // Log responses for debugging
-      console.log("Sync all responses:", responses);
+      console.log("Update orders responses:", responses);
     } catch (error: any) {
-      setError('Failed to sync all orders: ' + (error?.message || error));
+      setError('Failed to update orders: ' + (error?.message || error));
       setFetchFeedback(null);
     } finally {
       setProcessingOrders(false);
     }
-  }, [tenant?.id, selectedStore, stores]);
+  }, [tenant?.id, selectedStore, stores, selectedDate, processOrdersReload]);
 
   // --- Clear All Orders (Fresh Start) ---
   const clearAllOrdersData = useCallback(async () => {
@@ -479,6 +487,13 @@ export function OrdersView() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Load orders when selectedDate changes
+  useEffect(() => {
+    if (tenant?.id && selectedDate) {
+      processOrdersReload();
+    }
+  }, [tenant?.id, selectedDate, processOrdersReload]);
 
   const handleOrderUpdate = async (orderId: string, updates: any) => {
     if (!tenant?.id || !currentUser?.id) return
@@ -874,7 +889,7 @@ export function OrdersView() {
               )}
             </Button>
             <Button 
-              onClick={syncAllOrdersByDate} 
+              onClick={updateOrdersFromShopify} 
               disabled={processingOrders || !stores.length}
               variant="outline"
               className={`${isMobileView ? "w-full text-sm h-9" : "w-full md:w-auto"}`}
@@ -882,12 +897,12 @@ export function OrdersView() {
               {processingOrders ? (
                 <>
                   <div className={`animate-spin rounded-full border-b-2 border-white mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`}></div>
-                  {isMobileView ? "Syncing..." : "Syncing All Orders..."}
+                  {isMobileView ? "Updating..." : "Updating Orders..."}
                 </>
               ) : (
                 <>
                   <CalendarDays className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                  {isMobileView ? "Sync All" : "Sync All Orders"}
+                  {isMobileView ? "Update Orders" : "Update Orders"}
                 </>
               )}
             </Button>

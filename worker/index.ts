@@ -4229,6 +4229,158 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-all", async (c) => 
   }
 });
 
+// --- Update Existing Orders with Latest Shopify Data ---
+app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  const storeId = c.req.param("storeId");
+  
+  try {
+    console.log("[UPDATE-EXISTING] Starting update process for tenant:", tenantId, "store:", storeId);
+    
+    // 1. Get store info
+    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
+    if (!store || !store.settings.accessToken) {
+      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
+    }
+    
+         // 2. Get all existing orders from database
+     const { results: existingOrders } = await c.env.DB.prepare(
+       `SELECT shopify_order_id, status, priority, assigned_to, notes FROM tenant_orders 
+        WHERE tenant_id = ? AND store_id = ?`
+     ).bind(tenantId, storeId).all();
+     
+     const typedOrders = existingOrders as Array<{
+       shopify_order_id: string;
+       status: string;
+       priority: string;
+       assigned_to: string;
+       notes: string;
+     }>;
+    
+    if (!existingOrders || existingOrders.length === 0) {
+      return c.json({ 
+        success: true, 
+        message: "No existing orders found to update",
+        updatedOrders: [],
+        totalProcessed: 0
+      });
+    }
+    
+    console.log("[UPDATE-EXISTING] Found", existingOrders.length, "orders to update");
+    
+    // 3. Fetch current data from Shopify for these orders
+    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken);
+    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
+    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
+    
+    const updatedOrders = [];
+    const failedUpdates = [];
+    
+         // 4. Process each existing order
+     for (const dbOrder of typedOrders) {
+      try {
+        console.log("[UPDATE-EXISTING] Processing order:", dbOrder.shopify_order_id);
+        
+        // Fetch current GraphQL data from Shopify
+        const orderGid = `gid://shopify/Order/${dbOrder.shopify_order_id}`;
+        const shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+        
+        // Prepare Shopify-sourced data while preserving local changes
+        const customerName = shopifyOrderGraphQL.customer
+          ? `${shopifyOrderGraphQL.customer.firstName || ""} ${shopifyOrderGraphQL.customer.lastName || ""}`.trim()
+          : "N/A";
+        
+        // Extract delivery date from updated tags
+        const extractDeliveryDateFromTags = (tags: string): string | null => {
+          if (!tags) return null;
+          const tagArray = tags.split(", ");
+          const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+          return dateTag || null;
+        };
+        
+        const deliveryDate = extractDeliveryDateFromTags(shopifyOrderGraphQL.tags || "");
+        
+        // Prepare update data - only update Shopify-sourced fields, preserve local state
+        const updateData = {
+          // Update Shopify-sourced data
+          customerName: customerName,
+          customer_email: shopifyOrderGraphQL.customer?.email || null,
+          total_price: shopifyOrderGraphQL.totalPriceSet?.shopMoney?.amount ? 
+            parseFloat(shopifyOrderGraphQL.totalPriceSet.shopMoney.amount) : null,
+          currency: shopifyOrderGraphQL.currencyCode || null,
+          line_items: shopifyOrderGraphQL.lineItems?.edges ? 
+            JSON.stringify(shopifyOrderGraphQL.lineItems.edges.map((edge: any) => edge.node)) : null,
+          product_titles: shopifyOrderGraphQL.lineItems?.edges ? 
+            JSON.stringify(shopifyOrderGraphQL.lineItems.edges.map((edge: any) => edge.node.title)) : null,
+          quantities: shopifyOrderGraphQL.lineItems?.edges ? 
+            JSON.stringify(shopifyOrderGraphQL.lineItems.edges.map((edge: any) => edge.node.quantity)) : null,
+          product_type: shopifyOrderGraphQL.lineItems?.edges?.[0]?.node?.product?.productType || null,
+          shopifyOrderData: shopifyOrderGraphQL,
+          deliveryDate: deliveryDate, // Update delivery date if it changed
+          
+          // PRESERVE local changes - do NOT update these fields
+          // status: dbOrder.status,           // Keep local status
+          // priority: dbOrder.priority,       // Keep local priority  
+          // assigned_to: dbOrder.assigned_to, // Keep local assignment
+          // notes: dbOrder.notes,             // Keep local notes
+        };
+        
+        // Update the order in database
+        await c.env.DB.prepare(`
+          UPDATE tenant_orders 
+          SET customer_name = ?, customer_email = ?, total_price = ?, currency = ?, 
+              line_items = ?, product_titles = ?, quantities = ?, product_type = ?, 
+              shopify_order_data = ?, delivery_date = ?, updated_at = ?
+          WHERE tenant_id = ? AND shopify_order_id = ?
+        `).bind(
+          updateData.customerName,
+          updateData.customer_email,
+          updateData.total_price,
+          updateData.currency,
+          updateData.line_items,
+          updateData.product_titles,
+          updateData.quantities,
+          updateData.product_type,
+          JSON.stringify(updateData.shopifyOrderData),
+          updateData.deliveryDate,
+          new Date().toISOString(),
+          tenantId,
+          dbOrder.shopify_order_id
+        ).run();
+        
+        updatedOrders.push({
+          shopifyOrderId: dbOrder.shopify_order_id,
+          deliveryDate: updateData.deliveryDate,
+          customerName: updateData.customerName
+        });
+        
+        console.log("[UPDATE-EXISTING] Successfully updated order:", dbOrder.shopify_order_id);
+        
+      } catch (error) {
+        console.error("[UPDATE-EXISTING] Failed to update order:", dbOrder.shopify_order_id, error);
+        failedUpdates.push({
+          shopifyOrderId: dbOrder.shopify_order_id,
+          error: error.message
+        });
+      }
+    }
+    
+    console.log("[UPDATE-EXISTING] Completed update process. Updated:", updatedOrders.length, "Failed:", failedUpdates.length);
+    
+    return c.json({ 
+      success: true, 
+      updatedOrders, 
+      failedUpdates,
+      totalProcessed: updatedOrders.length,
+      message: `Updated ${updatedOrders.length} orders with latest Shopify data while preserving local changes`
+    });
+    
+  } catch (error) {
+    console.error("Error updating existing orders:", error);
+    return c.json({ error: "Failed to update orders", details: error.message }, 500);
+  }
+});
+
 // --- Date normalization utility ---
 function normalizeDateToISO(dateStr: string): string | null {
   // Accepts dd/mm/yyyy, returns yyyy-mm-dd
