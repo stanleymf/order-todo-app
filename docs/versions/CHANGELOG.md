@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.2] - 2025-01-15
+
+### Fixed
+- **DashboardCard Eye Icon**: Fixed eye icon to properly open ProductImageModal with product images and descriptions
+- **Card Interaction**: Fixed collapse/expand behavior to trigger only on white space clicks, not eye icon or status buttons
+- **Notes Interaction**: Fixed notes textbox to prevent card collapse when clicking or editing
+- **ProductImageModal Integration**: Properly integrated with saved products API for image lookup by product/variant ID
+- **Product Data Extraction**: Enhanced product info extraction for both GraphQL and REST API formats
+
 ## [1.5.1] - 2025-01-15
 
 ### Enhanced

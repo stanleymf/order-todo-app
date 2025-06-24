@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
 import { Card, CardContent, CardHeader } from "./ui/card"
 import { Button } from "./ui/button"
 import { Badge } from "./ui/badge"
@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import { ProductImageModal } from "./shared/ProductImageModal"
 import { useAuth } from "../contexts/AuthContext"
+import { syncShopifyProduct } from "../services/api"
 import type { Order, User as UserType } from "../types"
 import type { OrderCardField } from "../types/orderCardFields"
 
@@ -21,6 +22,7 @@ interface ProcessedOrder extends Order {
   timeWindow?: string
   isExpress?: boolean
   storeData?: any
+  storeId?: string
   difficultyLabel?: string
   productTypeLabel?: string
   savedProductData?: {
@@ -51,217 +53,182 @@ export function DashboardCard({
   currentUser,
   isMobileView = false
 }: DashboardCardProps) {
+  const { tenant } = useAuth()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
-  const [notes, setNotes] = useState(order.notes || "")
-  const [isProductImageModalOpen, setIsProductImageModalOpen] = useState(false)
-  const [productLabels, setProductLabels] = useState<{
-    difficultyLabel?: string
-    difficultyColor?: string
-    productTypeLabel?: string
-    productTypeColor?: string
-  }>({})
+  const [localNotes, setLocalNotes] = useState(order.notes || "")
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false)
 
-  const { tenant } = useAuth()
-
-  // Get field values using config mappings
+  // Memoized field value getter
   const getFieldValue = (field: OrderCardField): string => {
     try {
-      // Handle special fields first
-      switch (field.id) {
-        case 'difficultyLabel':
-          return productLabels.difficultyLabel || "Standard"
-        case 'productTypeLabel':
-          return productLabels.productTypeLabel || "Arrangement"
-        case 'timeslot':
-          return order.timeWindow || extractTimeslotFromTags() || "Time not specified"
-        case 'orderDate':
-          return order.deliveryDate || extractDateFromTags() || "Date not specified"
-        case 'addOns':
-          return extractAddOnsFromData() || "Not set"
-        case 'notes':
-          return order.notes || "Not set"
-        case 'isCompleted':
-          return order.status === 'completed' ? 'Completed' : 'Pending'
-        case 'assignedTo':
-          const assignedFlorist = florists.find(f => f.id === order.assignedTo)
-          return assignedFlorist?.name || "Unassigned"
+      if (!order.shopifyOrderData) return "N/A"
+      
+      // Handle special cases
+      if (field.id === 'timeslot') {
+        return extractTimeslotFromTags() || "No timeslot"
       }
-
-      // Handle Shopify field mappings
-      if (field.shopifyFields && order.shopifyOrderData) {
+      if (field.id === 'orderDate') {
+        return extractDateFromTags() || order.deliveryDate || "No date"
+      }
+      if (field.id === 'addOns') {
+        return extractAddOnsFromData() || "None"
+      }
+      if (field.id === 'customerName') {
+        return order.customerName || "N/A"
+      }
+      if (field.id === 'orderNumber') {
+        return order.shopifyOrderId || "N/A"
+      }
+      if (field.id === 'status') {
+        return order.status?.charAt(0).toUpperCase() + order.status?.slice(1) || "N/A"
+      }
+      if (field.id === 'assignedTo') {
+        const florist = florists.find(f => f.id === order.assignedTo)
+        return florist ? florist.name : "Unassigned"
+      }
+      if (field.id === 'notes') {
+        return order.notes || "No notes"
+      }
+      
+      // Handle Shopify fields
+      if (field.shopifyFields && field.shopifyFields.length > 0) {
         for (const shopifyField of field.shopifyFields) {
-          let value = getNestedValue(order.shopifyOrderData, shopifyField)
-          
-          if (value !== undefined && value !== null) {
-            // Apply transformation if specified
-            if (field.transformation === 'extract' && field.transformationRule) {
-              const regex = new RegExp(field.transformationRule, 'i')
-              const match = String(value).match(regex)
-              value = match ? match[1] || match[0] : value
-            }
+          const value = getNestedValue(order.shopifyOrderData, shopifyField)
+          if (value !== undefined && value !== null && value !== "") {
             return String(value)
           }
         }
       }
-
-      // Fallback to order properties
-      const orderValue = getNestedValue(order, field.id)
-      return orderValue !== undefined && orderValue !== null ? String(orderValue) : "Not specified"
+      
+      return "N/A"
     } catch (error) {
       console.error(`Error getting field value for ${field.id}:`, error)
-      return "Error loading field"
+      return "Error"
     }
   }
 
+  // Helper function to get nested values from objects
   const getNestedValue = (obj: any, path: string): any => {
     return path.split('.').reduce((current, key) => {
-      if (current && typeof current === 'object' && key in current) {
-        return current[key]
-      }
-      return undefined
+      return current && current[key] !== undefined ? current[key] : undefined
     }, obj)
   }
 
   // Extract timeslot from tags
   const extractTimeslotFromTags = (): string | null => {
-    if (!order.shopifyOrderData?.tags) return null
-    const timePattern = /\b(\d{1,2}:\d{2}-\d{1,2}:\d{2})\b/
-    const match = order.shopifyOrderData.tags.match(timePattern)
-    return match ? match[1] : null
+    const tags = order.shopifyOrderData?.tags || ""
+    const timeRegex = /\b(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\b/
+    const match = tags.match(timeRegex)
+    return match ? match[0] : null
   }
 
   // Extract date from tags
   const extractDateFromTags = (): string | null => {
-    if (!order.shopifyOrderData?.tags) return null
-    const datePattern = /\b(\d{1,2}\/\d{1,2}\/\d{4})\b/
-    const match = order.shopifyOrderData.tags.match(datePattern)
-    return match ? match[1] : null
+    const tags = order.shopifyOrderData?.tags || ""
+    const dateRegex = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/
+    const match = tags.match(dateRegex)
+    return match ? match[0] : null
   }
 
-  // Extract add-ons from order data
+  // Extract add-ons from line items
   const extractAddOnsFromData = (): string | null => {
-    // Check line items for add-ons
-    if (order.shopifyOrderData?.line_items) {
-      const addOns = order.shopifyOrderData.line_items
-        .filter((item: any) => item.title?.toLowerCase().includes('add'))
-        .map((item: any) => item.title)
-      if (addOns.length > 0) {
-        return addOns.join(', ')
-      }
+    try {
+      const lineItems = order.shopifyOrderData?.lineItems?.edges || order.shopifyOrderData?.line_items || []
+      if (lineItems.length === 0) return null
+      
+      const addOns = lineItems
+        .filter((item: any) => {
+          const title = item.node?.title || item.title || ""
+          return title.toLowerCase().includes('add-on') || title.toLowerCase().includes('addon')
+        })
+        .map((item: any) => item.node?.title || item.title)
+      
+      return addOns.length > 0 ? addOns.join(', ') : null
+    } catch (error) {
+      console.error('Error extracting add-ons:', error)
+      return null
     }
-    return null
   }
 
-  // Get product title and variant for display
+  // Get product information
   const getProductInfo = () => {
-    if (order.shopifyOrderData?.line_items?.[0]) {
-      const firstItem = order.shopifyOrderData.line_items[0]
+    try {
+      // Check GraphQL format first (lineItems.edges)
+      const graphQLLineItems = order.shopifyOrderData?.lineItems?.edges
+      if (graphQLLineItems && graphQLLineItems.length > 0) {
+        const firstItem = graphQLLineItems[0].node
+        return {
+          productTitle: firstItem.title || 'Unknown Product',
+          variantTitle: firstItem.variant?.title || null,
+          productId: firstItem.product?.id?.replace('gid://shopify/Product/', '') || null,
+          variantId: firstItem.variant?.id?.replace('gid://shopify/ProductVariant/', '') || null
+        }
+      }
+      
+      // Fallback to REST format (line_items)
+      const restLineItems = order.shopifyOrderData?.line_items
+      if (restLineItems && restLineItems.length > 0) {
+        const firstItem = restLineItems[0]
+        return {
+          productTitle: firstItem.title || 'Unknown Product',
+          variantTitle: firstItem.variant_title || null,
+          productId: firstItem.product_id?.toString() || null,
+          variantId: firstItem.variant_id?.toString() || null
+        }
+      }
+      
       return {
-        productTitle: firstItem.title || firstItem.name || "Product",
-        variantTitle: firstItem.variant_title || "",
-        productId: firstItem.product_id,
-        variantId: firstItem.variant_id,
+        productTitle: 'Unknown Product',
+        variantTitle: null,
+        productId: null,
+        variantId: null
+      }
+    } catch (error) {
+      console.error('Error getting product info:', error)
+      return {
+        productTitle: 'Error loading product',
+        variantTitle: null,
+        productId: null,
+        variantId: null
       }
     }
-    return {
-      productTitle: "Product",
-      variantTitle: "",
-      productId: undefined,
-      variantId: undefined,
-    }
   }
+
+  // Get product labels from saved products
+  const productLabels = useMemo(() => {
+    try {
+      if (order.savedProductData?.labelNames && order.savedProductData.labelNames.length > 0) {
+        const difficultyIndex = order.savedProductData.labelCategories?.indexOf('difficulty')
+        const productTypeIndex = order.savedProductData.labelCategories?.indexOf('productType')
+        
+        return {
+          difficultyLabel: difficultyIndex !== -1 ? order.savedProductData.labelNames[difficultyIndex] : null,
+          difficultyColor: difficultyIndex !== -1 ? order.savedProductData.labelColors[difficultyIndex] : null,
+          productTypeLabel: productTypeIndex !== -1 ? order.savedProductData.labelNames[productTypeIndex] : null,
+          productTypeColor: productTypeIndex !== -1 ? order.savedProductData.labelColors[productTypeIndex] : null
+        }
+      }
+      
+      // Fallback to processed order labels
+      return {
+        difficultyLabel: order.difficultyLabel || null,
+        difficultyColor: null,
+        productTypeLabel: order.productTypeLabel || null,
+        productTypeColor: null
+      }
+    } catch (error) {
+      console.error('Error processing product labels:', error)
+      return {
+        difficultyLabel: null,
+        difficultyColor: null,
+        productTypeLabel: null,
+        productTypeColor: null
+      }
+    }
+  }, [order.savedProductData, order.difficultyLabel, order.productTypeLabel])
 
   const productInfo = getProductInfo()
-
-  // Fetch product labels from saved products API
-  const fetchProductLabels = useCallback(async () => {
-    if (!tenant?.id || !productInfo.productId || !productInfo.variantId) return
-
-    const cacheKey = `${productInfo.productId}-${productInfo.variantId}`
-    
-    // Check cache first
-    if (productLabelCache.has(cacheKey)) {
-      const cached = productLabelCache.get(cacheKey)
-      if (cached?.labelNames && cached?.labelCategories && cached?.labelColors) {
-        const difficultyIndex = cached.labelCategories.findIndex((cat: string) => cat === 'difficulty')
-        const productTypeIndex = cached.labelCategories.findIndex((cat: string) => cat === 'productType')
-        
-        setProductLabels({
-          difficultyLabel: difficultyIndex >= 0 ? cached.labelNames[difficultyIndex] : undefined,
-          difficultyColor: difficultyIndex >= 0 ? cached.labelColors[difficultyIndex] : undefined,
-          productTypeLabel: productTypeIndex >= 0 ? cached.labelNames[productTypeIndex] : undefined,
-          productTypeColor: productTypeIndex >= 0 ? cached.labelColors[productTypeIndex] : undefined,
-        })
-      }
-      return
-    }
-
-    // Check if request is already pending
-    if (pendingRequests.has(cacheKey)) {
-      try {
-        const result = await pendingRequests.get(cacheKey)
-        if (result?.labelNames && result?.labelCategories && result?.labelColors) {
-          const difficultyIndex = result.labelCategories.findIndex((cat: string) => cat === 'difficulty')
-          const productTypeIndex = result.labelCategories.findIndex((cat: string) => cat === 'productType')
-          
-          setProductLabels({
-            difficultyLabel: difficultyIndex >= 0 ? result.labelNames[difficultyIndex] : undefined,
-            difficultyColor: difficultyIndex >= 0 ? result.labelColors[difficultyIndex] : undefined,
-            productTypeLabel: productTypeIndex >= 0 ? result.labelNames[productTypeIndex] : undefined,
-            productTypeColor: productTypeIndex >= 0 ? result.labelColors[productTypeIndex] : undefined,
-          })
-        }
-      } catch (error) {
-        console.error("Error waiting for pending request:", error)
-      }
-      return
-    }
-
-    try {
-      const jwt = localStorage.getItem("auth_token")
-      const fetchPromise = fetch(`/api/tenants/${tenant.id}/saved-products/by-shopify-id?shopify_product_id=${productInfo.productId}&shopify_variant_id=${productInfo.variantId}`, {
-        credentials: "include",
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-          "Content-Type": "application/json"
-        }
-      }).then(res => res.ok ? res.json() : Promise.reject('Network error'))
-
-      // Store the pending request
-      pendingRequests.set(cacheKey, fetchPromise)
-      
-      const result = await fetchPromise
-      
-      // Cache the result
-      productLabelCache.set(cacheKey, result)
-      
-      // Clean up pending request
-      pendingRequests.delete(cacheKey)
-      
-      if (result?.labelNames && result?.labelCategories && result?.labelColors) {
-        const difficultyIndex = result.labelCategories.findIndex((cat: string) => cat === 'difficulty')
-        const productTypeIndex = result.labelCategories.findIndex((cat: string) => cat === 'productType')
-        
-        setProductLabels({
-          difficultyLabel: difficultyIndex >= 0 ? result.labelNames[difficultyIndex] : undefined,
-          difficultyColor: difficultyIndex >= 0 ? result.labelColors[difficultyIndex] : undefined,
-          productTypeLabel: productTypeIndex >= 0 ? result.labelNames[productTypeIndex] : undefined,
-          productTypeColor: productTypeIndex >= 0 ? result.labelColors[productTypeIndex] : undefined,
-        })
-      }
-      
-    } catch (error) {
-      console.error("Failed to fetch product labels:", error)
-      // Clean up pending request on error
-      pendingRequests.delete(cacheKey)
-    }
-  }, [tenant?.id, productInfo.productId, productInfo.variantId])
-
-  // Fetch product labels on mount
-  useEffect(() => {
-    fetchProductLabels()
-  }, [fetchProductLabels])
 
   // Status update handlers
   const handleStatusUpdate = async (newStatus: 'pending' | 'assigned' | 'completed') => {
@@ -284,19 +251,15 @@ export function DashboardCard({
     }
   }
 
-
-
+  // Notes update handler
   const handleNotesUpdate = async () => {
-    if (isUpdating || notes === order.notes) return
+    if (localNotes === order.notes) return
     
-    setIsUpdating(true)
     try {
-      await onUpdate(order.id, { notes })
+      await onUpdate(order.id, { notes: localNotes })
     } catch (error) {
       console.error("Failed to update notes:", error)
-      setNotes(order.notes || "") // Revert on error
-    } finally {
-      setIsUpdating(false)
+      setLocalNotes(order.notes || "")
     }
   }
 
@@ -322,15 +285,43 @@ export function DashboardCard({
     }
   }
 
+  // Handle eye icon click to open ProductImageModal
+  const handleEyeIconClick = (e: React.MouseEvent) => {
+    e.stopPropagation() // Prevent card expansion
+    setIsImageModalOpen(true)
+  }
+
+  // Handle card click for expand/collapse (white space)
+  const handleCardClick = () => {
+    setIsExpanded(!isExpanded)
+  }
+
+  // Handle notes click to prevent card collapse
+  const handleNotesClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+  }
+
+  // Handle sync product for ProductImageModal
+  const handleSyncProduct = async (shopifyProductId: string) => {
+    if (!tenant?.id) return
+    try {
+      await syncShopifyProduct(tenant.id, order.storeId || '', shopifyProductId)
+    } catch (error) {
+      console.error('Failed to sync product:', error)
+      throw error
+    }
+  }
+
   // Check if order is express
   const isExpress = order.shopifyOrderData?.tags?.toLowerCase().includes('express') || false
 
   return (
     <>
       <Card 
-        className={`transition-all duration-200 hover:shadow-md border ${
+        className={`transition-all duration-200 hover:shadow-md border cursor-pointer ${
           isExpress ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200'
         } ${isExpanded ? 'ring-2 ring-blue-500' : ''}`}
+        onClick={handleCardClick}
       >
         <CardHeader className={`pb-3 ${isMobileView ? 'p-3' : 'p-4'}`}>
           {/* Collapsed State */}
@@ -346,11 +337,11 @@ export function DashboardCard({
                     {productInfo.productTitle}
                   </h3>
                   
-                  {/* Eye icon for expansion */}
+                  {/* Eye icon for ProductImageModal */}
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setIsExpanded(!isExpanded)}
+                    onClick={handleEyeIconClick}
                     className="p-1 h-6 w-6 text-gray-400 hover:text-gray-600 flex-shrink-0"
                   >
                     <Eye className="h-3 w-3" />
@@ -372,7 +363,10 @@ export function DashboardCard({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleStatusUpdate('pending')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusUpdate('pending')
+                }}
                 disabled={isUpdating}
                 className={getStatusButtonStyle('pending').className}
               >
@@ -383,7 +377,10 @@ export function DashboardCard({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleStatusUpdate('assigned')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusUpdate('assigned')
+                }}
                 disabled={isUpdating}
                 className={getStatusButtonStyle('assigned').className}
               >
@@ -394,7 +391,10 @@ export function DashboardCard({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => handleStatusUpdate('completed')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusUpdate('completed')
+                }}
                 disabled={isUpdating}
                 className={getStatusButtonStyle('completed').className}
               >
@@ -507,24 +507,21 @@ export function DashboardCard({
                   Status:
                 </label>
                 <p className={`font-medium ${isMobileView ? 'text-sm' : ''}`}>
-                  {order.status === 'completed' ? 'Completed' : order.status === 'assigned' ? `Assigned${currentUser && order.assignedTo === currentUser.id ? ` to ${currentUser.name}` : ''}` : 'Pending'}
+                  {getFieldValue({ id: 'status' } as OrderCardField)}
                 </p>
               </div>
 
-              {/* Editable Notes Textbox */}
-              <div className="space-y-2">
+              {/* Editable Notes */}
+              <div onClick={handleNotesClick}>
                 <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
                   Notes:
                 </label>
                 <Textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
+                  value={localNotes}
+                  onChange={(e) => setLocalNotes(e.target.value)}
                   onBlur={handleNotesUpdate}
-                  onClick={(e) => e.stopPropagation()} // Prevent collapse on click
-                  placeholder="Add notes..."
-                  disabled={isUpdating}
-                  className={`resize-none min-h-[60px] ${isMobileView ? 'text-sm' : ''}`}
-                  style={{ minHeight: '60px' }}
+                  placeholder="Add order notes..."
+                  className="mt-1 min-h-[80px] resize-none"
                 />
               </div>
             </div>
@@ -534,10 +531,18 @@ export function DashboardCard({
 
       {/* Product Image Modal */}
       <ProductImageModal
-        isOpen={isProductImageModalOpen}
-        onClose={() => setIsProductImageModalOpen(false)}
+        isOpen={isImageModalOpen}
+        onClose={() => setIsImageModalOpen(false)}
         shopifyProductId={productInfo.productId}
         shopifyVariantId={productInfo.variantId}
+        tenantId={tenant?.id}
+        notes={localNotes}
+        onNotesChange={setLocalNotes}
+        onSave={async (notes) => {
+          setLocalNotes(notes)
+          await onUpdate(order.id, { notes })
+        }}
+        onSyncProduct={handleSyncProduct}
       />
     </>
   )
