@@ -141,7 +141,7 @@ export function Dashboard() {
             className={`${isMobileView ? "space-y-4" : "space-y-6"}`}
           >
             <TabsList
-              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-6"}`}
+              className={`grid w-full ${isMobileView ? "grid-cols-2 h-10" : "grid-cols-5"}`}
             >
               <TabsTrigger
                 value="dashboard"
@@ -149,13 +149,6 @@ export function Dashboard() {
               >
                 <BarChart3 className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                 Dashboard
-              </TabsTrigger>
-              <TabsTrigger
-                value="orders"
-                className={`flex items-center gap-2 ${isMobileView ? "text-xs px-2" : ""}`}
-              >
-                <Calendar className={`${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
-                Orders
               </TabsTrigger>
               <TabsTrigger
                 value="analytics"

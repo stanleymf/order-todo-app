@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext"
 import { Login } from "./components/Login"
 import { Dashboard } from "./components/Dashboard"
 import { DashboardView } from "./components/DashboardView"
-import { OrdersView } from "./components/OrdersView"
+
 import { ProductManagement } from "./components/ProductManagement"
 import { Settings } from "./components/Settings"
 import { AIIntegration } from "./components/AIIntegration"
@@ -68,7 +68,7 @@ function AppContent() {
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>}>
             <Route index element={<DashboardView />} />
             <Route path="dashboard" element={<DashboardView />} />
-            <Route path="orders" element={<OrdersView />} />
+
             <Route path="analytics" element={<Analytics />} />
             <Route path="products" element={<ProductsManagementRoute><ProductManagement /></ProductsManagementRoute>} />
             <Route path="ai-integration" element={<AIIntegration />} />
