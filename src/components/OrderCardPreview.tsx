@@ -73,14 +73,20 @@ interface SampleOrder {
 
 const getValueFromShopifyData = (sourcePath: string, data: any): any => {
   if (!sourcePath || !data) {
+    console.log('getValueFromShopifyData: Missing sourcePath or data', { sourcePath, hasData: !!data })
     return null;
   }
+
+  console.log('getValueFromShopifyData: Starting extraction', { sourcePath, dataKeys: Object.keys(data) })
 
   const parts = sourcePath.split('.');
   let current: any = data;
 
   for (const part of parts) {
+    console.log('getValueFromShopifyData: Processing part', { part, currentType: typeof current, currentKeys: current && typeof current === 'object' ? Object.keys(current) : 'N/A' })
+    
     if (current === null || typeof current === 'undefined') {
+      console.log('getValueFromShopifyData: Current is null/undefined, returning null')
       return null;
     }
 
@@ -91,19 +97,24 @@ const getValueFromShopifyData = (sourcePath: string, data: any): any => {
       if (nextPart) {
         const item = current.find(d => d.name === nextPart);
         current = item ? item.value : null;
+        console.log('getValueFromShopifyData: Array processing', { nextPart, item, current })
         // We've used the next part, so we skip it in the next iteration
         parts.splice(parts.indexOf(part) + 1, 1);
       } else {
         // If there's no next part, it means we're targeting the array itself (like 'tags')
+        console.log('getValueFromShopifyData: Returning array', current)
         return current;
       }
     } else if (typeof current === 'object' && part in current) {
       current = current[part];
+      console.log('getValueFromShopifyData: Object property access', { part, newCurrent: current })
     } else {
+      console.log('getValueFromShopifyData: Property not found', { part, currentType: typeof current, currentKeys: current && typeof current === 'object' ? Object.keys(current) : 'N/A' })
       return null;
     }
   }
 
+  console.log('getValueFromShopifyData: Final result', current)
   return current;
 };
 
@@ -635,6 +646,8 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
   // Effect to load real data into the preview
   useEffect(() => {
     if (realOrderData) {
+      console.log('OrderCardPreview: Processing real order data', realOrderData)
+      
       const newInitialValues: { [key: string]: any } = {}
       fields.forEach((field) => {
         // Start with a null value for all fields when real data is present
@@ -642,11 +655,20 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
         if (field.shopifyFields && field.shopifyFields.length > 0) {
           const shopifyPath = field.shopifyFields[0]
           const value = getValueFromShopifyData(shopifyPath, realOrderData)
+          console.log(`OrderCardPreview: Field ${field.id} (${field.label})`, {
+            shopifyPath,
+            value,
+            hasValue: value !== undefined && value !== null
+          })
           if (value !== undefined && value !== null) {
             newInitialValues[field.id] = value
           }
+        } else {
+          console.log(`OrderCardPreview: Field ${field.id} (${field.label}) has no shopify fields mapping`)
         }
       })
+
+      console.log('OrderCardPreview: New initial values', newInitialValues)
 
       // Find the difficulty label from the fetched data and update the ID for the collapsed view
       const difficultyLabelName = newInitialValues.difficultyLabel
@@ -659,11 +681,17 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
 
       // Important: replace the entire sampleOrder with new values
       // This prevents fallback to old sample data for unmapped fields.
-      setSampleOrder((prev) => ({
-        ...prev, // Keep structure and things like id, isCompleted
-        ...Object.fromEntries(fields.map((f) => [f.id, null])), // Reset all fields
-        ...newInitialValues, // Apply new values
-      }))
+      setSampleOrder((prev) => {
+        const newOrder = {
+          ...prev, // Keep structure and things like id, isCompleted
+          ...Object.fromEntries(fields.map((f) => [f.id, null])), // Reset all fields
+          ...newInitialValues, // Apply new values
+        }
+        console.log('OrderCardPreview: Updated sample order', newOrder)
+        return newOrder
+      })
+    } else {
+      console.log('OrderCardPreview: No real order data available')
     }
   }, [realOrderData, fields, difficultyLabels])
 
@@ -742,12 +770,33 @@ export const OrderCardPreview: React.FC<OrderCardPreviewProps> = ({
       // Use the first mapping for now. Can be enhanced later.
       const sourcePath = field.shopifyFields[0]
       rawValue = getValueFromShopifyData(sourcePath, realOrderData)
+      
+      // Debug logging
+      console.log(`Field ${fieldId} (${field.label}):`, {
+        sourcePath,
+        rawValue,
+        hasRealOrderData: !!realOrderData,
+        shopifyFields: field.shopifyFields
+      })
     } else {
       // Fallback to sample data if no real order is present
       rawValue = (sampleOrder as any)[fieldId]
+      
+      // Debug logging
+      console.log(`Field ${fieldId} (${field.label}):`, {
+        sourcePath: 'sample data',
+        rawValue,
+        hasRealOrderData: !!realOrderData,
+        hasShopifyFields: !!(field.shopifyFields && field.shopifyFields.length > 0)
+      })
     }
 
-    return applyTransformation(rawValue, field)
+    const transformedValue = applyTransformation(rawValue, field)
+    
+    // Debug logging for final value
+    console.log(`Field ${fieldId} final value:`, transformedValue)
+    
+    return transformedValue
   }, [fields, realOrderData, sampleOrder])
 
   // ============================================================================

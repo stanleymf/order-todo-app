@@ -73,7 +73,7 @@ import {
 import { cn } from "../lib/utils"
 import { ScrollArea } from "./ui/scroll-area"
 import { toast } from "sonner"
-import { OrderCardField, ORDER_CARD_FIELDS } from "../types/orderCardFields"
+import { OrderCardField, ORDER_CARD_FIELDS, OrderCardFieldType } from "../types/orderCardFields"
 
 // Predefined regex patterns for common extractions
 const REGEX_PATTERNS = {
@@ -133,59 +133,59 @@ function getShopifyFieldOptions(): ShopifyFieldCategory[] {
       fields: [
         { value: "id", label: "Order ID" },
         { value: "name", label: "Order Name" },
-        { value: "order_number", label: "Order Number" },
-        { value: "created_at", label: "Created At" },
+        { value: "orderNumber", label: "Order Number" },
+        { value: "createdAt", label: "Created At" },
         { value: "note", label: "Note" },
         { value: "tags", label: "Tags" },
-        { value: "fulfillment_status", label: "Fulfillment Status" },
-        { value: "financial_status", label: "Financial Status" },
+        { value: "displayFulfillmentStatus", label: "Fulfillment Status" },
+        { value: "displayFinancialStatus", label: "Financial Status" },
       ],
     },
     {
       name: "Product Information",
       fields: [
-        { value: "line_items.title", label: "Product Title" },
-        { value: "line_items.variant_title", label: "Product Variant" },
-        { value: "line_items.sku", label: "Product SKU" },
-        { value: "line_items.quantity", label: "Quantity" },
+        { value: "lineItems.edges.0.node.title", label: "Product Title" },
+        { value: "lineItems.edges.0.node.variant.title", label: "Product Variant" },
+        { value: "lineItems.edges.0.node.variant.sku", label: "Product SKU" },
+        { value: "lineItems.edges.0.node.quantity", label: "Quantity" },
       ],
     },
     {
       name: "Customer Information",
       fields: [
-        { value: "shipping_address.name", label: "Recipient Name" },
-        { value: "shipping_address.first_name", label: "First Name" },
-        { value: "shipping_address.last_name", label: "Last Name" },
-        { value: "shipping_address.email", label: "Email" },
-        { value: "shipping_address.phone", label: "Phone" },
-        { value: "shipping_address.address1", label: "Address Line 1" },
-        { value: "shipping_address.address2", label: "Address Line 2" },
-        { value: "shipping_address.city", label: "City" },
-        { value: "shipping_address.province", label: "Province/State" },
-        { value: "shipping_address.country", label: "Country" },
+        { value: "shippingAddress.name", label: "Recipient Name" },
+        { value: "shippingAddress.firstName", label: "First Name" },
+        { value: "shippingAddress.lastName", label: "Last Name" },
+        { value: "email", label: "Email" },
+        { value: "phone", label: "Phone" },
+        { value: "shippingAddress.address1", label: "Address Line 1" },
+        { value: "shippingAddress.address2", label: "Address Line 2" },
+        { value: "shippingAddress.city", label: "City" },
+        { value: "shippingAddress.province", label: "Province/State" },
+        { value: "shippingAddress.country", label: "Country" },
       ],
     },
     {
       name: "Note Attributes",
       fields: [
-        { value: "note_attributes.delivery_date", label: "Delivery Date" },
-        { value: "note_attributes.delivery_time", label: "Delivery Time" },
-        { value: "note_attributes.card_message", label: "Card Message" },
-        { value: "note_attributes.delivery_instructions", label: "Delivery Instructions" },
-        { value: "note_attributes.add_ons", label: "Add-Ons" },
-        { value: "note_attributes.timeslot", label: "Timeslot" },
-        { value: "note_attributes.recipient_name", label: "Recipient Name" },
-        { value: "note_attributes.occasion", label: "Occasion" },
+        { value: "noteAttributes.delivery_date", label: "Delivery Date" },
+        { value: "noteAttributes.delivery_time", label: "Delivery Time" },
+        { value: "noteAttributes.card_message", label: "Card Message" },
+        { value: "noteAttributes.delivery_instructions", label: "Delivery Instructions" },
+        { value: "noteAttributes.add_ons", label: "Add-Ons" },
+        { value: "noteAttributes.timeslot", label: "Timeslot" },
+        { value: "noteAttributes.recipient_name", label: "Recipient Name" },
+        { value: "noteAttributes.occasion", label: "Occasion" },
       ],
     },
     {
       name: "Financial Information",
       fields: [
-        { value: "total_price", label: "Total Price" },
-        { value: "subtotal_price", label: "Subtotal" },
-        { value: "total_tax", label: "Total Tax" },
-        { value: "total_discounts", label: "Total Discounts" },
-        { value: "currency", label: "Currency" },
+        { value: "totalPriceSet.shopMoney.amount", label: "Total Price" },
+        { value: "subtotalPriceSet.shopMoney.amount", label: "Subtotal" },
+        { value: "totalTaxSet.shopMoney.amount", label: "Total Tax" },
+        { value: "totalDiscountsSet.shopMoney.amount", label: "Total Discounts" },
+        { value: "currencyCode", label: "Currency" },
       ],
     },
   ]
@@ -230,7 +230,7 @@ export const OrderCardSettings: React.FC = () => {
       const allFields = getAllFields()
       const mergedConfig = allFields.map(field => {
         const savedField = data.fields?.find((f: any) => f.id === field.id)
-        return savedField ? { ...field, ...savedField, group: field.group } : field
+        return savedField ? { ...field, ...savedField } : field
       })
       setConfig(mergedConfig)
     } catch (err) {
@@ -298,7 +298,7 @@ export const OrderCardSettings: React.FC = () => {
   const handleToggleFieldVisibility = (fieldId: string) => {
     setConfig(prevConfig =>
       prevConfig.map(field =>
-        field.id === fieldId ? { ...field, is_visible: !field.is_visible } : field
+        field.id === fieldId ? { ...field, isVisible: !field.isVisible } : field
       )
     )
   }
@@ -327,13 +327,12 @@ export const OrderCardSettings: React.FC = () => {
   const handleAddField = () => {
     const newField: OrderCardField = {
       id: `custom_${Date.now()}`,
-      label: `Custom Field ${config.length + 1}`,
-      description: 'A new custom field.',
-      group: newFieldGroup,
+      label: `New ${newFieldType} Field`,
+      description: `Custom ${newFieldType} field`,
       type: newFieldType,
-      is_visible: true,
-      is_system: false,
-      is_editable: true,
+      isVisible: true,
+      isSystem: false,
+      isEditable: true,
     }
     setConfig(prev => [...prev, newField])
     setShowAddFieldDialog(false)
@@ -434,15 +433,6 @@ export const OrderCardSettings: React.FC = () => {
     return <Alert variant="destructive">{error}</Alert>
   }
 
-  const groupedFields = config.reduce((acc, field) => {
-    const group = field.group || "General"
-    if (!acc[group]) {
-      acc[group] = []
-    }
-    acc[group].push(field)
-    return acc
-  }, {} as Record<string, OrderCardField[]>)
-
   // Convert config to ExternalOrderCardField format for preview
   const previewFields: OrderCardField[] = config.map(field => ({
     ...field
@@ -507,34 +497,29 @@ export const OrderCardSettings: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {Object.entries(groupedFields).map(([groupName, fields]) => (
-              <Collapsible key={groupName} defaultOpen={groupName === 'Order Fields'}>
-                <CollapsibleTrigger className="flex justify-between items-center w-full bg-gray-50 p-3 rounded-md">
-                  <h3 className="text-lg font-semibold">{groupName}</h3>
-                  <ChevronDown className="h-5 w-5" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="p-4 space-y-4">
-                  {fields.map((field, index) => (
-                    <div key={field.id} className="relative">
-                      <FieldEditor 
-                        field={field} 
-                        onFieldChange={handleFieldChange}
-                        productLabels={productLabels}
-                      />
-                      {field.id.startsWith('custom_') && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveField(field.id)}
-                          className="absolute top-2 right-2 text-red-500 hover:text-red-700 h-6 w-6 p-0"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      )}
-                    </div>
-                  ))}
-                </CollapsibleContent>
-              </Collapsible>
+            {config.map((field) => (
+              <div
+                key={field.id}
+                className={`p-4 border rounded-lg ${
+                  field.isVisible ? "bg-white" : "bg-gray-50"
+                }`}
+              >
+                <FieldEditor 
+                  field={field} 
+                  onFieldChange={handleFieldChange}
+                  productLabels={productLabels}
+                />
+                {field.id.startsWith('custom_') && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleRemoveField(field.id)}
+                    className="absolute top-2 right-2 text-red-500 hover:text-red-700 h-6 w-6 p-0"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
             ))}
           </div>
         </CardContent>
@@ -551,8 +536,8 @@ export const OrderCardSettings: React.FC = () => {
               <div>
                 <Label>Field Type</Label>
                 <Select
-                  value={field.type}
-                  onValueChange={value => onFieldChange(field.id, "type", value)}
+                  value={newFieldType}
+                  onValueChange={value => setNewFieldType(value as OrderCardFieldType)}
                 >
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
@@ -563,7 +548,6 @@ export const OrderCardSettings: React.FC = () => {
                     <SelectItem value="date">Date</SelectItem>
                     <SelectItem value="tags">Tags</SelectItem>
                     <SelectItem value="status">Status</SelectItem>
-                    <SelectItem value="label">Label</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -616,14 +600,14 @@ const FieldEditor: React.FC<{
           </div>
           <div className="flex items-center space-x-2">
             <Switch
-              checked={field.is_visible}
-              onCheckedChange={() => onFieldChange(field.id, "is_visible", !field.is_visible)}
+              checked={field.isVisible}
+              onCheckedChange={() => onFieldChange(field.id, "isVisible", !field.isVisible)}
             />
             <span>Visible</span>
           </div>
         </div>
 
-        {field.is_visible && (
+        {field.isVisible && (
           <div className="space-y-2">
             <div>
               <Label className="text-xs font-medium">Display Label</Label>
@@ -633,28 +617,6 @@ const FieldEditor: React.FC<{
                 className="h-8 text-sm"
               />
             </div>
-            
-            {field.type === "label" && (
-              <div>
-                <Label className="text-xs font-medium">Label</Label>
-                <Select
-                  value={field.labelId || ""}
-                  onValueChange={value => onFieldChange(field.id, "labelId", value)}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue placeholder="Select label" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto-generated</SelectItem>
-                    {productLabels.map(label => (
-                      <SelectItem key={label.id} value={label.id}>
-                        {label.name} ({label.category})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
         )}
       </div>

@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.4] - 2025-01-13
+
+### 🔧 **OrderCardPreview Fixes**
+
+- **Fixed Field Mappings**: Updated Shopify field mappings to use correct GraphQL response structure (camelCase instead of snake_case).
+- **Product Information Mapping**: Fixed `lineItems.edges.0.node.title` mapping for product titles and variants.
+- **Order Data Display**: Resolved issue where order details weren't showing when fetching real orders from Shopify.
+- **Field Mapping Updates**: Updated all Shopify field options to match actual GraphQL API response structure:
+  - `line_items.title` → `lineItems.edges.0.node.title`
+  - `line_items.variant_title` → `lineItems.edges.0.node.variant.title`
+  - `order_number` → `orderNumber`
+  - `created_at` → `createdAt`
+  - `fulfillment_status` → `displayFulfillmentStatus`
+  - `financial_status` → `displayFinancialStatus`
+- **Debugging Support**: Added comprehensive debugging logs to track data extraction and field mapping issues.
+- **Linter Error Fixes**: Resolved TypeScript linter errors in OrderCardSettingsNew component.
+
+### 🐛 **Bug Fixes**
+- Fixed property name mismatches (`is_visible` → `isVisible`, `is_system` → `isSystem`)
+- Removed invalid field type references and problematic grouped field logic
+- Fixed field editor component property access issues
+
 ## [1.4.3] - 2025-01-13
 
 ### 🔄 **Saved Products Sync System**
