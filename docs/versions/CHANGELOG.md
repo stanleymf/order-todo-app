@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.10] - 2025-01-24
+
+### Fixed
+- **Order Fetching Logic**: Fixed critical issue where orders weren't populating after sync
+  - Added `getOrdersFromDbByDate` API function to fetch orders from database instead of Shopify API
+  - Updated `processOrdersReload` to use database endpoint after syncing orders
+  - Fixed dependency order in OrdersView component to prevent linter errors
+  - Added `orders-from-db-by-date` to public endpoints list
+  - Ensured proper classification of main orders vs add-ons after sync
+  - Support fetching orders for all stores or specific store selection
+
+### Technical
+- **API Endpoints**: Added new database orders endpoint for proper data flow
+- **Frontend Logic**: Fixed order processing pipeline to use correct data source
+- **Error Handling**: Improved error handling and logging for order sync operations
+
 ## [1.4.9] - 2025-06-24
 
 ### 🎯 **OrdersView Logic Implementation - Add-On Classification & Line Item Processing**
@@ -93,15 +109,21 @@ All notable changes to this project will be documented in this file.
 - **Enhanced UX**: Clear visual distinction between main orders and add-ons
 - **Future-Ready**: Foundation for advanced add-on processing workflows
 
-## [1.4.8] - 2025-06-24
+## [1.4.8] - 2025-01-24
 
-### 🐛 Bug Fixes & UI Improvements
+### Fixed
+- **Order Fetching Logic**: Fixed critical issue where orders weren't populating after sync
+  - Added `getOrdersFromDbByDate` API function to fetch orders from database instead of Shopify API
+  - Updated `processOrdersReload` to use database endpoint after syncing orders
+  - Fixed dependency order in OrdersView component to prevent linter errors
+  - Added `orders-from-db-by-date` to public endpoints list
+  - Ensured proper classification of main orders vs add-ons after sync
+  - Support fetching orders for all stores or specific store selection
 
-- **Product Image Modal Image Fix:** Fixed a backend bug where the `/api/tenants/:tenantId/saved-products/by-shopify-id` endpoint did not return image fields (`imageUrl`, `imageAlt`, `imageWidth`, `imageHeight`) for saved products. This caused product images to not display in the Product Image Modal even when present in the database. The endpoint now correctly returns all image fields.
-- **Modal UI Polish:** Removed the redundant custom close (X) button from the Product Image Modal header. The modal now only shows a single close button at the top right, matching the rest of the app's dialog UI.
-
-### 🚀 Deployment
-- Build and deploy completed for version 1.4.8. Product images now display correctly in the modal, and the UI is cleaner.
+### Technical
+- **API Endpoints**: Added new database orders endpoint for proper data flow
+- **Frontend Logic**: Fixed order processing pipeline to use correct data source
+- **Error Handling**: Improved error handling and logging for order sync operations
 
 ## [1.4.7] - 2025-01-13
 
