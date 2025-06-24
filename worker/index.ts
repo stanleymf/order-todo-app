@@ -460,10 +460,27 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           const expressItem = lineItems.find((item: any) => 
             (item.title || item.name || '').toLowerCase().includes('express')
           )
+          
+          // Debug the express item data
+          console.log('[EXPRESS-DEBUG] Express item found:', {
+            title: expressItem?.title,
+            name: expressItem?.name,
+            variant_title: expressItem?.variant_title,
+            variant: expressItem?.variant,
+            properties: expressItem?.properties,
+            fullItem: expressItem
+          })
+          
           if (expressItem && expressItem.variant_title) {
-            // Extract time pattern like "10:00 - 12:00" or "10:00-12:00"
-            const timeMatch = expressItem.variant_title.match(/(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})/i)
+            // Extract time pattern like "10:00 - 12:00", "10:00-12:00", "10:30AM - 11:30AM", or "15:30PM - 16:30PM"
+            const timeMatch = expressItem.variant_title.match(/(\d{1,2}:\d{2}(?:AM|PM)?\s*-\s*\d{1,2}:\d{2}(?:AM|PM)?)/i)
             expressTimeSlot = timeMatch ? timeMatch[1] : null
+            
+            console.log('[EXPRESS-DEBUG] Time extraction:', {
+              variant_title: expressItem.variant_title,
+              regex_match: timeMatch,
+              extracted_time: expressTimeSlot
+            })
           }
         }
         
@@ -562,6 +579,42 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       }
     }
 
+    // Fetch saved card states for this date
+    let cardStates: Record<string, any> = {}
+    try {
+      const { results: stateResults } = await c.env.DB.prepare(`
+        SELECT card_id, status, assigned_to, assigned_by, notes, updated_at
+        FROM order_card_states 
+        WHERE tenant_id = ? AND delivery_date = ?
+      `).bind(tenantId, date).all()
+
+      for (const state of stateResults || []) {
+        cardStates[state.card_id as string] = {
+          status: state.status,
+          assignedTo: state.assigned_to,
+          assignedBy: state.assigned_by,
+          notes: state.notes,
+          updatedAt: state.updated_at
+        }
+      }
+      console.log(`[ORDER-CARD-STATE] Loaded ${Object.keys(cardStates).length} saved states for date ${date}`)
+    } catch (error) {
+      console.error("Failed to load card states:", error)
+      // Continue without states
+    }
+
+    // Merge saved states into processed orders
+    for (const order of processedOrders) {
+      const savedState = cardStates[order.cardId]
+      if (savedState) {
+        order.status = savedState.status
+        order.assignedTo = savedState.assignedTo
+        order.assignedBy = savedState.assignedBy
+        order.notes = savedState.notes
+        order.updatedAt = savedState.updatedAt
+      }
+    }
+
     // Separate orders into main orders and add-ons
     const mainOrders = processedOrders.filter(order => !order.isAddOn)
     const addOnOrders = processedOrders.filter(order => order.isAddOn)
@@ -576,12 +629,153 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       stats: {
         total: processedOrders.length,
         mainOrders: mainOrders.length,
-        addOns: addOnOrders.length
+        addOns: addOnOrders.length,
+        // Add status-based stats
+        unassigned: processedOrders.filter(o => !o.status || o.status === 'unassigned').length,
+        assigned: processedOrders.filter(o => o.status === 'assigned').length,
+        completed: processedOrders.filter(o => o.status === 'completed').length
       }
     })
   } catch (error: any) {
     console.error("Error fetching orders from database:", error)
     return c.json({ error: "Failed to fetch orders from database", details: error.message }, 500)
+  }
+})
+
+// --- Order Card States API (PROTECTED) ---
+
+// Update order card status/notes
+app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const cardId = c.req.param("cardId")
+  const { status, notes, assignedTo, deliveryDate } = await c.req.json()
+
+  if (!deliveryDate) {
+    return c.json({ error: "Delivery date is required" }, 400)
+  }
+
+  try {
+    const jwtPayload = c.get('jwtPayload')
+    const currentUserId = jwtPayload?.sub || 'unknown'
+    
+    console.log(`[ORDER-CARD-STATE] Updating card ${cardId} for tenant ${tenantId}`)
+    
+    // Use INSERT OR REPLACE to handle both new and existing records
+    const result = await c.env.DB.prepare(`
+      INSERT OR REPLACE INTO order_card_states 
+      (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).bind(
+      tenantId, 
+      cardId, 
+      deliveryDate, 
+      status || 'unassigned', 
+      assignedTo || null, 
+      currentUserId, 
+      notes || null
+    ).run()
+
+    console.log(`[ORDER-CARD-STATE] Updated successfully: ${JSON.stringify(result)}`)
+    
+    return c.json({ 
+      success: true, 
+      cardId,
+      status: status || 'unassigned',
+      notes: notes || null,
+      assignedTo: assignedTo || null,
+      updatedAt: new Date().toISOString()
+    })
+  } catch (error: any) {
+    console.error("Error updating order card state:", error)
+    return c.json({ error: "Failed to update order card state", details: error.message }, 500)
+  }
+})
+
+// Get order card states for a specific date
+app.get("/api/tenants/:tenantId/order-card-states", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const date = c.req.query("date")
+
+  if (!date) {
+    return c.json({ error: "Date query parameter is required" }, 400)
+  }
+
+  try {
+    console.log(`[ORDER-CARD-STATE] Fetching states for tenant ${tenantId}, date ${date}`)
+    
+    const { results } = await c.env.DB.prepare(`
+      SELECT card_id, status, assigned_to, assigned_by, notes, updated_at
+      FROM order_card_states 
+      WHERE tenant_id = ? AND delivery_date = ?
+    `).bind(tenantId, date).all()
+
+    console.log(`[ORDER-CARD-STATE] Found ${results?.length || 0} states for date ${date}`)
+    
+    // Convert to map for easy lookup
+    const statesMap: Record<string, any> = {}
+    for (const state of results || []) {
+      statesMap[state.card_id] = {
+        status: state.status,
+        assignedTo: state.assigned_to,
+        assignedBy: state.assigned_by,
+        notes: state.notes,
+        updatedAt: state.updated_at
+      }
+    }
+    
+    return c.json({ states: statesMap })
+  } catch (error: any) {
+    console.error("Error fetching order card states:", error)
+    return c.json({ error: "Failed to fetch order card states", details: error.message }, 500)
+  }
+})
+
+// Bulk update multiple order card states
+app.post("/api/tenants/:tenantId/order-card-states/bulk", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const { updates, deliveryDate } = await c.req.json()
+
+  if (!deliveryDate || !Array.isArray(updates)) {
+    return c.json({ error: "Delivery date and updates array are required" }, 400)
+  }
+
+  try {
+    const jwtPayload = c.get('jwtPayload')
+    const currentUserId = jwtPayload?.sub || 'unknown'
+    
+    console.log(`[ORDER-CARD-STATE] Bulk updating ${updates.length} cards for tenant ${tenantId}`)
+    
+    // Prepare bulk insert/update
+    const stmt = c.env.DB.prepare(`
+      INSERT OR REPLACE INTO order_card_states 
+      (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `)
+    
+    const batch = updates.map(update => 
+      stmt.bind(
+        tenantId,
+        update.cardId,
+        deliveryDate,
+        update.status || 'unassigned',
+        update.assignedTo || null,
+        currentUserId,
+        update.notes || null
+      )
+    )
+    
+    const results = await c.env.DB.batch(batch)
+    
+    console.log(`[ORDER-CARD-STATE] Bulk update completed: ${results.length} operations`)
+    
+    return c.json({ 
+      success: true, 
+      updated: updates.length,
+      results: results.map(r => ({ success: r.success, changes: r.changes }))
+    })
+  } catch (error: any) {
+    console.error("Error bulk updating order card states:", error)
+    return c.json({ error: "Failed to bulk update order card states", details: error.message }, 500)
   }
 })
 

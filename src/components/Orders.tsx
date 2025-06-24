@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -72,9 +72,8 @@ export const Orders: React.FC = () => {
     loadInitialData()
   }, [tenant?.id])
 
-  const handleFetchOrders = async () => {
-    if (!tenant?.id) {
-      toast.error("No tenant selected")
+  const handleFetchOrders = useCallback(async () => {
+    if (!tenant?.id || !selectedDate) {
       return
     }
 
@@ -90,24 +89,37 @@ export const Orders: React.FC = () => {
       // Handle both old format (array) and new format (object with categories)
       if (Array.isArray(response)) {
         // Old format - treat all as main orders
+        console.log("Setting orders (old format):", response.length)
         setAllOrders(response)
         setMainOrders(response)
         setAddOnOrders([])
       } else {
         // New format with categories
+        console.log("Setting orders (new format):", {
+          all: response.orders?.length || 0,
+          main: response.mainOrders?.length || 0,
+          addOns: response.addOnOrders?.length || 0
+        })
         setAllOrders(response.orders || [])
         setMainOrders(response.mainOrders || [])
         setAddOnOrders(response.addOnOrders || [])
       }
       
-      toast.success(`Fetched ${(response.orders || response).length} orders for ${dateStr}`)
+      console.log(`Loaded ${(response.orders || response).length} orders for ${dateStr}`)
     } catch (error) {
       console.error("Failed to fetch orders:", error)
       toast.error("Failed to fetch orders")
     } finally {
       setLoading(false)
     }
-  }
+  }, [tenant?.id, selectedDate])
+
+  // Auto-load orders when date changes
+  useEffect(() => {
+    if (tenant?.id && selectedDate) {
+      handleFetchOrders()
+    }
+  }, [handleFetchOrders, tenant?.id, selectedDate])
 
   const handleUpdateOrders = () => {
     console.log("Updating orders...")
@@ -152,7 +164,15 @@ export const Orders: React.FC = () => {
     const unassignedCount = filteredAllOrders.filter(o => !o.status || o.status === 'unassigned').length
     const assignedCount = filteredAllOrders.filter(o => o.status === 'assigned').length
     const completedCount = filteredAllOrders.filter(o => o.status === 'completed').length
-    const addOnsCount = filteredAddOnOrders.length
+    
+    // Florist breakdown - count completed orders by florist
+    const floristBreakdown = filteredAllOrders
+      .filter(o => o.status === 'completed' && o.assignedTo)
+      .reduce((acc: any, order) => {
+        const florist = order.assignedTo || 'Unknown'
+        acc[florist] = (acc[florist] || 0) + 1
+        return acc
+      }, {})
 
     // Breakdown by store
     const storeBreakdown = stores.reduce((acc: any, store) => {
@@ -180,7 +200,7 @@ export const Orders: React.FC = () => {
       unassignedCount, 
       assignedCount, 
       completedCount,
-      addOnsCount,
+      floristBreakdown,
       storeBreakdown,
       difficultyBreakdown,
       productTypeBreakdown
@@ -351,14 +371,21 @@ export const Orders: React.FC = () => {
 
                 <Card className="border border-orange-200 bg-orange-50">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Add-Ons Count</CardTitle>
-                    <Gift className="h-4 w-4 text-orange-600" />
+                    <CardTitle className="text-sm font-medium">Completed by Florist</CardTitle>
+                    <UserCheck className="h-4 w-4 text-orange-600" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-orange-600">{stats.addOnsCount}</div>
-                    <p className="text-xs text-muted-foreground">
-                      Additional items
-                    </p>
+                    <div className="space-y-1">
+                      {Object.entries(stats.floristBreakdown).map(([florist, count]) => (
+                        <div key={florist} className="flex justify-between text-xs">
+                          <span className="truncate">{florist}:</span>
+                          <span className="font-semibold text-orange-600">{count as number}</span>
+                        </div>
+                      ))}
+                      {Object.keys(stats.floristBreakdown).length === 0 && (
+                        <div className="text-xs text-muted-foreground">No completed orders</div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </div>
@@ -384,7 +411,10 @@ export const Orders: React.FC = () => {
                 id="date"
                 type="date"
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => {
+                  console.log("Date changed to:", e.target.value)
+                  setSelectedDate(e.target.value)
+                }}
                 className="w-[180px]"
               />
             </div>
@@ -428,7 +458,10 @@ export const Orders: React.FC = () => {
             <h3 className="text-sm font-medium mb-3">Quick Actions</h3>
             <div className="flex flex-wrap gap-2">
               <Button 
-                onClick={handleFetchOrders}
+                onClick={() => {
+                  handleFetchOrders()
+                  toast.success("Refreshing orders...")
+                }}
                 disabled={loading}
                 className="gap-2"
               >
@@ -516,6 +549,7 @@ export const Orders: React.FC = () => {
                       isExpanded={false}
                       isAddOn={false}
                       onStatusChange={handleOrderStatusChange}
+                      deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
                     />
                   ))}
                 </div>
@@ -547,6 +581,7 @@ export const Orders: React.FC = () => {
                       isExpanded={false}
                       isAddOn={true}
                       onStatusChange={handleOrderStatusChange}
+                      deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
                     />
                   ))}
                 </div>

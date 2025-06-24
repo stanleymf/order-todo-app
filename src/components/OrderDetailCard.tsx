@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { Card, CardContent } from "./ui/card"
 import { Button } from "./ui/button"
 import { Badge } from "./ui/badge"
@@ -19,6 +19,15 @@ import { OrderCardField } from "../types/orderCardFields"
 import { useAuth } from "../contexts/AuthContext"
 import { ProductImageModal } from "./shared/ProductImageModal"
 
+// Simple debounce utility
+const debounce = (func: Function, wait: number) => {
+  let timeout: NodeJS.Timeout
+  return (...args: any[]) => {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => func.apply(null, args), wait)
+  }
+}
+
 interface OrderDetailCardProps {
   order: any
   fields: OrderCardField[]
@@ -26,6 +35,7 @@ interface OrderDetailCardProps {
   onToggle?: () => void
   isAddOn?: boolean
   onStatusChange?: (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => void
+  deliveryDate?: string
 }
 
 export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
@@ -35,15 +45,65 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   onToggle,
   isAddOn = false,
   onStatusChange,
+  deliveryDate,
 }) => {
   const [expanded, setExpanded] = useState(isExpanded)
   const [status, setStatus] = useState<'unassigned' | 'assigned' | 'completed'>(
-    order.status === 'completed' ? 'completed' : 
-    order.assignedTo ? 'assigned' : 'unassigned'
+    order.status || 'unassigned'
   )
-  const [notes, setNotes] = useState("")
+  const [notes, setNotes] = useState(order.notes || "")
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const { user, tenant } = useAuth()
+
+  // Auto-save function with debouncing
+  const saveCardState = async (newStatus?: string, newNotes?: string) => {
+    if (!tenant?.id || !deliveryDate) return
+
+    const cardId = order.cardId || order.id
+    if (!cardId) return
+
+    setIsSaving(true)
+    try {
+      const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${cardId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          status: newStatus || status,
+          notes: newNotes !== undefined ? newNotes : notes,
+          assignedTo: (newStatus === 'assigned' || status === 'assigned') ? (user?.name || user?.email) : null,
+          deliveryDate
+        })
+      })
+
+      if (!response.ok) {
+        console.error('Failed to save card state:', await response.text())
+      } else {
+        console.log(`[CARD-SAVE] Saved state for card ${cardId}`)
+      }
+    } catch (error) {
+      console.error('Error saving card state:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Debounced auto-save for notes
+  const debouncedSaveNotes = useCallback(
+    debounce((newNotes: string) => {
+      saveCardState(undefined, newNotes)
+    }, 1000),
+    [status, deliveryDate, tenant?.id]
+  )
+
+  // Initialize state from order data
+  useEffect(() => {
+    setStatus(order.status || 'unassigned')
+    setNotes(order.notes || "")
+  }, [order.status, order.notes])
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Don't toggle if clicking on status buttons, textarea, or eye icon
@@ -72,14 +132,78 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
       onStatusChange(order.cardId || order.id, finalStatus)
     }
     
-    // TODO: Update order status in backend
-    // For now, just update local state
+    // Auto-save the status change
+    saveCardState(finalStatus)
+  }
+
+  const handleNotesChange = (newNotes: string) => {
+    setNotes(newNotes)
+    debouncedSaveNotes(newNotes)
   }
 
   // Extract field value using configured shopifyFields paths
   const extractFieldValue = (shopifyData: any, fieldPath: string): any => {
     if (!shopifyData || !fieldPath) return null
     
+    // Handle direct properties first (like 'name', 'tags', 'note')
+    if (!fieldPath.includes('.')) {
+      return shopifyData[fieldPath]
+    }
+    
+    // Handle note attributes (like noteAttributes.delivery_date, noteAttributes.timeslot)
+    if (fieldPath.startsWith('noteAttributes.')) {
+      const attributeName = fieldPath.split('.')[1]
+      const noteAttributes = shopifyData.noteAttributes
+      if (Array.isArray(noteAttributes)) {
+        const attribute = noteAttributes.find((attr: any) => attr.name === attributeName)
+        return attribute?.value || null
+      }
+      return null
+    }
+    
+    // Handle shipping address fields
+    if (fieldPath.startsWith('shippingAddress.')) {
+      const addressField = fieldPath.split('.')[1]
+      return shopifyData.shippingAddress?.[addressField] || null
+    }
+    
+    // Handle customer fields
+    if (fieldPath.startsWith('customer.')) {
+      const customerField = fieldPath.split('.')[1]
+      return shopifyData.customer?.[customerField] || null
+    }
+    
+    // Handle pricing fields
+    if (fieldPath.includes('PriceSet.shopMoney.amount')) {
+      const priceType = fieldPath.split('.')[0] // totalPriceSet, subtotalPriceSet, etc.
+      return shopifyData[priceType]?.shopMoney?.amount || null
+    }
+    
+    // Handle special GraphQL paths for backward compatibility
+    if (fieldPath.includes('lineItems.edges')) {
+      const lineItems = shopifyData.lineItems?.edges
+      if (lineItems && lineItems.length > 0) {
+        const firstItem = lineItems[0]?.node
+        if (fieldPath === 'lineItems.edges.0.node.title') {
+          return firstItem?.title
+        }
+        if (fieldPath === 'lineItems.edges.0.node.variant.title') {
+          return firstItem?.variant?.title
+        }
+        if (fieldPath === 'lineItems.edges.0.node.variant.sku') {
+          return firstItem?.variant?.sku
+        }
+        if (fieldPath === 'lineItems.edges.0.node.quantity') {
+          return firstItem?.quantity
+        }
+        if (fieldPath === 'lineItems.edges.0.node.product.productType') {
+          return firstItem?.product?.productType
+        }
+      }
+      return null
+    }
+    
+    // Handle nested paths with dot notation
     const pathParts = fieldPath.split(".")
     let value = shopifyData
     
@@ -136,6 +260,24 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   const getFieldValue = (field: OrderCardField): any => {
     if (!order) return null
 
+    // For most fields, prioritize direct order properties from backend processing
+    const directOrderValue = order[field.id]
+    
+    // Special handling for orderId - use shopifyOrderId or name from shopifyOrderData
+    if (field.id === 'orderId') {
+      return order.shopifyOrderId || 
+             order.orderNumber || 
+             extractFieldValue(order.shopifyOrderData, 'name') || 
+             directOrderValue
+    }
+    
+    // For fields that should primarily use direct order properties
+    const directOrderFields = ['productTitle', 'productVariantTitle', 'difficultyLabel', 'assignedTo']
+    
+    if (directOrderFields.includes(field.id) && directOrderValue) {
+      return directOrderValue
+    }
+
     // Use configured shopifyFields if available
     if (field.shopifyFields && field.shopifyFields.length > 0) {
       const fieldPath = field.shopifyFields[0]
@@ -147,11 +289,11 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
       }
       
       // Return configured value or fallback to direct order property
-      return value || order[field.id] || null
+      return value || directOrderValue || null
     }
     
     // Fallback to direct order property for fields without shopifyFields
-    return order[field.id] || null
+    return directOrderValue || null
   }
 
   // Get field icon
@@ -288,67 +430,67 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
             </div>
           </div>
           
-          {/* Status Buttons - Circular with Icons */}
-          <div className="flex items-center gap-1 sm:gap-2 status-buttons flex-shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
-                status === 'unassigned' 
-                  ? 'bg-white text-gray-700 border border-gray-300 shadow-lg' 
-                  : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-              }`}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleStatusChange('unassigned')
-              }}
-              title="Unassigned"
-            >
-              <Circle className="h-4 w-4 sm:h-5 sm:w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
-                status === 'assigned' 
-                  ? 'bg-blue-500 text-white shadow-lg' 
-                  : 'bg-gray-100 text-gray-400 hover:bg-blue-100'
-              }`}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleStatusChange('assigned')
-              }}
-              title="Assigned"
-            >
-              <UserCheck className="h-4 w-4 sm:h-5 sm:w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
-                status === 'completed' 
-                  ? 'bg-green-500 text-white shadow-lg' 
-                  : 'bg-gray-100 text-gray-400 hover:bg-green-100'
-              }`}
-              onClick={(e) => {
-                e.stopPropagation()
-                handleStatusChange('completed')
-              }}
-              title="Completed"
-            >
-              <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5" />
-            </Button>
+          {/* Status Buttons and Difficulty Badge - Circular with Icons */}
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 status-buttons flex-shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
+                  status === 'unassigned' 
+                    ? 'bg-white text-gray-700 border border-gray-300 shadow-lg' 
+                    : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                }`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusChange('unassigned')
+                }}
+                title="Unassigned"
+              >
+                <Circle className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
+                  status === 'assigned' 
+                    ? 'bg-blue-500 text-white shadow-lg' 
+                    : 'bg-gray-100 text-gray-400 hover:bg-blue-100'
+                }`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusChange('assigned')
+                }}
+                title="Assigned"
+              >
+                <UserCheck className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 sm:h-10 sm:w-10 rounded-full shadow-md transition-all duration-200 ${
+                  status === 'completed' 
+                    ? 'bg-green-500 text-white shadow-lg' 
+                    : 'bg-gray-100 text-gray-400 hover:bg-green-100'
+                }`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleStatusChange('completed')
+                }}
+                title="Completed"
+              >
+                <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+            </div>
+            
+            {/* Difficulty Badge - Below status buttons, right aligned */}
+            {difficultyValue && (
+              <Badge className={`text-xs ${getDifficultyColor(difficultyValue)}`}>
+                {difficultyValue}
+              </Badge>
+            )}
           </div>
         </div>
-
-        {/* Difficulty Badge - Below status buttons */}
-        {difficultyValue && (
-          <div className="mt-3 flex justify-center">
-            <Badge className={`text-xs ${getDifficultyColor(difficultyValue)}`}>
-              {difficultyValue}
-            </Badge>
-          </div>
-        )}
 
         {/* Assigned To Field - Show when status is assigned or completed */}
         {(status === 'assigned' || status === 'completed') && assignedToValue && (
@@ -398,10 +540,11 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
               <Textarea
                 placeholder="Add admin notes or special instructions..."
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => handleNotesChange(e.target.value)}
                 className="min-h-[60px] sm:min-h-[80px] resize-none border-0 bg-transparent p-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-xs sm:text-sm"
                 onClick={(e) => e.stopPropagation()}
                 onFocus={(e) => e.stopPropagation()}
+                disabled={isSaving}
               />
             </div>
           </div>

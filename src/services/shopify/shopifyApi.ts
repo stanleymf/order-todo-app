@@ -509,28 +509,53 @@ export class ShopifyApiService {
           name
           createdAt
           displayFulfillmentStatus
+          displayFinancialStatus
           tags
           note
+          email
+          phone
           customer {
             firstName
             lastName
             email
           }
+          shippingAddress {
+            firstName
+            lastName
+            name
+            address1
+            address2
+            city
+            province
+            country
+            zip
+            phone
+          }
+          noteAttributes {
+            name
+            value
+          }
           lineItems(first: 50) {
             edges {
               node {
                 title
+                quantity
                 variant {
                   id
                   title
+                  sku
                 }
                 product {
                   id
+                  productType
                 }
               }
             }
           }
           totalPriceSet { shopMoney { amount currencyCode } }
+          subtotalPriceSet { shopMoney { amount currencyCode } }
+          totalTaxSet { shopMoney { amount currencyCode } }
+          totalDiscountsSet { shopMoney { amount currencyCode } }
           currencyCode
         }
       }

@@ -2,6 +2,102 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.7] - 2025-06-25
+
+### 🔧 **Field Mapping Data Source Fix**
+
+**Issue Resolution**: Some order cards were displaying without detailed field information in the expanded view.
+
+**Root Cause**: Mismatch between field mapping configurations expecting rich GraphQL data and the limited GraphQL query that was actually being executed.
+
+### 🚀 **Enhanced GraphQL Data Fetching**
+
+- **Expanded Shopify GraphQL Query**: Enhanced `fetchOrderByIdGraphQL` to fetch comprehensive order data
+  - Added `noteAttributes` for custom fields like delivery instructions, timeslots
+  - Added `shippingAddress` for recipient information 
+  - Added `displayFinancialStatus` for order status tracking
+  - Added `email`, `phone` for customer contact details
+  - Added pricing breakdowns (`subtotalPriceSet`, `totalTaxSet`, `totalDiscountsSet`)
+  - Added product details (`variant.sku`, `product.productType`, `quantity`)
+
+- **Improved Field Value Extraction**: Enhanced `extractFieldValue` function in OrderDetailCard
+  - **Note Attributes Support**: `noteAttributes.delivery_date`, `noteAttributes.timeslot`
+  - **Address Fields Support**: `shippingAddress.firstName`, `shippingAddress.address1`, etc.
+  - **Customer Fields Support**: `customer.firstName`, `customer.email`, etc.
+  - **Pricing Fields Support**: `totalPriceSet.shopMoney.amount`, etc.
+  - **Line Item Details**: Enhanced support for variant SKU, quantity, product type
+
+### 🎯 **Field Priority Logic**
+
+- **Direct Order Properties First**: Critical fields like `productTitle`, `difficultyLabel` use backend-processed data
+- **Special OrderID Handling**: Uses `shopifyOrderId` → `orderNumber` → GraphQL `name` → fallback
+- **Fallback Chain**: shopifyOrderData → direct order properties → null
+
+### 📋 **Technical Implementation**
+
+```typescript
+// Enhanced field extraction with multiple data sources
+extractFieldValue(shopifyData, 'noteAttributes.timeslot')  // Custom attributes
+extractFieldValue(shopifyData, 'shippingAddress.city')     // Address fields  
+extractFieldValue(shopifyData, 'lineItems.edges.0.node.variant.sku') // Product details
+```
+
+### 🔄 **Migration Notes**
+
+- **Existing Orders**: Will continue using current GraphQL data until next webhook/sync
+- **New Orders**: Will automatically use enhanced GraphQL data structure
+- **Backward Compatibility**: Maintained for existing field mapping configurations
+
+---
+
+## [1.5.6] - 2025-06-25
+
+### 🚀 **DATA PERSISTENCE SYSTEM - Major Implementation**
+
+- **Cross-Session Persistence**: Order card assignments and notes now persist across sessions and date changes
+- **Auto-Save Functionality**: Status changes and notes automatically save without requiring manual action
+- **Real-time Data Sync**: Changes sync immediately with backend database for instant persistence
+- **Date-Based Storage**: Assignments and notes are tied to specific delivery dates for accurate tracking
+
+### 🗄️ **Database Schema Enhancement**
+
+- **New Table**: `order_card_states` table for persistent order card data
+- **Optimized Indexing**: Fast lookups by tenant, delivery date, and status
+- **Auto-Timestamps**: Automatic tracking of creation and update times
+- **Unique Constraints**: Prevents duplicate state records per card
+
+### 🔄 **Auto-Save Features**
+
+- **Status Persistence**: Assignment status (unassigned/assigned/completed) automatically saves
+- **Notes Auto-Save**: Textarea notes save with 1-second debouncing for optimal performance
+- **User Assignment**: Automatic assignment tracking with current user information
+- **Cross-Date Persistence**: Switching dates preserves all assignments and notes
+
+### 🎯 **Enhanced User Experience**
+
+- **No Manual Save**: All changes save automatically without user intervention
+- **Visual Feedback**: Loading states indicate save operations in progress
+- **Data Recovery**: Assignments and notes persist even after browser refresh or logout
+- **Seamless Navigation**: Date picker changes load saved states instantly
+
+### 🔧 **Technical Implementation**
+
+- **Backend API**: Complete CRUD operations for order card states
+- **Debounced Saves**: Optimized auto-save to prevent excessive API calls
+- **State Management**: Enhanced OrderDetailCard with persistent state integration
+- **Error Handling**: Graceful fallback when save operations fail
+
+### 📊 **Enhanced Analytics Integration**
+
+- **Persistent Stats**: Status-based statistics now reflect saved assignments
+- **Real-time Updates**: Stats container updates immediately when assignments change
+- **Accurate Counts**: Unassigned/Assigned/Completed counts based on persistent data
+
+### 🚀 **Deployment Status**
+- **Database Migration**: Successfully deployed to production D1 database
+- **Version ID**: fdc9b303-1514-43e5-a34d-d1c6df191fa8
+- **Status**: 🟢 **Live** - Data persistence system fully operational
+
 ## [1.5.5] - 2025-01-25
 
 ### 🚀 Major Features Added
@@ -855,3 +951,53 @@ All notable changes to this project will be documented in this file.
 - **User Interface**: Modern, responsive web application
 - **Database Foundation**: SQLite-based data storage
 - **Cloudflare Workers**: Serverless backend deployment 
+
+## Version 1.4.2 - 2025-01-03
+
+### 🔧 **Field Mapping Data Source Fix**
+
+**Issue Resolution**: Some order cards were displaying without detailed field information in the expanded view.
+
+**Root Cause**: Mismatch between field mapping configurations expecting rich GraphQL data and the limited GraphQL query that was actually being executed.
+
+### 🚀 **Enhanced GraphQL Data Fetching**
+
+- **Expanded Shopify GraphQL Query**: Enhanced `fetchOrderByIdGraphQL` to fetch comprehensive order data
+  - Added `noteAttributes` for custom fields like delivery instructions, timeslots
+  - Added `shippingAddress` for recipient information 
+  - Added `displayFinancialStatus` for order status tracking
+  - Added `email`, `phone` for customer contact details
+  - Added pricing breakdowns (`subtotalPriceSet`, `totalTaxSet`, `totalDiscountsSet`)
+  - Added product details (`variant.sku`, `product.productType`, `quantity`)
+
+- **Improved Field Value Extraction**: Enhanced `extractFieldValue` function in OrderDetailCard
+  - **Note Attributes Support**: `noteAttributes.delivery_date`, `noteAttributes.timeslot`
+  - **Address Fields Support**: `shippingAddress.firstName`, `shippingAddress.address1`, etc.
+  - **Customer Fields Support**: `customer.firstName`, `customer.email`, etc.
+  - **Pricing Fields Support**: `totalPriceSet.shopMoney.amount`, etc.
+  - **Line Item Details**: Enhanced support for variant SKU, quantity, product type
+
+### 🎯 **Field Priority Logic**
+
+- **Direct Order Properties First**: Critical fields like `productTitle`, `difficultyLabel` use backend-processed data
+- **Special OrderID Handling**: Uses `shopifyOrderId` → `orderNumber` → GraphQL `name` → fallback
+- **Fallback Chain**: shopifyOrderData → direct order properties → null
+
+### 📋 **Technical Implementation**
+
+```typescript
+// Enhanced field extraction with multiple data sources
+extractFieldValue(shopifyData, 'noteAttributes.timeslot')  // Custom attributes
+extractFieldValue(shopifyData, 'shippingAddress.city')     // Address fields  
+extractFieldValue(shopifyData, 'lineItems.edges.0.node.variant.sku') // Product details
+```
+
+### 🔄 **Migration Notes**
+
+- **Existing Orders**: Will continue using current GraphQL data until next webhook/sync
+- **New Orders**: Will automatically use enhanced GraphQL data structure
+- **Backward Compatibility**: Maintained for existing field mapping configurations
+
+---
+
+## Version 1.4.1 - 2025-01-02 
