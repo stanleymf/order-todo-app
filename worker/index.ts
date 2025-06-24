@@ -449,8 +449,30 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         // Parse line items from JSON string
         const lineItems = order.line_items ? JSON.parse(order.line_items as string) : []
         
-        // Process each line item
+        // Check if any line item in this order contains "express" (case-insensitive)
+        const hasExpressItem = lineItems.some((item: any) => 
+          (item.title || item.name || '').toLowerCase().includes('express')
+        )
+        
+        // Extract express time slot from the express item's variant title if it exists
+        let expressTimeSlot = null
+        if (hasExpressItem) {
+          const expressItem = lineItems.find((item: any) => 
+            (item.title || item.name || '').toLowerCase().includes('express')
+          )
+          if (expressItem && expressItem.variant_title) {
+            // Extract time pattern like "10:00 - 12:00" or "10:00-12:00"
+            const timeMatch = expressItem.variant_title.match(/(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})/i)
+            expressTimeSlot = timeMatch ? timeMatch[1] : null
+          }
+        }
+        
+        // Process each line item (excluding express items)
         for (const lineItem of lineItems) {
+          // Skip line items that contain "express" - they won't become individual cards
+          if ((lineItem.title || lineItem.name || '').toLowerCase().includes('express')) {
+            continue
+          }
           // Classify as add-on
           const isAddOn = isAddOnProduct(
             lineItem.product_id?.toString() || '', 
@@ -494,6 +516,9 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               variantTitle: lineItem.variant_title,
               // Labels from product_labels database
               difficultyLabel: difficultyLabel,
+              // Express order detection
+              isExpressOrder: hasExpressItem,
+              expressTimeSlot: expressTimeSlot,
               // Add-on classification
               isAddOn: isAddOn,
               productCategory: isAddOn ? "add-on" : "main-order",

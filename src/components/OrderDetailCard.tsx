@@ -204,8 +204,21 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     }
   }
 
-  // Get card background color based on status
+  // Get card background color based on status and express
   const getCardStatusColor = () => {
+    // Express orders have yellow background regardless of status
+    if (isExpressOrder) {
+      switch (status) {
+        case "assigned":
+          return "bg-yellow-100 border-l-blue-500"
+        case "completed":
+          return "bg-yellow-200 border-l-green-500"
+        default:
+          return `bg-yellow-50 ${getBorderColor(difficultyValue)}`
+      }
+    }
+    
+    // Non-express orders use original logic
     switch (status) {
       case "assigned":
         return "bg-blue-50 border-l-blue-500"
@@ -226,6 +239,10 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   const primaryValue = order.title || "Order"  // This is unique per line item
   const variantValue = order.variantTitle      // This is unique per line item
   const difficultyValue = order.difficultyLabel || (difficultyField ? getFieldValue(difficultyField) : null)
+  
+  // Express order data
+  const isExpressOrder = order.isExpressOrder || false
+  const expressTimeSlot = order.expressTimeSlot
 
   // Get assigned user name
   const assignedToValue = status === 'assigned' || status === 'completed' ? 
@@ -257,9 +274,9 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
                 {variantValue && (
                   <span className="text-xs sm:text-sm text-muted-foreground">{variantValue}</span>
                 )}
-                {difficultyValue && (
-                  <Badge className={`text-xs ${getDifficultyColor(difficultyValue)}`}>
-                    {difficultyValue}
+                {isExpressOrder && expressTimeSlot && (
+                  <Badge className="text-xs bg-yellow-200 text-yellow-900 border-yellow-400">
+                    EX - {expressTimeSlot}
                   </Badge>
                 )}
                 {isAddOn && (
@@ -323,6 +340,15 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
             </Button>
           </div>
         </div>
+
+        {/* Difficulty Badge - Below status buttons */}
+        {difficultyValue && (
+          <div className="mt-3 flex justify-center">
+            <Badge className={`text-xs ${getDifficultyColor(difficultyValue)}`}>
+              {difficultyValue}
+            </Badge>
+          </div>
+        )}
 
         {/* Assigned To Field - Show when status is assigned or completed */}
         {(status === 'assigned' || status === 'completed') && assignedToValue && (
