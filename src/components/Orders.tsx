@@ -30,7 +30,7 @@ import {
   AlertTriangle
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
-import { getOrdersFromDbByDate, getStores, getOrderCardConfig } from "../services/api"
+import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders } from "../services/api"
 import { OrderDetailCard } from "./OrderDetailCard"
 import { OrderCardField } from "../types/orderCardFields"
 import { toast } from "sonner"
@@ -121,9 +121,39 @@ export const Orders: React.FC = () => {
     }
   }, [handleFetchOrders, tenant?.id, selectedDate])
 
-  const handleUpdateOrders = () => {
-    console.log("Updating orders...")
-    toast.info("Update functionality coming soon")
+  const handleUpdateOrders = async () => {
+    if (!tenant?.id || !stores.length) {
+      toast.error("No stores configured")
+      return
+    }
+
+    const storeId = selectedStore === "all" ? stores[0].id : selectedStore
+    
+    setLoading(true)
+    try {
+      console.log("Updating existing orders with enhanced GraphQL data...")
+      toast.info("Updating orders with enhanced data...")
+      
+      // Call the update-existing API function
+      const result = await updateExistingOrders(tenant.id, storeId)
+      
+      console.log("Update result:", result)
+      
+      if (result.success) {
+        toast.success(`Successfully updated ${result.totalProcessed || result.updatedOrders?.length || 0} orders with enhanced GraphQL data`)
+        
+        // Refresh the orders list to show the updated data
+        await handleFetchOrders()
+      } else {
+        toast.error("Update completed but with errors")
+      }
+      
+    } catch (error) {
+      console.error("Failed to update orders:", error)
+      toast.error("Failed to update orders: " + (error as Error).message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleDeleteOrders = () => {
@@ -473,8 +503,17 @@ export const Orders: React.FC = () => {
                 Fetch Orders
               </Button>
               
-              <Button variant="outline" onClick={handleUpdateOrders} className="gap-2">
-                <Upload className="h-4 w-4" />
+              <Button 
+                variant="outline" 
+                onClick={handleUpdateOrders} 
+                disabled={loading}
+                className="gap-2"
+              >
+                {loading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
                 Update Orders
               </Button>
               
