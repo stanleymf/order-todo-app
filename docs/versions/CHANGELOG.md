@@ -27,13 +27,14 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Fixes
 - **Status Reset**: Fixed status buttons to properly reset to unassigned when clicked again
 - **Stats Calculation**: Enhanced statistics to handle edge cases and empty data states
+- **Difficulty Label Display**: Fixed missing difficulty labels on OrderDetailCard - now properly extracts from product_labels database
 
 ### 🚀 Deployment
 - **Build**: 1420 modules transformed successfully
 - **Bundle**: 702.43 kB (197.84 kB gzipped)  
-- **Version ID**: d05d709e-ed11-4765-883c-dee170e6ca5e
+- **Version ID**: 7a04c59a-ac08-4c1f-b790-90192af85072
 - **Deployment URL**: https://order-to-do.stanleytan92.workers.dev
-- **Status**: 🟢 **Live** - Status toggle and collapsible stats features deployed
+- **Status**: 🟢 **Live** - Status toggle, collapsible stats, and difficulty label fix deployed
 
 ## [1.5.4] - 2024-12-XX
 
