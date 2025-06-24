@@ -21,6 +21,7 @@ interface ProductImageModalProps {
   onClose: () => void
   shopifyProductId?: string
   shopifyVariantId?: string
+  tenantId?: string
   notes?: string
   onNotesChange?: (notes: string) => void
   onSave?: (notes: string) => Promise<void>
@@ -44,6 +45,7 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
   onClose,
   shopifyProductId,
   shopifyVariantId,
+  tenantId,
   notes = "",
   onNotesChange,
   onSave,
@@ -59,29 +61,22 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
 
   // Reset state when modal opens/closes
   useEffect(() => {
-    if (isOpen) {
-      setLocalNotes(notes)
-      setError(null)
-      if (shopifyProductId) {
-        fetchProductImage()
-      }
-    } else {
-      setProductData(null)
-      setLoading(false)
-      setSaving(false)
-      setError(null)
+    console.log('ProductImageModal useEffect triggered', { isOpen, shopifyProductId, shopifyVariantId, tenantId });
+    if (isOpen && shopifyProductId) {
+      fetchProductImage();
     }
-  }, [isOpen, shopifyProductId, shopifyVariantId, notes])
+  }, [isOpen, shopifyProductId, shopifyVariantId, tenantId]);
 
   const fetchProductImage = async () => {
-    if (!user?.tenantId || !shopifyProductId) return
+    const resolvedTenantId = tenantId || user?.tenantId;
+    if (!resolvedTenantId || !shopifyProductId) return
 
     setLoading(true)
     setError(null)
 
     try {
       // Use the correct endpoint that returns complete saved product data
-      const url = `/api/tenants/${user.tenantId}/saved-products/by-shopify-id?shopify_product_id=${encodeURIComponent(shopifyProductId)}&shopify_variant_id=${encodeURIComponent(shopifyVariantId || '')}`
+      const url = `/api/tenants/${resolvedTenantId}/saved-products/by-shopify-id?shopify_product_id=${encodeURIComponent(shopifyProductId)}&shopify_variant_id=${encodeURIComponent(shopifyVariantId || '')}`
 
       const token = getStoredToken()
       if (!token) {
@@ -108,9 +103,20 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
       const product = await response.json()
       
       // Map the saved product data to the expected ProductImageData format
+      console.log('Product fetched for modal:', product);
+      const imageUrl = product?.imageUrl || product?.image_url;
+      const imageAlt = product?.imageAlt || product?.image_alt || 'Product image';
+
+      if (!product) {
+        console.warn('No product found for modal!');
+      }
+      if (!imageUrl) {
+        console.warn('No imageUrl/image_url found for product:', product);
+      }
+
       setProductData({
-        imageUrl: product.imageUrl,
-        imageAlt: product.imageAlt,
+        imageUrl: imageUrl,
+        imageAlt: imageAlt,
         title: product.title,
         variantTitle: product.variantTitle,
         description: product.description,
@@ -177,9 +183,6 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Product Details</span>
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
           </DialogTitle>
           <DialogDescription>
             View product image and add custom notes for this order

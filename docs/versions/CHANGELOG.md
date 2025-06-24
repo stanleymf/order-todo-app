@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.8] - 2025-06-24
+
+### 🐛 Bug Fixes & UI Improvements
+
+- **Product Image Modal Image Fix:** Fixed a backend bug where the `/api/tenants/:tenantId/saved-products/by-shopify-id` endpoint did not return image fields (`imageUrl`, `imageAlt`, `imageWidth`, `imageHeight`) for saved products. This caused product images to not display in the Product Image Modal even when present in the database. The endpoint now correctly returns all image fields.
+- **Modal UI Polish:** Removed the redundant custom close (X) button from the Product Image Modal header. The modal now only shows a single close button at the top right, matching the rest of the app's dialog UI.
+
+### 🚀 Deployment
+- Build and deploy completed for version 1.4.8. Product images now display correctly in the modal, and the UI is cleaner.
+
 ## [1.4.7] - 2025-01-13
 
 ### 🎯 **Complete Saved Products Sync & Label Management System**
