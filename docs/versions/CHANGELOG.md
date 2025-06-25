@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.14] - 2025-06-25
+
+### 🎯 **Critical Fix - AI Training Data Manager Ratings**
+
+**Issue Resolution**: Fixed critical bug where users couldn't rate generated images in the AI Training Data Manager Ratings tab and AI Florist widget.
+
+### 🐛 **AI Rating System Issues Fixed**
+
+- **Service Implementation**: Fixed `updateDesignRating` method in `aiTrainingService.ts` that was throwing "Not implemented yet" error
+- **API Integration**: Properly connected frontend rating functionality to existing backend API endpoint
+- **Rating Workflow**: Fixed rating submission in both AI Training Manager and AI Florist widget
+- **Backend Compatibility**: Utilized existing `/api/tenants/{tenantId}/ai/generated-designs/{designId}` PUT endpoint
+- **Result**: Users can now successfully rate AI-generated designs and provide feedback
+
+### 💡 **Technical Implementation**
+
+- **Frontend**: Replaced error-throwing method with proper API call using `updateAIGeneratedDesign`
+- **Backend**: Backend endpoint was already correctly implemented and functional
+- **Rating Flow**: Fixed connection between frontend rating modal and backend persistence
+- **Data Storage**: Ratings and feedback now properly saved to `ai_generated_designs` table with `quality_rating` and `feedback` fields
+
+### ✅ **User Impact**
+
+- **✅ AI Training Manager**: Ratings tab now fully functional
+- **✅ AI Florist Widget**: Rate This Design button now works properly  
+- **✅ Design Feedback**: Users can provide star ratings (1-5) and written feedback
+- **✅ Statistics**: Rating statistics now update correctly in overview
+- **✅ Data Collection**: AI model training data collection now includes user ratings
+
+### 🔧 **Version Details**
+
+- **Deployment ID**: `2086c5b4-8958-42e5-9ae8-b49d6f1d2762`
+- **Build Size**: 710.76 kB JS, 82.84 kB CSS
+- **Worker Startup**: 14ms
+
 ## [1.5.13] - 2025-06-25
 
 ### 🔧 **Critical Fix - Unassigned Orders Stat Card Count**
