@@ -137,16 +137,17 @@ export const Orders: React.FC = () => {
     
     setLoading(true)
     try {
-      console.log("Updating existing orders with enhanced GraphQL data...")
-      toast.info("Updating orders with enhanced data...")
+      console.log(`Updating existing orders for date ${selectedDate} with enhanced GraphQL data...`)
+      toast.info(`Updating orders for ${selectedDate} with enhanced data...`)
       
-      // Call the update-existing API function
-      const result = await updateExistingOrders(tenant.id, storeId)
+      // Call the update-existing API function with selected date
+      const result = await updateExistingOrders(tenant.id, storeId, selectedDate)
       
       console.log("Update result:", result)
       
       if (result.success) {
-        toast.success(`Successfully updated ${result.totalProcessed || result.updatedOrders?.length || 0} orders with enhanced GraphQL data`)
+        const updatedCount = result.totalProcessed || result.updatedOrders?.length || 0
+        toast.success(`Successfully updated ${updatedCount} orders for ${selectedDate}`)
         
         // Refresh the orders list to show the updated data
         await handleFetchOrders()
@@ -601,7 +602,7 @@ export const Orders: React.FC = () => {
                 ) : (
                   <Upload className="h-4 w-4" />
                 )}
-                Update Orders
+                Update Orders for {selectedDate}
               </Button>
               
               <Button variant="outline" onClick={handleExportOrders} className="gap-2">

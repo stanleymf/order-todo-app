@@ -1092,12 +1092,14 @@ export async function syncAllOrders(
 
 export async function updateExistingOrders(
   tenantId: string,
-  storeId: string
+  storeId: string,
+  date?: string
 ): Promise<any> {
   return authenticatedRequest<any>(
     `/api/tenants/${tenantId}/stores/${storeId}/orders/update-existing`,
     {
       method: "POST",
+      body: JSON.stringify({ date }),
     }
   );
 }

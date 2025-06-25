@@ -4797,8 +4797,11 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async 
   const tenantId = c.req.param("tenantId");
   const storeId = c.req.param("storeId");
   
+  // Get optional date parameter for filtering
+  const { date } = await c.req.json().catch(() => ({}));
+  
   try {
-    console.log("[UPDATE-EXISTING] Starting update process for tenant:", tenantId, "store:", storeId);
+    console.log("[UPDATE-EXISTING] Starting update process for tenant:", tenantId, "store:", storeId, "date:", date || "all dates");
     
     // 1. Get store info
     const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
@@ -4806,19 +4809,17 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async 
       return c.json({ error: "Shopify store not found or access token is missing." }, 404);
     }
     
-         // 2. Get all existing orders from database
-     const { results: existingOrders } = await c.env.DB.prepare(
-       `SELECT shopify_order_id, status, priority, assigned_to, notes FROM tenant_orders 
-        WHERE tenant_id = ? AND store_id = ?`
-     ).bind(tenantId, storeId).all();
-     
-     const typedOrders = existingOrders as Array<{
-       shopify_order_id: string;
-       status: string;
-       priority: string;
-       assigned_to: string;
-       notes: string;
-     }>;
+    // 2. Get existing orders from database - filter by date if provided
+    let query = `SELECT shopify_order_id, status, priority, assigned_to, notes FROM tenant_orders 
+                 WHERE tenant_id = ? AND store_id = ?`;
+    let params = [tenantId, storeId];
+    
+    if (date) {
+      query += ` AND delivery_date = ?`;
+      params.push(date);
+    }
+    
+    const { results: existingOrders } = await c.env.DB.prepare(query).bind(...params).all();
     
     if (!existingOrders || existingOrders.length === 0) {
       return c.json({ 
@@ -4840,7 +4841,7 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async 
     const failedUpdates = [];
     
          // 4. Process each existing order
-     for (const dbOrder of typedOrders) {
+     for (const dbOrder of existingOrders) {
       try {
         console.log("[UPDATE-EXISTING] Processing order:", dbOrder.shopify_order_id);
         
