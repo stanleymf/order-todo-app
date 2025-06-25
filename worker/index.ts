@@ -678,11 +678,53 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       }
     }
 
+    // Load store information for proper naming
+    const storesMap = new Map<string, any>()
+    try {
+      const { results: storeResults } = await c.env.DB.prepare(`
+        SELECT id, name, shopify_domain FROM shopify_stores 
+        WHERE tenant_id = ?
+      `).bind(tenantId).all()
+
+      for (const store of storeResults || []) {
+        const storeId = String(store.id || '')
+        storesMap.set(storeId, {
+          id: store.id,
+          name: store.name,
+          domain: store.shopify_domain
+        })
+      }
+      console.log(`[STORE-GROUPING] Loaded ${storesMap.size} stores for grouping`)
+    } catch (error) {
+      console.error("Failed to load stores for grouping:", error)
+    }
+
+    // Helper function to get store name with fallbacks
+    const getStoreName = (order: any): string => {
+      const storeId = order.storeId || order.store_id
+      if (storeId && storesMap.has(String(storeId))) {
+        const store = storesMap.get(String(storeId))
+        return store?.name || `Store ${storeId}`
+      }
+      
+      // Fallback to store ID if available
+      if (storeId) {
+        return `Store ${storeId}`
+      }
+      
+      // Final fallback to order name prefix detection
+      const orderName = order.shopifyOrderId || order.orderId || ''
+      if (orderName.startsWith('WF')) return 'WindflowerFlorist'
+      if (orderName.startsWith('HF')) return 'HelloFlowers'
+      
+      return 'Unknown Store'
+    }
+
     // Separate orders into main orders and add-ons
     const mainOrders = processedOrders.filter(order => !order.isAddOn)
     const addOnOrders = processedOrders.filter(order => order.isAddOn)
 
-    // Sort both main orders and add-on orders by sort_order (ascending), then by created_at for ties
+    // Sort function for consistent ordering
     const sortByOrder = (a: any, b: any) => {
       if (a.sortOrder !== b.sortOrder) {
         return a.sortOrder - b.sortOrder
@@ -691,11 +733,36 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       return 0
     }
 
-    mainOrders.sort(sortByOrder)
+    // Group main orders by store
+    const storeGroups: Record<string, any> = {}
+    for (const order of mainOrders) {
+      const storeName = getStoreName(order)
+      const storeId = order.storeId || order.store_id || 'unknown'
+      
+      if (!storeGroups[storeName]) {
+        storeGroups[storeName] = {
+          storeName,
+          storeId,
+          orders: []
+        }
+      }
+      storeGroups[storeName].orders.push(order)
+    }
+
+    // Sort orders within each store group and sort stores by order count (most orders first)
+    const sortedStoreContainers = Object.values(storeGroups)
+      .map(group => ({
+        ...group,
+        orders: group.orders.sort(sortByOrder)
+      }))
+      .sort((a, b) => b.orders.length - a.orders.length)
+
+    // Sort add-on orders separately
     addOnOrders.sort(sortByOrder)
 
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
-    console.log(`Main orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
+    console.log(`Store containers: ${sortedStoreContainers.length}, Add-ons: ${addOnOrders.length}`)
+    console.log(`Store breakdown:`, sortedStoreContainers.map(sc => `${sc.storeName}: ${sc.orders.length}`).join(', '))
     
     // Debug logging for first few orders
     if (processedOrders.length > 0) {
@@ -707,14 +774,16 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         isAddOn: processedOrders[0].isAddOn,
         isExpressOrder: processedOrders[0].isExpressOrder,
         expressTimeSlot: processedOrders[0].expressTimeSlot,
-        isPickupOrder: processedOrders[0].isPickupOrder
+        isPickupOrder: processedOrders[0].isPickupOrder,
+        storeName: getStoreName(processedOrders[0])
       })
     }
     
     return c.json({
       orders: processedOrders,
-      mainOrders: mainOrders,
+      mainOrders: mainOrders, // Keep for backward compatibility
       addOnOrders: addOnOrders,
+      storeContainers: sortedStoreContainers, // New store-based grouping
       stats: {
         total: processedOrders.length,
         mainOrders: mainOrders.length,

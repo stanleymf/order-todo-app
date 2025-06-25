@@ -66,6 +66,8 @@ export const Orders: React.FC = () => {
   const [allOrders, setAllOrders] = useState<any[]>([])
   const [mainOrders, setMainOrders] = useState<any[]>([])
   const [addOnOrders, setAddOnOrders] = useState<any[]>([])
+  // Add store containers state for new grouping
+  const [storeContainers, setStoreContainers] = useState<any[]>([])
   const [orderFields, setOrderFields] = useState<OrderCardField[]>([])
   const [loading, setLoading] = useState(false)
   const [isStatsOpen, setIsStatsOpen] = useState(false)
@@ -147,16 +149,19 @@ export const Orders: React.FC = () => {
           setAllOrders(response)
           setMainOrders(response)
           setAddOnOrders([])
+          setStoreContainers([])
         } else {
-          // New format with categories
+          // New format with categories and store containers
           console.log("Setting orders (new format):", {
             all: response.orders?.length || 0,
             main: response.mainOrders?.length || 0,
-            addOns: response.addOnOrders?.length || 0
+            addOns: response.addOnOrders?.length || 0,
+            storeContainers: response.storeContainers?.length || 0
           })
           setAllOrders(response.orders || [])
           setMainOrders(response.mainOrders || [])
           setAddOnOrders(response.addOnOrders || [])
+          setStoreContainers(response.storeContainers || [])
         }
         
         console.log(`Loaded ${(response.orders || response).length} orders for ${dateStr}`)
@@ -192,16 +197,19 @@ export const Orders: React.FC = () => {
         setAllOrders(response)
         setMainOrders(response)
         setAddOnOrders([])
+        setStoreContainers([])
       } else {
-        // New format with categories
+        // New format with categories and store containers
         console.log("Setting orders (new format):", {
           all: response.orders?.length || 0,
           main: response.mainOrders?.length || 0,
-          addOns: response.addOnOrders?.length || 0
+          addOns: response.addOnOrders?.length || 0,
+          storeContainers: response.storeContainers?.length || 0
         })
         setAllOrders(response.orders || [])
         setMainOrders(response.mainOrders || [])
         setAddOnOrders(response.addOnOrders || [])
+        setStoreContainers(response.storeContainers || [])
       }
       
       console.log(`Refreshed ${(response.orders || response).length} orders for ${dateStr}`)
@@ -326,6 +334,12 @@ export const Orders: React.FC = () => {
   const filteredMainOrders = filterOrders(mainOrders)
   const filteredAddOnOrders = filterOrders(addOnOrders)
   const filteredAllOrders = filterOrders(allOrders)
+  
+  // Create filtered store containers
+  const filteredStoreContainers = storeContainers.map(container => ({
+    ...container,
+    orders: filterOrders(container.orders)
+  })).filter(container => container.orders.length > 0)
 
   const getComprehensiveStats = () => {
     // Use unfiltered data for stats (show total counts, not filtered counts)
@@ -387,7 +401,7 @@ export const Orders: React.FC = () => {
   const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => {
     // Update the order status in all relevant arrays
     const updateOrderStatus = (orders: any[]) => 
-      orders.map(order => 
+      orders.map((order: any) => 
         (order.cardId === orderId || order.id === orderId) 
           ? { ...order, status: newStatus }
           : order
@@ -396,6 +410,14 @@ export const Orders: React.FC = () => {
     setAllOrders(prev => updateOrderStatus(prev))
     setMainOrders(prev => updateOrderStatus(prev))
     setAddOnOrders(prev => updateOrderStatus(prev))
+    
+    // Also update store containers
+    setStoreContainers(prev => 
+      prev.map(container => ({
+        ...container,
+        orders: updateOrderStatus(container.orders)
+      }))
+    )
   }
 
   // Handle order deletion from OrderDetailCard
@@ -414,13 +436,21 @@ export const Orders: React.FC = () => {
       
       // Remove the order from all relevant arrays
       const removeOrder = (orders: any[]) => 
-        orders.filter(order => 
+        orders.filter((order: any) => 
           order.cardId !== orderId && order.id !== orderId
         )
 
       setAllOrders(prev => removeOrder(prev))
       setMainOrders(prev => removeOrder(prev))
       setAddOnOrders(prev => removeOrder(prev))
+      
+      // Also remove from store containers
+      setStoreContainers(prev => 
+        prev.map(container => ({
+          ...container,
+          orders: removeOrder(container.orders)
+        })).filter(container => container.orders.length > 0)
+      )
       
       toast.success("Order deleted successfully")
       console.log(`Order ${orderId} deleted successfully`)
@@ -445,51 +475,77 @@ export const Orders: React.FC = () => {
     }
 
     try {
-      // Find which list the dragged item belongs to
-      const activeMainIndex = filteredMainOrders.findIndex(order => 
-        (order.cardId || order.id) === active.id
-      )
-      const activeAddOnIndex = filteredAddOnOrders.findIndex(order => 
-        (order.cardId || order.id) === active.id
-      )
-
-      if (activeMainIndex !== -1) {
-        // Reordering main orders
-        const oldIndex = activeMainIndex
-        const newIndex = filteredMainOrders.findIndex(order => 
-          (order.cardId || order.id) === over.id
+      // Find which store container the dragged item belongs to
+      let foundInStoreContainer = false
+      for (let containerIndex = 0; containerIndex < filteredStoreContainers.length; containerIndex++) {
+        const container = filteredStoreContainers[containerIndex]
+        const activeOrderIndex = container.orders.findIndex((order: any) => 
+          (order.cardId || order.id) === active.id
         )
 
-        if (newIndex !== -1) {
-          const newMainOrders = arrayMove(filteredMainOrders, oldIndex, newIndex)
-          setMainOrders(newMainOrders)
-          
-          // Extract order IDs in new sequence
-          const orderIds = newMainOrders.map(order => order.cardId || order.id)
-          const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
-          
-          // Auto-save the new order
-          await reorderOrders(tenant.id, orderIds, deliveryDate)
-          toast.success("Order sequence updated")
+        if (activeOrderIndex !== -1) {
+          // Found the order in this store container
+          const newOrderIndex = container.orders.findIndex((order: any) => 
+            (order.cardId || order.id) === over.id
+          )
+
+          if (newOrderIndex !== -1) {
+            // Reorder within the same store container
+            const newOrders = arrayMove(container.orders, activeOrderIndex, newOrderIndex)
+            
+            // Update the store containers state
+            const newStoreContainers = [...storeContainers]
+            const originalContainerIndex = newStoreContainers.findIndex(c => c.storeName === container.storeName)
+            if (originalContainerIndex !== -1) {
+              newStoreContainers[originalContainerIndex] = {
+                ...newStoreContainers[originalContainerIndex],
+                orders: newOrders
+              }
+              setStoreContainers(newStoreContainers)
+              
+              // Also update mainOrders state for backward compatibility
+              const allMainOrdersFromContainers = newStoreContainers.flatMap(c => c.orders)
+              setMainOrders(allMainOrdersFromContainers)
+            }
+            
+            // Extract order IDs in new sequence for this store
+            const orderIds = newOrders.map(order => order.cardId || order.id)
+            const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+            
+            // Auto-save the new order
+            await reorderOrders(tenant.id, orderIds, deliveryDate)
+            toast.success("Order sequence updated")
+            foundInStoreContainer = true
+            break
+          }
         }
-      } else if (activeAddOnIndex !== -1) {
-        // Reordering add-on orders
-        const oldIndex = activeAddOnIndex
-        const newIndex = filteredAddOnOrders.findIndex(order => 
-          (order.cardId || order.id) === over.id
-        )
+      }
 
-        if (newIndex !== -1) {
-          const newAddOnOrders = arrayMove(filteredAddOnOrders, oldIndex, newIndex)
-          setAddOnOrders(newAddOnOrders)
-          
-          // Extract order IDs in new sequence
-          const orderIds = newAddOnOrders.map(order => order.cardId || order.id)
-          const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
-          
-          // Auto-save the new order
-          await reorderOrders(tenant.id, orderIds, deliveryDate)
-          toast.success("Order sequence updated")
+             // If not found in store containers, check add-on orders
+       if (!foundInStoreContainer) {
+         const activeAddOnIndex = filteredAddOnOrders.findIndex((order: any) => 
+           (order.cardId || order.id) === active.id
+         )
+
+         if (activeAddOnIndex !== -1) {
+           // Reordering add-on orders
+           const oldIndex = activeAddOnIndex
+           const newIndex = filteredAddOnOrders.findIndex((order: any) => 
+             (order.cardId || order.id) === over.id
+           )
+
+          if (newIndex !== -1) {
+            const newAddOnOrders = arrayMove(filteredAddOnOrders, oldIndex, newIndex)
+            setAddOnOrders(newAddOnOrders)
+            
+            // Extract order IDs in new sequence
+            const orderIds = newAddOnOrders.map(order => order.cardId || order.id)
+            const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+            
+            // Auto-save the new order
+            await reorderOrders(tenant.id, orderIds, deliveryDate)
+            toast.success("Order sequence updated")
+          }
         }
       }
     } catch (error) {
@@ -864,26 +920,93 @@ export const Orders: React.FC = () => {
         </Card>
       ) : (
         <div className="space-y-6">
-          {/* Main Orders Container */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-blue-500" />
-                Main Orders ({filteredMainOrders.length})
-                {isReorderingEnabled && filteredMainOrders.length > 1 && (
-                  <span className="text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
-                    Drag to reorder
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {filteredMainOrders.length === 0 ? (
-                <div className="text-center py-8">
-                  <Package className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No main orders found</p>
-                </div>
-              ) : (
+          {/* Store Containers - New Layout */}
+          {filteredStoreContainers.map((container, containerIndex) => {
+            const storeIconColor = containerIndex === 0 ? 'text-blue-500' : 
+                                  containerIndex === 1 ? 'text-green-500' : 'text-purple-500'
+            const bgColor = containerIndex === 0 ? 'bg-blue-100' : 
+                           containerIndex === 1 ? 'bg-green-100' : 'bg-purple-100'
+            
+            return (
+              <Card key={container.storeName}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Store className={`h-5 w-5 ${storeIconColor}`} />
+                    {container.storeName} ({container.orders.length})
+                    {isReorderingEnabled && container.orders.length > 1 && (
+                      <span className={`text-xs text-muted-foreground ${bgColor} px-2 py-1 rounded`}>
+                        Drag to reorder
+                      </span>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {container.orders.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Store className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No orders found for this store</p>
+                    </div>
+                  ) : (
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                    >
+                      <SortableContext
+                        items={container.orders.map((order: any) => order.cardId || order.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-3">
+                          {container.orders.map((order: any) => (
+                            isReorderingEnabled ? (
+                              <SortableOrderCard
+                                key={order.cardId || order.id}
+                                id={order.cardId || order.id}
+                                order={order}
+                                fields={orderFields}
+                                isExpanded={false}
+                                onStatusChange={handleOrderStatusChange}
+                                onDelete={handleOrderDelete}
+                                deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                                disabled={!isReorderingEnabled}
+                              />
+                            ) : (
+                              <OrderDetailCard
+                                key={order.cardId || order.id}
+                                order={order}
+                                fields={orderFields}
+                                isExpanded={false}
+                                onStatusChange={handleOrderStatusChange}
+                                onDelete={handleOrderDelete}
+                                deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                              />
+                            )
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
+          
+          {/* Fallback to legacy Main Orders if no store containers */}
+          {filteredStoreContainers.length === 0 && filteredMainOrders.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-blue-500" />
+                  Main Orders ({filteredMainOrders.length})
+                  {isReorderingEnabled && filteredMainOrders.length > 1 && (
+                    <span className="text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
+                      Drag to reorder
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
@@ -923,9 +1046,9 @@ export const Orders: React.FC = () => {
                     </div>
                   </SortableContext>
                 </DndContext>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Add-ons Container */}
           <Card>

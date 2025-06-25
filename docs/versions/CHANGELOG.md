@@ -2185,108 +2185,48 @@ extractFieldValue(shopifyData, 'lineItems.edges.0.node.variant.sku') // Product 
 
 ### 🚀 **Enhanced GraphQL Data Fetching** 
 
-## [1.5.15] - 2025-06-25
+## Version 1.5.26 - Store-Based Container Organization (2025-01-26)
 
-### 🔧 **Critical Fix - Order Fields & Update Orders Functionality**
+### 🔥 Major Feature: Store-Based Order Organization
 
-**Issue Resolution**: Fixed critical JSON double-encoding bug in Shopify webhook handler that corrupted order data and prevented proper display of order fields in OrderDetailCard.
+**Feature**: Complete reorganization of Orders page to group orders by store containers instead of "Main Orders" and "Add-Ons"
 
-### 🐛 **Root Cause & Technical Fix**
+**Backend Enhancements**:
+- **Store-Based Grouping Logic**: Modified `/api/tenants/:tenantId/orders-from-db-by-date` endpoint to return `storeContainers` structure
+- **Smart Store Detection**: Added fallback logic for store identification using order name prefixes (WF→WindflowerFlorist, HF→HelloFlowers)
+- **Store Information Loading**: Backend now queries `shopify_stores` table for proper store naming and metadata
+- **Automatic Sorting**: Store containers sorted by order count (most orders first) for better UX
 
-- **Double JSON Encoding**: Webhook handler was calling `JSON.stringify()` before passing data to `updateOrder()`, but `updateOrder()` was already doing `JSON.stringify()` internally
-- **Data Corruption**: This caused `shopify_order_data` to be stored as escaped JSON string instead of proper JSON object
-- **Display Issues**: OrderDetailCard couldn't parse corrupted data, showing order IDs as digits instead of proper names (e.g., "996192" instead of "#WF76764")
+**Frontend Transformation**:
+- **New Store Containers UI**: Each store gets its own dedicated container with:
+  - Store-specific icons and color coding (blue, green, purple)
+  - Individual drag-and-drop zones per store
+  - Order count display per store
+- **Preserved Functionality**: All existing features maintained:
+  - ✅ Drag-and-drop reordering (within each store container)
+  - ✅ Status management (unassigned/assigned/completed)
+  - ✅ Order deletion
+  - ✅ Search and filtering
+  - ✅ All statistics and analytics
+  - ✅ Add-on orders container (unchanged)
+- **Backward Compatibility**: Legacy "Main Orders" view shows if no store containers available
+- **Enhanced State Management**: All state changes (status, deletion, reordering) now update both legacy arrays and new store containers
 
-### 📊 **Impact & Resolution**
+**Drag-and-Drop Improvements**:
+- **Store-Scoped Reordering**: Orders can only be reordered within their own store container
+- **Improved Logic**: Enhanced drag-and-drop detection to work with nested store container structure
+- **Preserved Persistence**: Sort order still persists across page refreshes
 
-**Before Fix**:
-- Order fields missing in OrderDetailCard  
-- Order names showing as digit IDs instead of "#WF76764" format
-- "Update Orders" returning 0 updates despite having valid delivery date tags
-- `shopifyOrderData` stored as string: `"{\"id\":\"gid://shopify/Order/..."`
+**User Experience Improvements**:
+- **Clear Organization**: Orders naturally grouped by store origin
+- **Visual Differentiation**: Color-coded store containers for easy identification
+- **Maintained Performance**: All filtering and search operations work seamlessly with new structure
 
-**After Fix**:
-- ✅ Order fields properly displayed (customer name, delivery address, notes, etc.)
-- ✅ Order names show correctly as "#WF76764" format  
-- ✅ "Update Orders" properly extracts delivery dates from tags
-- ✅ `shopifyOrderData` stored as proper JSON object
+**Technical Implementation**:
+- **Dual Structure Support**: Backend returns both legacy arrays and new store containers for seamless transition
+- **Enhanced Type Safety**: Added proper typing for store container structure
+- **Complete State Synchronization**: All order state changes update across all data structures
 
-### 🛠️ **Technical Changes**
+**Result**: Orders are now organized by store origin while maintaining all existing functionality and performance characteristics.
 
-- **Webhook Handler** (`worker/index.ts:2391`): Removed `JSON.stringify()` call when updating existing orders
-- **Database Service**: `updateOrder()` function already handles JSON serialization correctly
-- **Repair Script**: Created `scripts/fix-corrupted-shopify-data.ts` to identify and fix corrupted existing orders
-
-### 📋 **Affected Orders**
-
-- **Identified**: Orders #WF76760 and #WF76764 have corrupted data
-- **Status**: New orders will be properly formatted; existing corrupted orders need manual repair
-- **Verification**: All other orders (7 out of 9) already have correct JSON object format
-
---- 
-
-### 🐛 **Critical Bug Fix - Double JSON Encoding in HelloFlowersSG Orders**
-
-**Issue Resolved**: Fixed OrderDetailCards showing empty timeslots, delivery dates, and other extracted fields for HelloFlowersSG orders after "Refresh from Database".
-
-### 🔍 **Root Cause Analysis** 
-
-**The Problem**: HelloFlowersSG orders had `shopify_order_data` stored as **double-encoded JSON strings** instead of proper JSON objects.
-
-**Data Storage Comparison**:
-- ✅ **WindflowerFlorist**: `{"id":"gid://shopify/Order/123","tags":["10:00-14:00"]}` (SQLite json_type: "object")
-- ❌ **HelloFlowersSG**: `"{\"id\":\"gid://shopify/Order/123\",\"tags\":[\"10:00-14:00\"]}"` (SQLite json_type: "text")
-
-**Impact**: SQLite's `json_extract()` function failed on double-encoded strings, causing field extraction to return `null` values.
-
-### 🛠️ **Technical Fix**
-
-**Bug Location**: Line 4593 in `worker/index.ts` (sync-by-date endpoint)
-
-**Before (Causing Double Encoding)**:
-```typescript
-await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { 
-  shopifyOrderData: JSON.stringify(shopifyOrderGraphQL) // ❌ Extra stringify!
-});
-```
-
-**After (Fixed)**:
-```typescript
-await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { 
-  shopifyOrderData: shopifyOrderGraphQL // ✅ Direct object
-});
-```
-
-**Why Only HelloFlowersSG Affected**: These orders were fetched using "Fetch Orders from Shopify" button which uses the sync-by-date endpoint with the double-encoding bug. WindflowerFlorist orders used webhooks/sync-all endpoints which were correct.
-
-### 🔧 **Database Processing**
-
-The `database-d1.ts` service correctly applies `JSON.stringify()` once during storage:
-```typescript
-shopifyOrderData: orderData.shopifyOrderData ? JSON.stringify(orderData.shopifyOrderData) : null
-```
-
-But the sync-by-date endpoint was passing **already-stringified data**, causing:
-1. First stringify (sync endpoint) → string  
-2. Second stringify (database service) → escaped string
-
-### ✅ **Resolution**
-
-- **Fixed**: Removed extra `JSON.stringify()` from sync-by-date endpoint
-- **Result**: New HelloFlowersSG orders will store proper JSON objects
-- **Field Extraction**: `json_extract()` now works correctly for future orders
-- **Backward Compatibility**: Existing double-encoded orders still need manual correction
-
-### 🎯 **User Impact**
-
-**Before Fix**:
-- "Refresh from Database" showed empty OrderDetailCard fields
-- Timeslots, delivery dates, order tags appeared as "N/A"
-
-**After Fix**:
-- New orders will display all extracted fields correctly
-- "Fetch Orders from Shopify" now works properly for HelloFlowersSG
-
-**Note**: Existing corrupted orders may need re-fetching or manual correction to display properly.
-
-## [1.5.21] - 2025-06-25
+// ... existing code ...
