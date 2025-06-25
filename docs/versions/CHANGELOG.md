@@ -2,6 +2,64 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.13] - 2025-06-25
+
+### 🔧 **Critical Fix - Unassigned Orders Stat Card Count**
+
+**Issue Resolution**: Fixed critical bug where Unassigned stat card was not showing correct count due to database schema inconsistency and missing table migration.
+
+### 🐛 **Database Schema Issues Fixed**
+
+- **Missing Table**: Applied migration `0017_add_order_card_states.sql` to create missing `order_card_states` table
+- **Status Default Mismatch**: Fixed inconsistency between `tenant_orders` (defaulted to "pending") and `order_card_states` (defaulted to "unassigned")
+- **Schema Migration**: Created and applied `0018_fix_order_status_default.sql` to standardize status defaults
+- **Result**: Both tables now consistently default to "unassigned" status
+
+### 📊 **Statistics Calculation Fixed**
+
+- **Before**: Unassigned count was 0 because orders had "pending" status but logic only checked for null/"unassigned"
+- **After**: Unassigned count correctly shows orders that have no status or "unassigned" status
+- **Logic**: Updated stat calculation to properly handle null/unassigned status values
+- **Consistency**: Frontend and backend stat calculations now match
+
+### 🔧 **Technical Implementation**
+
+**Database Changes**:
+```sql
+-- Applied missing migration for order_card_states table
+CREATE TABLE order_card_states (
+    status TEXT NOT NULL DEFAULT 'unassigned',
+    -- ... other fields
+);
+
+-- Fixed tenant_orders default status
+ALTER TABLE tenant_orders 
+MODIFY status TEXT DEFAULT "unassigned"; -- Changed from "pending"
+```
+
+**Frontend Fix**:
+```typescript
+// Correct unassigned count calculation
+const unassignedCount = allOrdersForStats.filter(o => 
+  !o.status || o.status === 'unassigned'
+).length
+```
+
+### 🚀 **Impact**
+
+- **✅ Unassigned Stat Card**: Now correctly shows count of orders awaiting assignment
+- **✅ Status Consistency**: All order status tracking now uses consistent "unassigned" default
+- **✅ Data Integrity**: Order card states properly persist across sessions
+- **✅ Filter Logic**: Unassigned filter now works correctly with updated status logic
+
+### 📋 **Migration Applied**
+
+- **Migration 0017**: `order_card_states` table created successfully
+- **Migration 0018**: `tenant_orders` status default corrected from "pending" to "unassigned"
+- **Database Consistency**: Both order tracking tables now use same status vocabulary
+
+---
+
 ## [1.5.12] - 2025-06-25
 
 ### 🎨 **Pickup Badge & Interactive Stat Cards Enhancement**

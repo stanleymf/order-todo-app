@@ -237,7 +237,9 @@ export const Orders: React.FC = () => {
     
     // Basic counts
     const totalOrderCount = allOrdersForStats.length
-    const unassignedCount = allOrdersForStats.filter(o => !o.status || o.status === 'unassigned').length
+    const unassignedCount = allOrdersForStats.filter(o => 
+      !o.status || o.status === 'unassigned'
+    ).length
     const assignedCount = allOrdersForStats.filter(o => o.status === 'assigned').length
     const completedCount = allOrdersForStats.filter(o => o.status === 'completed').length
     
