@@ -1126,13 +1126,28 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
     const updatePromises = orderIds.map(async (orderId: string, index: number) => {
       const sortOrder = (index + 1) * 10 // Use increments of 10 for easier insertion later
       
+      // First check if record exists to preserve existing fields
+      const existing = await c.env.DB.prepare(`
+        SELECT status, assigned_to, assigned_by, notes FROM order_card_states
+        WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
+      `).bind(tenantId, orderId, deliveryDate).first()
+      
       const result = await c.env.DB.prepare(`
         INSERT OR REPLACE INTO order_card_states 
-        (tenant_id, delivery_date, card_id, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `).bind(tenantId, deliveryDate, orderId, sortOrder).run()
+        (tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(
+        tenantId, 
+        deliveryDate, 
+        orderId, 
+        existing?.status || 'unassigned',
+        existing?.assigned_to || null,
+        existing?.assigned_by || null,
+        existing?.notes || null,
+        sortOrder
+      ).run()
 
-      console.log(`[REORDER] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder})`)
+      console.log(`[REORDER] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder}), preserved status: ${existing?.status || 'unassigned'}`)
       return result
     })
 

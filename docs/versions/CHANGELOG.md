@@ -2,6 +2,108 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.24] - 2025-06-25
+
+### 🐛 **Critical Fix - Order State Preservation During Reordering**
+
+**Issue Resolved**: Fixed order card states (status, notes, assigned_to) being lost when reordering OrderDetailCards via drag-and-drop.
+
+### 🔍 **Root Cause Analysis**
+
+**The Problem**: After fixing the 404 reordering issue in v1.5.23, drag-and-drop reordering worked but **order states were being reset** to default values.
+
+**Root Cause Found**: The reorder endpoint was using `INSERT OR REPLACE` with **incomplete field list**:
+
+```sql
+-- ❌ WRONG (Only updating sort_order, losing other fields)
+INSERT OR REPLACE INTO order_card_states 
+(tenant_id, delivery_date, card_id, sort_order, updated_at)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+
+-- ✅ CORRECT (Preserving existing fields)
+INSERT OR REPLACE INTO order_card_states 
+(tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+```
+
+**Why This Happened**:
+1. **SQLite `INSERT OR REPLACE` behavior**: Replaces the **entire row**, not just specified columns
+2. **Missing fields become NULL**: Any field not explicitly set gets default/NULL values
+3. **State loss**: `status`, `assigned_to`, `notes` were being reset to defaults
+
+### 🛠️ **Fix Implementation**
+
+**Two-Step Process**:
+1. **Query existing state** before updating to get current values
+2. **Preserve all fields** while only updating `sort_order`
+
+**Fixed Logic**:
+```typescript
+// Step 1: Query existing state
+const existing = await c.env.DB.prepare(`
+  SELECT status, assigned_to, assigned_by, notes FROM order_card_states
+  WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
+`).bind(tenantId, orderId, deliveryDate).first()
+
+// Step 2: Preserve all fields while updating sort_order
+const result = await c.env.DB.prepare(`
+  INSERT OR REPLACE INTO order_card_states 
+  (tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+`).bind(
+  tenantId, deliveryDate, orderId, 
+  existing?.status || 'unassigned',      // Preserve existing status
+  existing?.assigned_to || null,         // Preserve existing assignment
+  existing?.assigned_by || null,         // Preserve who assigned it
+  existing?.notes || null,               // Preserve existing notes
+  sortOrder                              // Update sort order
+).run()
+```
+
+### ✅ **Behavior Fixed**
+
+**Before Fix**:
+- Drag-and-drop order → Position changes ✅
+- **BUT**: Status resets to "unassigned" ❌
+- **BUT**: Notes get cleared ❌  
+- **BUT**: Assignments get lost ❌
+
+**After Fix**:
+- Drag-and-drop order → Position changes ✅
+- Status preserved (assigned/completed) ✅
+- Notes preserved ✅
+- Assignments preserved ✅
+
+### 🔧 **Technical Impact**
+
+**Database Operations**:
+- ✅ Reordering preserves all existing order card state data
+- ✅ Only `sort_order` and `updated_at` fields are modified during reordering
+- ✅ No data loss during drag-and-drop operations
+- ✅ Maintains referential integrity of order states
+
+**Performance**:
+- Minor overhead: Additional SELECT query per order during reordering
+- Acceptable trade-off for data preservation
+- Batch operations still efficient for typical order counts (5-50 orders)
+
+### 🎯 **User Experience Restored**
+
+**Complete Workflow Now Working**:
+1. **Set Status**: Mark order as "assigned" or "completed" ✅
+2. **Add Notes**: Add specific instructions or notes ✅
+3. **Assign Users**: Assign orders to specific florists ✅
+4. **Reorder Cards**: Drag-and-drop to reorder priorities ✅
+5. **Refresh Page**: All states and order persisted correctly ✅
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Feature**: Orders → Set status/notes → Drag-and-drop reorder
+**Status**: ✅ **FULLY FUNCTIONAL** - No data loss
+
+---
+
 ## [1.5.23] - 2025-06-25
 
 ### 🐛 **Critical Fix - Route Ordering Bug**
