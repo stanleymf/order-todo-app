@@ -86,6 +86,9 @@ export function ProductManagement() {
   // New state for labelled/not-labelled filter
   const [labelledFilter, setLabelledFilter] = useState<"all" | "labelled" | "not-labelled">("all")
 
+  // New state for store filtering in saved products
+  const [savedProductStoreFilter, setSavedProductStoreFilter] = useState<string>("all")
+
   // State for shift+click selection
   const [lastSelectedProductId, setLastSelectedProductId] = useState<string | null>(null)
 
@@ -376,8 +379,13 @@ export function ProductManagement() {
     return savedProducts.some((sp) => sp.shopifyProductId === shopifyId)
   }
 
-  // Filter saved products based on search and label status
+  // Filter saved products based on search, label status, and store
   const filteredSavedProducts = savedProducts.filter((product) => {
+    // Store filter
+    if (savedProductStoreFilter !== "all" && product.storeId !== savedProductStoreFilter) {
+      return false
+    }
+
     // Label filter
     if (labelledFilter === "labelled" && (!product.labelNames || product.labelNames.length === 0)) {
       return false
@@ -442,6 +450,7 @@ export function ProductManagement() {
   const clearSavedProductFilters = () => {
     setSavedProductSearch("")
     setLabelledFilter("all")
+    setSavedProductStoreFilter("all")
   }
 
   const openShopifyProduct = (product: any) => {
@@ -531,6 +540,7 @@ export function ProductManagement() {
         imageAlt: product.images?.[0]?.alt,
         imageWidth: product.images?.[0]?.width,
         imageHeight: product.images?.[0]?.height,
+        storeId: syncStoreId, // Add store ID to saved products
       }))
 
       await saveProducts(tenant.id, productsData)
@@ -1425,6 +1435,22 @@ export function ProductManagement() {
                   className={isMobileView ? "h-9 text-sm" : ""}
                 />
               </div>
+              <Select
+                value={savedProductStoreFilter}
+                onValueChange={setSavedProductStoreFilter}
+              >
+                <SelectTrigger className={`${isMobileView ? "w-full h-9 text-sm" : "w-48"}`}>
+                  <SelectValue placeholder="Filter by store" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Stores</SelectItem>
+                  {stores.map((store) => (
+                    <SelectItem key={store.id} value={store.id}>
+                      {store.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select
                 value={labelledFilter}
                 onValueChange={(value: "all" | "labelled" | "not-labelled") =>

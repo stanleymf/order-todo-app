@@ -277,6 +277,13 @@ export async function deleteOrder(tenantId: string, orderId: string): Promise<vo
   })
 }
 
+export async function reorderOrders(tenantId: string, orderIds: string[], deliveryDate: string): Promise<void> {
+  return authenticatedRequest<void>(`/api/tenants/${tenantId}/orders/reorder`, {
+    method: "PUT",
+    body: JSON.stringify({ orderIds, deliveryDate }),
+  })
+}
+
 // Store management
 export async function getStores(tenantId: string): Promise<Store[]> {
   return authenticatedRequest<Store[]>(`/api/tenants/${tenantId}/stores`)

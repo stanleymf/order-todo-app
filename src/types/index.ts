@@ -199,6 +199,8 @@ export interface SavedProduct {
   imageAlt?: string
   imageWidth?: number
   imageHeight?: number
+  // Store association
+  storeId?: string
   createdAt: string
   updatedAt: string
   labelIds?: string[]

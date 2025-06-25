@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent } from "./ui/card"
 import { Button } from "./ui/button"
 import { Badge } from "./ui/badge"
 import { Textarea } from "./ui/textarea"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog"
 import {
   Hash,
   Clock,
@@ -14,6 +15,7 @@ import {
   CheckCircle,
   UserCheck,
   Eye,
+  Trash2,
 } from "lucide-react"
 import { OrderCardField } from "../types/orderCardFields"
 import { useAuth } from "../contexts/AuthContext"
@@ -34,6 +36,7 @@ interface OrderDetailCardProps {
   isExpanded?: boolean
   onToggle?: () => void
   onStatusChange?: (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => void
+  onDelete?: (orderId: string) => void
   deliveryDate?: string
 }
 
@@ -43,6 +46,7 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   isExpanded = false,
   onToggle,
   onStatusChange,
+  onDelete,
   deliveryDate,
 }) => {
   const [expanded, setExpanded] = useState(isExpanded)
@@ -52,6 +56,15 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   const [notes, setNotes] = useState(order.notes || "")
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  
+  // Swipe gesture state
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const [startPosition, setStartPosition] = useState({ x: 0, y: 0 })
+  const cardRef = useRef<HTMLDivElement>(null)
+  const swipeThreshold = 150 // pixels to trigger delete action
+
   const { user, tenant } = useAuth()
 
   // Auto-save function with debouncing
@@ -103,11 +116,82 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     setNotes(order.notes || "")
   }, [order.status, order.notes])
 
+  // Touch/Mouse gesture handlers
+  const handleStart = (clientX: number, clientY: number) => {
+    setIsDragging(true)
+    setStartPosition({ x: clientX, y: clientY })
+    setSwipeOffset(0)
+  }
+
+  const handleMove = (clientX: number, clientY: number) => {
+    if (!isDragging) return
+    
+    const deltaX = clientX - startPosition.x
+    const deltaY = Math.abs(clientY - startPosition.y)
+    
+    // Only process horizontal swipe if it's more horizontal than vertical
+    if (deltaY < 50 && deltaX > 0) {
+      setSwipeOffset(Math.min(deltaX, swipeThreshold * 1.5))
+    }
+  }
+
+  const handleEnd = () => {
+    if (!isDragging) return
+    
+    setIsDragging(false)
+    
+    if (swipeOffset >= swipeThreshold) {
+      // Trigger delete confirmation
+      setShowDeleteConfirm(true)
+    }
+    
+    // Reset swipe offset
+    setSwipeOffset(0)
+  }
+
+  // Mouse events
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    handleStart(e.clientX, e.clientY)
+  }
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    handleMove(e.clientX, e.clientY)
+  }
+
+  const handleMouseUp = () => {
+    handleEnd()
+  }
+
+  // Touch events
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0]
+    handleStart(touch.clientX, touch.clientY)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const touch = e.touches[0]
+    handleMove(touch.clientX, touch.clientY)
+  }
+
+  const handleTouchEnd = () => {
+    handleEnd()
+  }
+
+  // Mouse leave event to reset swipe
+  const handleMouseLeave = () => {
+    if (isDragging) {
+      setIsDragging(false)
+      setSwipeOffset(0)
+    }
+  }
+
   const handleCardClick = (e: React.MouseEvent) => {
-    // Don't toggle if clicking on status buttons, textarea, or eye icon
+    // Don't toggle if clicking on status buttons, textarea, eye icon, or during swipe
     if ((e.target as HTMLElement).closest('.status-buttons') || 
         (e.target as HTMLElement).closest('.notes-textarea') ||
-        (e.target as HTMLElement).closest('.eye-icon')) {
+        (e.target as HTMLElement).closest('.eye-icon') ||
+        swipeOffset > 10) {
       return
     }
     
@@ -137,6 +221,17 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   const handleNotesChange = (newNotes: string) => {
     setNotes(newNotes)
     debouncedSaveNotes(newNotes)
+  }
+
+  const handleDeleteConfirm = () => {
+    if (onDelete) {
+      onDelete(order.cardId || order.id)
+    }
+    setShowDeleteConfirm(false)
+  }
+
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false)
   }
 
   // Extract field value using configured shopifyFields paths
@@ -412,9 +507,45 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
   return (
     <>
-    <Card className={`transition-all duration-200 hover:shadow-md border-l-4 cursor-pointer ${
-      getCardStatusColor()
-    }`}>
+    {/* Swipe Container */}
+    <div 
+      ref={cardRef}
+      className="relative overflow-hidden"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ userSelect: 'none' }}
+    >
+      {/* Delete Action Background */}
+      <div 
+        className="absolute inset-y-0 left-0 bg-red-500 flex items-center justify-start pl-6 transition-all duration-200"
+        style={{
+          width: `${Math.min(swipeOffset, swipeThreshold * 1.5)}px`,
+          opacity: swipeOffset > 0 ? 1 : 0
+        }}
+      >
+        <Trash2 
+          className={`text-white transition-all duration-200 ${
+            swipeOffset >= swipeThreshold ? 'scale-125' : 'scale-100'
+          }`} 
+          size={20} 
+        />
+      </div>
+      
+      {/* Main Card */}
+      <Card 
+        className={`transition-all duration-200 hover:shadow-md border-l-4 cursor-pointer relative ${
+          getCardStatusColor()
+        }`}
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          transition: isDragging ? 'none' : 'transform 0.3s ease-out'
+        }}
+      >
       <CardContent className="p-4" onClick={handleCardClick}>
         {/* Header Row - Always Visible */}
         <div className="flex items-start justify-between gap-2">
@@ -576,6 +707,7 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
         )}
       </CardContent>
     </Card>
+    </div>
 
     {/* Product Image Modal */}
     <ProductImageModal
@@ -585,6 +717,20 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
       shopifyVariantId={order.variantId}
       tenantId={tenant?.id}
     />
+
+    {/* Delete Confirmation Dialog */}
+    <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Are you sure you want to delete this order?</AlertDialogTitle>
+          <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={handleDeleteCancel}>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleDeleteConfirm}>Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   )
 } 

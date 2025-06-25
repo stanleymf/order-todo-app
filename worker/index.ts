@@ -1124,6 +1124,52 @@ app.delete("/api/tenants/:tenantId/orders/:orderId", async (c) => {
   return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
 })
 
+// --- Order Reordering ---
+app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const { orderIds, deliveryDate } = await c.req.json()
+
+  if (!orderIds || !Array.isArray(orderIds) || !deliveryDate) {
+    return c.json({ error: "orderIds array and deliveryDate are required" }, 400)
+  }
+
+  try {
+    console.log(`[REORDER] Updating order sequence for ${orderIds.length} orders on ${deliveryDate}`)
+
+    // Update sort_order for each order based on its position in the array
+    const updatePromises = orderIds.map(async (orderId: string, index: number) => {
+      const sortOrder = (index + 1) * 10 // Use increments of 10 for easier insertion later
+      
+      const result = await c.env.DB.prepare(`
+        INSERT OR REPLACE INTO order_card_states 
+        (tenant_id, delivery_date, order_id, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(tenantId, deliveryDate, orderId, sortOrder).run()
+
+      console.log(`[REORDER] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder})`)
+      return result
+    })
+
+    await Promise.all(updatePromises)
+
+    console.log(`[REORDER] Successfully updated order sequence for tenant ${tenantId} on ${deliveryDate}`)
+    
+    return c.json({ 
+      success: true, 
+      message: `Updated order sequence for ${orderIds.length} orders`,
+      orderIds: orderIds,
+      deliveryDate: deliveryDate
+    })
+
+  } catch (error) {
+    console.error("[REORDER] Error updating order sequence:", error)
+    return c.json({ 
+      error: "Failed to update order sequence", 
+      details: error instanceof Error ? error.message : "Unknown error" 
+    }, 500)
+  }
+})
+
 // --- Camera Widget Templates ---
 app.get("/api/tenants/:tenantId/camera-widget-templates", async (c) => {
   const tenantId = c.req.param("tenantId");
@@ -3918,21 +3964,20 @@ app.get("/api/tenants/:tenantId/saved-products", async (c) => {
 app.post("/api/tenants/:tenantId/saved-products", async (c) => {
   const tenantId = c.req.param("tenantId")
   const { products } = await c.req.json()
-  
-  console.log(`[SAVED-PRODUCTS-POST] Received request for tenant: ${tenantId}`)
-  console.log(`[SAVED-PRODUCTS-POST] Products array length: ${products?.length || 0}`)
-  
-  if (!products || !Array.isArray(products)) {
-    console.log(`[SAVED-PRODUCTS-POST] Error: Invalid products data - products:`, products)
-    return c.json({ error: "Products array is required" }, 400)
+
+  if (!Array.isArray(products) || products.length === 0) {
+    return c.json({ error: "Products array is required and cannot be empty" }, 400)
   }
 
-  // Log each product being saved
+  console.log(`[SAVED-PRODUCTS-POST] Attempting to save ${products.length} products for tenant: ${tenantId}`)
+  
+  // Log the products being saved to verify they have the expected structure
   products.forEach((product, index) => {
     console.log(`[SAVED-PRODUCTS-POST] Product ${index + 1}:`, {
       shopifyProductId: product.shopifyProductId,
       shopifyVariantId: product.shopifyVariantId,
       title: product.title,
+      storeId: product.storeId, // Add storeId to logging
       imageUrl: product.imageUrl,
       imageAlt: product.imageAlt,
       imageWidth: product.imageWidth,
@@ -3952,6 +3997,7 @@ app.post("/api/tenants/:tenantId/saved-products", async (c) => {
         shopifyProductId: product.shopifyProductId,
         shopifyVariantId: product.shopifyVariantId,
         title: product.title,
+        storeId: product.storeId, // Add storeId to logging
         imageUrl: product.imageUrl,
         imageAlt: product.imageAlt,
         imageWidth: product.imageWidth,

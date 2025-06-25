@@ -2,6 +2,267 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.18] - 2025-06-25
+
+### 🏪 **Major Feature - Store Filtering for Saved Products**
+
+**New Feature Addition**: Added comprehensive store filtering functionality for saved products with database migration and UI enhancements.
+
+### 🗄️ **Database Schema Enhancement**
+
+- **New Column**: Added `store_id` column to `saved_products` table for store association
+- **Migration Applied**: Executed migration `0021_update_saved_products_store_ids.sql` 
+- **Data Distribution**: Properly distributed 1,536 existing saved products between stores:
+  - **WindflowerFlorist**: 1,477 products (96.16%)
+  - **HelloFlowers Singapore**: 59 products (3.84%)
+- **Pattern-Based Assignment**: Used intelligent pattern matching to assign products to correct stores
+- **Index Optimization**: Added database index for `store_id` for optimal query performance
+
+### 🎯 **Store Filtering Features**
+
+- **Filter Dropdown**: New "Filter by store" dropdown in Saved Products section
+- **Store Selection**: Filter by "All Stores" or specific store (WindflowerFlorist / HelloFlowers SG)
+- **Multi-Filter Support**: Works alongside existing search and label filters
+- **Real-time Filtering**: Instant results when selecting different stores
+- **Clear Filters**: Reset button clears all filters including store filter
+
+### 🔧 **Technical Implementation**
+
+**Database Changes**:
+```sql
+-- Added store_id column with foreign key relationship
+ALTER TABLE saved_products ADD COLUMN store_id TEXT;
+CREATE INDEX idx_saved_products_store_id ON saved_products(store_id);
+
+-- Intelligent store assignment based on product characteristics
+UPDATE saved_products SET store_id = '2a23fac3-625d-4ee8-95d9-33153c7d5535' 
+WHERE (lower(title) LIKE '%hello%' OR lower(title) LIKE '%singapore%' 
+       OR lower(description) LIKE '%singapore%');
+```
+
+**Frontend Updates**:
+```typescript
+// New store filter state and UI
+const [savedProductStoreFilter, setSavedProductStoreFilter] = useState<string>("all")
+
+// Enhanced filtering logic
+const filteredSavedProducts = savedProducts.filter((product) => {
+  if (savedProductStoreFilter !== "all" && product.storeId !== savedProductStoreFilter) {
+    return false
+  }
+  // ... other filters
+})
+```
+
+**Backend Integration**:
+```typescript
+// Enhanced getSavedProducts method with store filtering
+async getSavedProducts(env: any, tenantId: string, filters?: {
+  search?: string, productType?: string, vendor?: string, 
+  hasLabels?: boolean, storeId?: string
+})
+
+// Store ID included when saving new products  
+const productsData = products.map(product => ({
+  // ... other fields
+  storeId: syncStoreId
+}))
+```
+
+### 🏷️ **Type Safety Updates**
+
+- **SavedProduct Interface**: Added `storeId?: string` field to type definition
+- **API Consistency**: All saved product endpoints now support store_id field
+- **Future Products**: New saved products automatically include store association
+
+### ✅ **User Impact**
+
+- **✅ Organized Products**: Easily view products by specific store
+- **✅ Efficient Management**: Quickly find store-specific inventory
+- **✅ Data Integrity**: All existing products properly categorized
+- **✅ Multi-Store Support**: Full compatibility with multi-tenant store setup
+- **✅ Performance**: Fast filtering with database index optimization
+
+### 📋 **Usage Instructions**
+
+1. **Navigate**: Go to Products > Saved Products section
+2. **Filter**: Select store from "Filter by store" dropdown
+3. **View**: See products filtered by selected store
+4. **Combine**: Use with search and label filters for refined results
+5. **Reset**: Click "Clear Filters" to reset all filters including store
+
+---
+
+## [1.5.17] - 2025-01-13
+
+### 🚨 **CRITICAL FIX - Fetch Orders Functionality**
+
+**Issue Resolution**: Fixed major bug where "Fetch Orders" button was only querying the database instead of syncing new orders from Shopify, causing new stores to appear empty.
+
+### 🐛 **Orders Sync Issues Fixed**
+
+- **Root Cause**: "Fetch Orders" was calling `getOrdersFromDbByDate` (database query only) instead of `syncOrdersByDate` (Shopify sync)
+- **Impact**: New stores showed 0 orders because orders were never downloaded from Shopify to database
+- **Solution**: Updated "Fetch Orders" to actually sync from Shopify and save to D1 database
+- **User Experience**: Added clear button labels to distinguish between sync and refresh actions
+
+### 🔧 **Technical Implementation**
+
+**Button Functionality Changes**:
+```typescript
+// OLD: Only queried database
+const handleFetchOrders = () => getOrdersFromDbByDate(tenantId, date)
+
+// NEW: Syncs from Shopify then refreshes from database  
+const handleFetchOrders = () => {
+  const syncResponse = await syncOrdersByDate(tenantId, storeId, date)
+  const response = await getOrdersFromDbByDate(tenantId, date)
+}
+```
+
+**UI Updates**:
+- **"Fetch Orders"** → **"Fetch Orders from Shopify"** (Download icon)
+- **Added**: **"Refresh from Database"** (Refresh icon) for local queries
+- **Unchanged**: **"Update Orders"** continues to update existing order data
+
+### 🎯 **Order Sync Workflow Fixed**
+
+- **Step 1**: "Fetch Orders from Shopify" downloads orders for specific date and saves to D1
+- **Step 2**: "Refresh from Database" quickly loads already-synced orders from local database
+- **Step 3**: "Update Orders" enhances existing orders with additional Shopify GraphQL data
+
+### ✅ **User Impact**
+
+- **✅ New Stores**: Can now successfully fetch orders for the first time
+- **✅ Date-Specific Sync**: Downloads only orders for selected delivery date from Shopify
+- **✅ Auto-Save**: Synced orders automatically saved to D1 database
+- **✅ Clear Actions**: Button labels clearly indicate Shopify vs database operations
+- **✅ Performance**: Auto-refresh on date change uses fast database query instead of full sync
+
+### 🏪 **Store Compatibility**
+
+- **Store Selection**: Uses selected store or defaults to first configured store
+- **Multi-Store Support**: Properly syncs orders from correct Shopify store
+- **Date Filtering**: Only downloads orders with matching delivery date tags
+- **Error Handling**: Clear error messages if store not configured or sync fails
+
+## [1.5.16] - 2025-06-25
+
+### 📋 **Major Feature - Drag & Drop Order Card Reordering**
+
+**New Feature Addition**: Added comprehensive drag-and-drop reordering functionality for Order Cards with mobile-first design and auto-save capabilities.
+
+### 🎯 **Drag & Drop Reordering Features**
+
+- **Mobile-First**: Touch-optimized drag and drop for mobile devices
+- **Desktop Support**: Mouse-based dragging with smooth animations  
+- **Click-to-Activate**: No visual handles needed - click directly on cards to drag
+- **Auto-Save**: Immediately saves new order sequence to database
+- **Smart Availability**: Only enabled when "Total Orders" filter is active
+- **Separate Lists**: Independent reordering for Main Orders and Add-ons
+- **Visual Feedback**: Cards show opacity during drag, visual indicators when reordering is available
+- **Performance Optimized**: Uses @dnd-kit library for robust cross-platform compatibility
+
+### 🛠️ **Technical Implementation**
+
+- **Database Migration**: Added `sort_order` field to `order_card_states` table
+- **API Endpoint**: New `/api/tenants/{id}/orders/reorder` PUT endpoint
+- **Components**: New `SortableOrderCard` wrapper component with gesture detection
+- **Constraints**: Vertical-only dragging with parent element restrictions
+- **Error Handling**: Graceful fallback if reordering fails
+
+### 🔧 **Behavior Details**
+
+- **Activation Distance**: 8px movement required before drag starts
+- **Visual States**: Dragged cards become semi-transparent
+- **Context Awareness**: Automatically disabled when status filters are active
+- **Real-time Updates**: Order changes sync immediately across all views
+- **Toast Notifications**: Success/error feedback for user actions
+
+## [1.5.15] - 2025-06-25
+
+### 🗑️ **Major Feature - Swipe-to-Delete Order Cards**
+
+**New Feature Addition**: Added intuitive swipe-to-delete functionality for Order Detail Cards with both desktop and mobile gesture support.
+
+### 🎯 **Swipe-to-Delete Features**
+
+- **Desktop Support**: Click and drag order cards to the right to reveal delete action
+- **Mobile Support**: Natural swipe gesture to the right on mobile devices  
+- **Visual Feedback**: Red background with trash icon appears as user swipes
+- **Threshold Detection**: 150px swipe distance required to trigger delete confirmation
+- **Smooth Animations**: CSS transitions provide smooth reveal/hide effects
+- **Reset Behavior**: Cards snap back to original position if swipe is insufficient
+
+### 🛡️ **Safety & Confirmation**
+
+- **Delete Confirmation**: Always shows confirmation dialog before permanent deletion
+- **Error Handling**: Comprehensive error handling with toast notifications
+- **API Integration**: Utilizes existing secure delete endpoint with authentication
+- **Real-time Updates**: Order lists and statistics refresh immediately after deletion
+- **No Accidental Deletions**: Reasonable swipe threshold prevents accidental triggers
+
+### 🔧 **Technical Implementation**
+
+**Frontend Changes**:
+```typescript
+// Gesture detection for both mouse and touch
+const handleStart = (clientX: number, clientY: number) => {
+  setIsDragging(true)
+  setStartPosition({ x: clientX, y: clientY })
+}
+
+// Visual feedback during swipe
+<div style={{
+  width: `${Math.min(swipeOffset, swipeThreshold * 1.5)}px`,
+  opacity: swipeOffset > 0 ? 1 : 0
+}}>
+  <Trash2 className={swipeOffset >= threshold ? 'scale-125' : 'scale-100'} />
+</div>
+```
+
+**Backend Integration**:
+```typescript
+// Uses existing secure delete API
+await deleteOrder(tenant.id, orderId)
+
+// Real-time state management
+const removeOrder = (orders: any[]) => 
+  orders.filter(order => order.cardId !== orderId && order.id !== orderId)
+```
+
+### 📱 **Cross-Platform Support**
+
+- **Mouse Events**: `onMouseDown`, `onMouseMove`, `onMouseUp` for desktop
+- **Touch Events**: `onTouchStart`, `onTouchMove`, `onTouchEnd` for mobile
+- **Edge Cases**: Handles mouse leave, prevents text selection during drag
+- **Performance**: Smooth 60fps animations with hardware acceleration
+
+### 🎨 **User Experience**
+
+- **Intuitive Gesture**: Natural swipe-right motion for deletion
+- **Progressive Disclosure**: Trash icon scales up when threshold is reached
+- **Confirmation Dialog**: Clear "Are you sure?" dialog with Cancel/Delete options
+- **Toast Notifications**: Success/error feedback with detailed messages
+- **Immediate Feedback**: Orders disappear from list instantly after confirmation
+
+### ✅ **User Impact**
+
+- **✅ Mobile-First**: Optimized for mobile workflow with touch gestures
+- **✅ Desktop Compatible**: Mouse drag support for desktop users
+- **✅ Safety**: Confirmation prevents accidental deletions
+- **✅ Performance**: Smooth animations without UI lag
+- **✅ Real-time**: Statistics and counts update immediately
+
+### 📋 **Usage Instructions**
+
+1. **Mobile**: Swipe any order card to the right → Confirm deletion in dialog
+2. **Desktop**: Click and drag any order card to the right → Confirm deletion in dialog
+3. **Safety**: Cards snap back if swipe distance is insufficient (< 150px)
+4. **Feedback**: Red trash icon appears and scales up when deletion threshold is reached
+
+---
+
 ## [1.5.14] - 2025-06-25
 
 ### 🎯 **Critical Fix - AI Training Data Manager Ratings**

@@ -30,8 +30,28 @@ import {
   AlertTriangle
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
-import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders } from "../services/api"
+import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate } from "../services/api"
 import { OrderDetailCard } from "./OrderDetailCard"
+import { SortableOrderCard } from "./SortableOrderCard"
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import {
+  restrictToVerticalAxis,
+  restrictToParentElement,
+} from '@dnd-kit/modifiers'
 import { OrderCardField } from "../types/orderCardFields"
 import { toast } from "sonner"
 
@@ -56,6 +76,18 @@ export const Orders: React.FC = () => {
     stores?: string[]
   }>({})
 
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
   // Load stores and configuration on mount
   useEffect(() => {
     const loadInitialData = async () => {
@@ -79,6 +111,67 @@ export const Orders: React.FC = () => {
   }, [tenant?.id])
 
   const handleFetchOrders = useCallback(async () => {
+    if (!tenant?.id || !selectedDate || !stores.length) {
+      return
+    }
+
+    setLoading(true)
+    try {
+      // Use the selected store, or default to first store if "all" is selected
+      const storeId = selectedStore === "all" ? stores[0]?.id : selectedStore
+      if (!storeId) {
+        toast.error("No store selected")
+        return
+      }
+
+      // Convert date from YYYY-MM-DD to DD/MM/YYYY format for API
+      const dateStr = selectedDate.split("-").reverse().join("/")
+      console.log("Syncing orders from Shopify for date:", dateStr, "store:", storeId)
+      
+      // Sync orders from Shopify for this specific date
+      const syncResponse = await syncOrdersByDate(tenant.id, storeId, dateStr)
+      console.log("Sync response:", syncResponse)
+      
+      if (syncResponse.success) {
+        const totalProcessed = syncResponse.newOrders?.length + syncResponse.updatedOrders?.length || 0
+        toast.success(`Synced ${totalProcessed} orders for ${dateStr} from Shopify`)
+        
+        // Now fetch the updated data from database
+        const response = await getOrdersFromDbByDate(tenant.id, dateStr)
+        console.log("Orders response after sync:", response)
+        
+        // Handle both old format (array) and new format (object with categories)
+        if (Array.isArray(response)) {
+          // Old format - treat all as main orders
+          console.log("Setting orders (old format):", response.length)
+          setAllOrders(response)
+          setMainOrders(response)
+          setAddOnOrders([])
+        } else {
+          // New format with categories
+          console.log("Setting orders (new format):", {
+            all: response.orders?.length || 0,
+            main: response.mainOrders?.length || 0,
+            addOns: response.addOnOrders?.length || 0
+          })
+          setAllOrders(response.orders || [])
+          setMainOrders(response.mainOrders || [])
+          setAddOnOrders(response.addOnOrders || [])
+        }
+        
+        console.log(`Loaded ${(response.orders || response).length} orders for ${dateStr}`)
+      } else {
+        toast.error("Failed to sync orders from Shopify")
+      }
+    } catch (error) {
+      console.error("Failed to sync orders:", error)
+      toast.error("Failed to sync orders: " + (error as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [tenant?.id, selectedDate, selectedStore, stores])
+
+  const handleRefreshFromDatabase = useCallback(async () => {
     if (!tenant?.id || !selectedDate) {
       return
     }
@@ -87,7 +180,7 @@ export const Orders: React.FC = () => {
     try {
       // Convert date from YYYY-MM-DD to DD/MM/YYYY format for API
       const dateStr = selectedDate.split("-").reverse().join("/")
-      console.log("Fetching orders for date:", dateStr)
+      console.log("Refreshing orders from database for date:", dateStr)
       
       const response = await getOrdersFromDbByDate(tenant.id, dateStr)
       console.log("Orders response:", response)
@@ -111,21 +204,22 @@ export const Orders: React.FC = () => {
         setAddOnOrders(response.addOnOrders || [])
       }
       
-      console.log(`Loaded ${(response.orders || response).length} orders for ${dateStr}`)
+      console.log(`Refreshed ${(response.orders || response).length} orders for ${dateStr}`)
+      toast.success("Orders refreshed from database")
     } catch (error) {
-      console.error("Failed to fetch orders:", error)
-      toast.error("Failed to fetch orders")
+      console.error("Failed to refresh orders:", error)
+      toast.error("Failed to refresh orders")
     } finally {
       setLoading(false)
     }
   }, [tenant?.id, selectedDate])
 
-  // Auto-load orders when date changes
+  // Auto-load orders when date changes - use database refresh for auto-load
   useEffect(() => {
     if (tenant?.id && selectedDate) {
-      handleFetchOrders()
+      handleRefreshFromDatabase()
     }
-  }, [handleFetchOrders, tenant?.id, selectedDate])
+  }, [handleRefreshFromDatabase, tenant?.id, selectedDate])
 
   const handleUpdateOrders = async () => {
     if (!tenant?.id || !stores.length) {
@@ -137,17 +231,19 @@ export const Orders: React.FC = () => {
     
     setLoading(true)
     try {
-      console.log(`Updating existing orders for date ${selectedDate} with enhanced GraphQL data...`)
-      toast.info(`Updating orders for ${selectedDate} with enhanced data...`)
+      // Convert date from YYYY-MM-DD to DD/MM/YYYY format for API (same as handleFetchOrders)
+      const dateStr = selectedDate.split("-").reverse().join("/")
+      console.log(`Updating existing orders for date ${dateStr} with enhanced GraphQL data...`)
+      toast.info(`Updating orders for ${dateStr} with enhanced data...`)
       
-      // Call the update-existing API function with selected date
-      const result = await updateExistingOrders(tenant.id, storeId, selectedDate)
+      // Call the update-existing API function with converted date
+      const result = await updateExistingOrders(tenant.id, storeId, dateStr)
       
       console.log("Update result:", result)
       
       if (result.success) {
         const updatedCount = result.totalProcessed || result.updatedOrders?.length || 0
-        toast.success(`Successfully updated ${updatedCount} orders for ${selectedDate}`)
+        toast.success(`Successfully updated ${updatedCount} orders for ${dateStr}`)
         
         // Refresh the orders list to show the updated data
         await handleFetchOrders()
@@ -301,6 +397,109 @@ export const Orders: React.FC = () => {
     setMainOrders(prev => updateOrderStatus(prev))
     setAddOnOrders(prev => updateOrderStatus(prev))
   }
+
+  // Handle order deletion from OrderDetailCard
+  const handleOrderDelete = async (orderId: string) => {
+    if (!tenant?.id) {
+      toast.error("No tenant ID available")
+      return
+    }
+
+    try {
+      console.log(`Deleting order ${orderId}...`)
+      toast.info("Deleting order...")
+      
+      // Call the delete API
+      await deleteOrder(tenant.id, orderId)
+      
+      // Remove the order from all relevant arrays
+      const removeOrder = (orders: any[]) => 
+        orders.filter(order => 
+          order.cardId !== orderId && order.id !== orderId
+        )
+
+      setAllOrders(prev => removeOrder(prev))
+      setMainOrders(prev => removeOrder(prev))
+      setAddOnOrders(prev => removeOrder(prev))
+      
+      toast.success("Order deleted successfully")
+      console.log(`Order ${orderId} deleted successfully`)
+      
+    } catch (error) {
+      console.error("Failed to delete order:", error)
+      toast.error("Failed to delete order: " + (error as Error).message)
+    }
+  }
+
+  // Handle drag end for reordering
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (!over || active.id === over.id) {
+      return
+    }
+
+    if (!tenant?.id) {
+      toast.error("No tenant ID available")
+      return
+    }
+
+    try {
+      // Find which list the dragged item belongs to
+      const activeMainIndex = filteredMainOrders.findIndex(order => 
+        (order.cardId || order.id) === active.id
+      )
+      const activeAddOnIndex = filteredAddOnOrders.findIndex(order => 
+        (order.cardId || order.id) === active.id
+      )
+
+      if (activeMainIndex !== -1) {
+        // Reordering main orders
+        const oldIndex = activeMainIndex
+        const newIndex = filteredMainOrders.findIndex(order => 
+          (order.cardId || order.id) === over.id
+        )
+
+        if (newIndex !== -1) {
+          const newMainOrders = arrayMove(filteredMainOrders, oldIndex, newIndex)
+          setMainOrders(newMainOrders)
+          
+          // Extract order IDs in new sequence
+          const orderIds = newMainOrders.map(order => order.cardId || order.id)
+          const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+          
+          // Auto-save the new order
+          await reorderOrders(tenant.id, orderIds, deliveryDate)
+          toast.success("Order sequence updated")
+        }
+      } else if (activeAddOnIndex !== -1) {
+        // Reordering add-on orders
+        const oldIndex = activeAddOnIndex
+        const newIndex = filteredAddOnOrders.findIndex(order => 
+          (order.cardId || order.id) === over.id
+        )
+
+        if (newIndex !== -1) {
+          const newAddOnOrders = arrayMove(filteredAddOnOrders, oldIndex, newIndex)
+          setAddOnOrders(newAddOnOrders)
+          
+          // Extract order IDs in new sequence
+          const orderIds = newAddOnOrders.map(order => order.cardId || order.id)
+          const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+          
+          // Auto-save the new order
+          await reorderOrders(tenant.id, orderIds, deliveryDate)
+          toast.success("Order sequence updated")
+        }
+      }
+    } catch (error) {
+      console.error("Failed to reorder:", error)
+      toast.error("Failed to update order sequence: " + (error as Error).message)
+    }
+  }
+
+  // Check if reordering is enabled (only when showing all orders without filters)
+  const isReorderingEnabled = !activeFilters.status && !activeFilters.stores?.length
 
   return (
     <div className="flex-1 space-y-4 sm:space-y-6 p-2 sm:p-4 md:p-6">
@@ -578,10 +777,21 @@ export const Orders: React.FC = () => {
             <h3 className="text-sm font-medium mb-3">Quick Actions</h3>
             <div className="flex flex-wrap gap-2">
               <Button 
-                onClick={() => {
-                  handleFetchOrders()
-                  toast.success("Refreshing orders...")
-                }}
+                onClick={handleFetchOrders}
+                disabled={loading || !stores.length}
+                className="gap-2"
+              >
+                {loading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                Fetch Orders from Shopify
+              </Button>
+              
+              <Button 
+                variant="outline"
+                onClick={handleRefreshFromDatabase}
                 disabled={loading}
                 className="gap-2"
               >
@@ -590,7 +800,7 @@ export const Orders: React.FC = () => {
                 ) : (
                   <RefreshCw className="h-4 w-4" />
                 )}
-                Fetch Orders
+                Refresh from Database
               </Button>
               
               <Button 
@@ -644,9 +854,9 @@ export const Orders: React.FC = () => {
                 }
               </p>
               {allOrders.length === 0 && (
-                <Button onClick={handleFetchOrders} disabled={loading}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Fetch Orders
+                <Button onClick={handleFetchOrders} disabled={loading || !stores.length}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Fetch Orders from Shopify
                 </Button>
               )}
             </div>
@@ -660,6 +870,11 @@ export const Orders: React.FC = () => {
               <CardTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5 text-blue-500" />
                 Main Orders ({filteredMainOrders.length})
+                {isReorderingEnabled && filteredMainOrders.length > 1 && (
+                  <span className="text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
+                    Drag to reorder
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -669,18 +884,45 @@ export const Orders: React.FC = () => {
                   <p className="text-sm text-muted-foreground">No main orders found</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {filteredMainOrders.map(order => (
-                    <OrderDetailCard
-                      key={order.cardId || order.id}
-                      order={order}
-                      fields={orderFields}
-                      isExpanded={false}
-                      onStatusChange={handleOrderStatusChange}
-                      deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
-                    />
-                  ))}
-                </div>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                  modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                >
+                  <SortableContext
+                    items={filteredMainOrders.map(order => order.cardId || order.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-3">
+                      {filteredMainOrders.map(order => (
+                        isReorderingEnabled ? (
+                          <SortableOrderCard
+                            key={order.cardId || order.id}
+                            id={order.cardId || order.id}
+                            order={order}
+                            fields={orderFields}
+                            isExpanded={false}
+                            onStatusChange={handleOrderStatusChange}
+                            onDelete={handleOrderDelete}
+                            deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                            disabled={!isReorderingEnabled}
+                          />
+                        ) : (
+                          <OrderDetailCard
+                            key={order.cardId || order.id}
+                            order={order}
+                            fields={orderFields}
+                            isExpanded={false}
+                            onStatusChange={handleOrderStatusChange}
+                            onDelete={handleOrderDelete}
+                            deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                          />
+                        )
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </CardContent>
           </Card>
@@ -691,6 +933,11 @@ export const Orders: React.FC = () => {
               <CardTitle className="flex items-center gap-2">
                 <Gift className="h-5 w-5 text-orange-500" />
                 Add-ons ({filteredAddOnOrders.length})
+                {isReorderingEnabled && filteredAddOnOrders.length > 1 && (
+                  <span className="text-xs text-muted-foreground bg-orange-100 px-2 py-1 rounded">
+                    Drag to reorder
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -700,18 +947,45 @@ export const Orders: React.FC = () => {
                   <p className="text-sm text-muted-foreground">No add-ons found</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {filteredAddOnOrders.map(order => (
-                    <OrderDetailCard
-                      key={order.cardId || order.id}
-                      order={order}
-                      fields={orderFields}
-                      isExpanded={false}
-                      onStatusChange={handleOrderStatusChange}
-                      deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
-                    />
-                  ))}
-                </div>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                  modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                >
+                  <SortableContext
+                    items={filteredAddOnOrders.map(order => order.cardId || order.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-3">
+                      {filteredAddOnOrders.map(order => (
+                        isReorderingEnabled ? (
+                          <SortableOrderCard
+                            key={order.cardId || order.id}
+                            id={order.cardId || order.id}
+                            order={order}
+                            fields={orderFields}
+                            isExpanded={false}
+                            onStatusChange={handleOrderStatusChange}
+                            onDelete={handleOrderDelete}
+                            deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                            disabled={!isReorderingEnabled}
+                          />
+                        ) : (
+                          <OrderDetailCard
+                            key={order.cardId || order.id}
+                            order={order}
+                            fields={orderFields}
+                            isExpanded={false}
+                            onStatusChange={handleOrderStatusChange}
+                            onDelete={handleOrderDelete}
+                            deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
+                          />
+                        )
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </CardContent>
           </Card>

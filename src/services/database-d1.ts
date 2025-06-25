@@ -1195,6 +1195,7 @@ export const d1DatabaseService = {
       imageAlt?: string
       imageWidth?: number
       imageHeight?: number
+      storeId?: string  // Add storeId to the interface
     }>
   ): Promise<any[]> {
     const savedProducts = []
@@ -1220,15 +1221,16 @@ export const d1DatabaseService = {
         imageAlt: product.imageAlt,
         imageWidth: product.imageWidth,
         imageHeight: product.imageHeight,
+        storeId: product.storeId,
       })
 
       await env.DB.prepare(`
         INSERT OR REPLACE INTO saved_products (
           id, tenant_id, shopify_product_id, shopify_variant_id, title, variant_title,
           description, price, tags, product_type, vendor, handle, 
-          image_url, image_alt, image_width, image_height,
+          image_url, image_alt, image_width, image_height, store_id,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
         .bind(
           safeValue(productId),
@@ -1247,6 +1249,7 @@ export const d1DatabaseService = {
           safeValue(product.imageAlt),
           safeValue(product.imageWidth),
           safeValue(product.imageHeight),
+          safeValue(product.storeId), // Add store_id to the INSERT
           safeValue(existingProduct ? existingProduct.created_at : now),
           safeValue(now)
         )
@@ -1257,12 +1260,13 @@ export const d1DatabaseService = {
         shopifyProductId: product.shopifyProductId,
         shopifyVariantId: product.shopifyVariantId,
         title: product.title,
-        imageUrl: product.imageUrl 
+        imageUrl: product.imageUrl,
+        storeId: product.storeId
       })
 
       // Verify the product was actually saved by querying the database
       const verificationResult = await env.DB.prepare(`
-        SELECT id, title, image_url, image_alt, image_width, image_height 
+        SELECT id, title, image_url, image_alt, image_width, image_height, store_id 
         FROM saved_products 
         WHERE id = ?
       `)
@@ -1288,6 +1292,7 @@ export const d1DatabaseService = {
         imageAlt: product.imageAlt,
         imageWidth: product.imageWidth,
         imageHeight: product.imageHeight,
+        storeId: product.storeId, // Add storeId to returned object
         createdAt: existingProduct ? existingProduct.created_at : now,
         updatedAt: now,
       })
@@ -1304,6 +1309,7 @@ export const d1DatabaseService = {
       productType?: string
       vendor?: string
       hasLabels?: boolean
+      storeId?: string  // Add store filter
     }
   ): Promise<any[]> {
     console.log('[getSavedProducts] Fetching products for tenant:', tenantId)
@@ -1336,6 +1342,11 @@ export const d1DatabaseService = {
       params.push(filters.vendor)
     }
 
+    if (filters?.storeId) {
+      query += ` AND sp.store_id = ?`
+      params.push(filters.storeId)
+    }
+
     if (filters?.hasLabels === true) {
       query += ` AND plm.label_id IS NOT NULL`
     } else if (filters?.hasLabels === false) {
@@ -1361,6 +1372,7 @@ export const d1DatabaseService = {
         image_alt: results[0].image_alt,
         image_width: results[0].image_width,
         image_height: results[0].image_height,
+        store_id: results[0].store_id,
       })
     }
 
@@ -1382,6 +1394,7 @@ export const d1DatabaseService = {
       imageAlt: result.image_alt,
       imageWidth: result.image_width,
       imageHeight: result.image_height,
+      storeId: result.store_id,  // Add storeId to mapped result
       createdAt: result.created_at,
       updatedAt: result.updated_at,
       labelIds: result.label_ids ? result.label_ids.split(",") : [],
@@ -1397,6 +1410,7 @@ export const d1DatabaseService = {
         imageAlt: mappedResults[0].imageAlt,
         imageWidth: mappedResults[0].imageWidth,
         imageHeight: mappedResults[0].imageHeight,
+        storeId: mappedResults[0].storeId,
       })
     }
 

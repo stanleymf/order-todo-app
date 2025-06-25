@@ -228,21 +228,12 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
         aiTrainingService.getGeneratedDesigns()
       ])
       
-      // More visible debugging
-      alert('[DEBUG] Found ' + generatedDesignsResults.length + ' designs');
-      console.log('[DEBUG] Generated designs data:', generatedDesignsResults);
-      console.log('[DEBUG] First design image data:', generatedDesignsResults[0] ? {
-        id: generatedDesignsResults[0].id,
-        generated_image_url: generatedDesignsResults[0].generated_image_url,
-        generated_image_data: generatedDesignsResults[0].generated_image_data,
-        prompt: generatedDesignsResults[0].prompt?.substring(0, 50) + '...'
-      } : 'No designs found');
+
       
       setTrainingStats(trainingStatsResults)
       setGeneratedDesigns(generatedDesignsResults)
     } catch (error) {
       console.error('Error loading training data:', error)
-      alert('Error loading training data: ' + (error as Error).message);
       toast.error('Failed to load training data')
     } finally {
       setIsLoading(false)
