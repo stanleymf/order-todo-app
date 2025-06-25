@@ -928,7 +928,7 @@ export const Orders: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Store className={`h-5 w-5 ${storeIconColor}`} />
-                    {container.storeName} ({container.orders.length})
+                    {container.storeName} - {container.orders.length}
                     {isReorderingEnabled && container.orders.length > 1 && (
                       <span className={`text-xs text-muted-foreground ${bgColor} px-2 py-1 rounded`}>
                         Drag to reorder
@@ -994,7 +994,7 @@ export const Orders: React.FC = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Package className="h-5 w-5 text-blue-500" />
-                  Main Orders ({filteredMainOrders.length})
+                  Main Orders - {filteredMainOrders.length}
                   {isReorderingEnabled && filteredMainOrders.length > 1 && (
                     <span className="text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
                       Drag to reorder
@@ -1051,7 +1051,7 @@ export const Orders: React.FC = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Gift className="h-5 w-5 text-orange-500" />
-                Add-ons ({filteredAddOnOrders.length})
+                Add-ons - {filteredAddOnOrders.length}
                 {isReorderingEnabled && filteredAddOnOrders.length > 1 && (
                   <span className="text-xs text-muted-foreground bg-orange-100 px-2 py-1 rounded">
                     Drag to reorder

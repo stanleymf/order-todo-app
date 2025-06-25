@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.28] - 2025-01-13
+
+### Improved
+- **Container Count Format**: Updated store container count format from "WindflowerFlorist (46)" to "WindflowerFlorist - 46"
+- Applied consistent dash format across all container types:
+  - Store containers: "WindflowerFlorist - 46", "HelloFlowers Singapore - 12" 
+  - Main Orders: "Main Orders - 58" (fallback)
+  - Add-ons: "Add-ons - 3"
+
+### Enhanced
+- Improved visual consistency across all order container headers
+- Cleaner, more readable count display format
+
+---
+
 ## [1.5.27] - 2025-01-13
 
 ### Fixed
