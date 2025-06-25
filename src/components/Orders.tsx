@@ -49,6 +49,12 @@ export const Orders: React.FC = () => {
   const [orderFields, setOrderFields] = useState<OrderCardField[]>([])
   const [loading, setLoading] = useState(false)
   const [isStatsOpen, setIsStatsOpen] = useState(false)
+  
+  // Filter state management
+  const [activeFilters, setActiveFilters] = useState<{
+    status?: 'unassigned' | 'assigned' | 'completed'
+    stores?: string[]
+  }>({})
 
   // Load stores and configuration on mount
   useEffect(() => {
@@ -180,7 +186,43 @@ export const Orders: React.FC = () => {
         order.storeId === selectedStore ||
         order.store_id === selectedStore
       
-      return matchesSearch && matchesStore
+      // Apply active filters
+      const matchesStatusFilter = !activeFilters.status || 
+        (activeFilters.status === 'unassigned' && (!order.status || order.status === 'unassigned')) ||
+        (activeFilters.status === 'assigned' && order.status === 'assigned') ||
+        (activeFilters.status === 'completed' && order.status === 'completed')
+      
+      const matchesStoreFilter = !activeFilters.stores?.length || 
+        activeFilters.stores.includes(order.storeId) || 
+        activeFilters.stores.includes(order.store_id)
+      
+      return matchesSearch && matchesStore && matchesStatusFilter && matchesStoreFilter
+    })
+  }
+
+  // Filter functions
+  const handleStatusFilterClick = (status: 'unassigned' | 'assigned' | 'completed') => {
+    setActiveFilters(prev => ({
+      ...prev,
+      status: prev.status === status ? undefined : status
+    }))
+  }
+
+  const handleTotalFilterClick = () => {
+    setActiveFilters({})
+  }
+
+  const handleStoreFilterClick = (storeId: string) => {
+    setActiveFilters(prev => {
+      const currentStores = prev.stores || []
+      const isActive = currentStores.includes(storeId)
+      
+      return {
+        ...prev,
+        stores: isActive 
+          ? currentStores.filter(id => id !== storeId)
+          : [...currentStores, storeId]
+      }
     })
   }
 
@@ -189,14 +231,17 @@ export const Orders: React.FC = () => {
   const filteredAllOrders = filterOrders(allOrders)
 
   const getComprehensiveStats = () => {
+    // Use unfiltered data for stats (show total counts, not filtered counts)
+    const allOrdersForStats = allOrders
+    
     // Basic counts
-    const totalOrderCount = filteredAllOrders.length
-    const unassignedCount = filteredAllOrders.filter(o => !o.status || o.status === 'unassigned').length
-    const assignedCount = filteredAllOrders.filter(o => o.status === 'assigned').length
-    const completedCount = filteredAllOrders.filter(o => o.status === 'completed').length
+    const totalOrderCount = allOrdersForStats.length
+    const unassignedCount = allOrdersForStats.filter(o => !o.status || o.status === 'unassigned').length
+    const assignedCount = allOrdersForStats.filter(o => o.status === 'assigned').length
+    const completedCount = allOrdersForStats.filter(o => o.status === 'completed').length
     
     // Florist breakdown - count completed orders by florist
-    const floristBreakdown = filteredAllOrders
+    const floristBreakdown = allOrdersForStats
       .filter(o => o.status === 'completed' && o.assignedTo)
       .reduce((acc: any, order) => {
         const florist = order.assignedTo || 'Unknown'
@@ -206,20 +251,20 @@ export const Orders: React.FC = () => {
 
     // Breakdown by store
     const storeBreakdown = stores.reduce((acc: any, store) => {
-      const storeOrders = filteredAllOrders.filter(o => o.storeId === store.id || o.store_id === store.id)
+      const storeOrders = allOrdersForStats.filter(o => o.storeId === store.id || o.store_id === store.id)
       acc[store.name] = storeOrders.length
       return acc
     }, {})
 
     // Difficulty labels count
-    const difficultyBreakdown = filteredAllOrders.reduce((acc: any, order) => {
+    const difficultyBreakdown = allOrdersForStats.reduce((acc: any, order) => {
       const difficulty = order.difficultyLabel || 'Unknown'
       acc[difficulty] = (acc[difficulty] || 0) + 1
       return acc
     }, {})
 
     // Product type label count
-    const productTypeBreakdown = filteredAllOrders.reduce((acc: any, order) => {
+    const productTypeBreakdown = allOrdersForStats.reduce((acc: any, order) => {
       const productType = order.productCategory || order.productTypeLabel || 'Unknown'
       acc[productType] = (acc[productType] || 0) + 1
       return acc
@@ -284,9 +329,16 @@ export const Orders: React.FC = () => {
             <CardContent className="space-y-6">
               {/* Basic Stats - Row 1 */}
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card className="border border-blue-200 bg-blue-50">
+                <Card 
+                  className={`border cursor-pointer transition-all hover:shadow-md ${
+                    !activeFilters.status && !activeFilters.stores?.length 
+                      ? 'border-blue-500 bg-blue-100 shadow-md' 
+                      : 'border-blue-200 bg-blue-50 hover:bg-blue-100'
+                  }`}
+                  onClick={handleTotalFilterClick}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total Order Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
                     <Package className="h-4 w-4 text-blue-600" />
                   </CardHeader>
                   <CardContent>
@@ -297,9 +349,16 @@ export const Orders: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="border border-gray-200 bg-gray-50">
+                <Card 
+                  className={`border cursor-pointer transition-all hover:shadow-md ${
+                    activeFilters.status === 'unassigned'
+                      ? 'border-gray-500 bg-gray-200 shadow-md' 
+                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                  }`}
+                  onClick={() => handleStatusFilterClick('unassigned')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Unassigned Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Unassigned</CardTitle>
                     <Circle className="h-4 w-4 text-gray-600" />
                   </CardHeader>
                   <CardContent>
@@ -310,9 +369,16 @@ export const Orders: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="border border-blue-200 bg-blue-50">
+                <Card 
+                  className={`border cursor-pointer transition-all hover:shadow-md ${
+                    activeFilters.status === 'assigned'
+                      ? 'border-blue-500 bg-blue-200 shadow-md' 
+                      : 'border-blue-200 bg-blue-50 hover:bg-blue-100'
+                  }`}
+                  onClick={() => handleStatusFilterClick('assigned')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Assigned Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Assigned</CardTitle>
                     <UserCheck className="h-4 w-4 text-blue-600" />
                   </CardHeader>
                   <CardContent>
@@ -323,9 +389,16 @@ export const Orders: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="border border-green-200 bg-green-50">
+                <Card 
+                  className={`border cursor-pointer transition-all hover:shadow-md ${
+                    activeFilters.status === 'completed'
+                      ? 'border-green-500 bg-green-200 shadow-md' 
+                      : 'border-green-200 bg-green-50 hover:bg-green-100'
+                  }`}
+                  onClick={() => handleStatusFilterClick('completed')}
+                >
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Completed Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Completed</CardTitle>
                     <CheckCircle className="h-4 w-4 text-green-600" />
                   </CardHeader>
                   <CardContent>
@@ -346,12 +419,26 @@ export const Orders: React.FC = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-1">
-                      {Object.entries(stats.storeBreakdown).map(([store, count]) => (
-                        <div key={store} className="flex justify-between text-xs">
-                          <span className="truncate">{store}:</span>
-                          <span className="font-semibold text-purple-600">{count as number}</span>
-                        </div>
-                      ))}
+                      {Object.entries(stats.storeBreakdown).map(([storeName, count]) => {
+                        const storeData = stores.find(s => s.name === storeName)
+                        const storeId = storeData?.id
+                        const isActive = activeFilters.stores?.includes(storeId)
+                        
+                        return (
+                          <div 
+                            key={storeName} 
+                            className={`flex justify-between text-xs cursor-pointer rounded px-2 py-1 transition-colors ${
+                              isActive 
+                                ? 'bg-purple-200 font-medium' 
+                                : 'hover:bg-purple-100'
+                            }`}
+                            onClick={() => storeId && handleStoreFilterClick(storeId)}
+                          >
+                            <span className="truncate">{storeName}:</span>
+                            <span className="font-semibold text-purple-600">{count as number}</span>
+                          </div>
+                        )
+                      })}
                       {Object.keys(stats.storeBreakdown).length === 0 && (
                         <div className="text-xs text-muted-foreground">No store data</div>
                       )}
@@ -361,7 +448,7 @@ export const Orders: React.FC = () => {
 
                 <Card className="border border-amber-200 bg-amber-50">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Difficulty Labels Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Difficulty Labels</CardTitle>
                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                   </CardHeader>
                   <CardContent>
@@ -381,7 +468,7 @@ export const Orders: React.FC = () => {
 
                 <Card className="border border-teal-200 bg-teal-50">
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Product Type Label Count</CardTitle>
+                    <CardTitle className="text-sm font-medium">Product Type Labels</CardTitle>
                     <Tags className="h-4 w-4 text-teal-600" />
                   </CardHeader>
                   <CardContent>
@@ -586,7 +673,6 @@ export const Orders: React.FC = () => {
                       order={order}
                       fields={orderFields}
                       isExpanded={false}
-                      isAddOn={false}
                       onStatusChange={handleOrderStatusChange}
                       deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
                     />
@@ -618,7 +704,6 @@ export const Orders: React.FC = () => {
                       order={order}
                       fields={orderFields}
                       isExpanded={false}
-                      isAddOn={true}
                       onStatusChange={handleOrderStatusChange}
                       deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
                     />

@@ -8,6 +8,7 @@ import {
   getAITrainingData,
   createAITrainingData,
   extractAITrainingDataFromProducts,
+  extractAITrainingDataFromOrders,
   getAITrainingDataStats,
   getAITrainingSessions,
   createAITrainingSession,
@@ -21,7 +22,10 @@ import {
   getFlowers,
   createFlower,
   deleteFlower,
-  updateAIGeneratedDesign
+  updateAIGeneratedDesign,
+  getPromptTemplates,
+  createPromptTemplate,
+  deletePromptTemplate
 } from './api';
 
 export interface AIModelConfig {
@@ -179,6 +183,10 @@ class AITrainingService {
 
   async extractTrainingDataFromProducts(): Promise<AITrainingData[]> {
     return await extractAITrainingDataFromProducts(this.tenantId);
+  }
+
+  async extractTrainingDataFromOrders(): Promise<AITrainingData[]> {
+    return await extractAITrainingDataFromOrders(this.tenantId);
   }
 
   async getTrainingDataStats(): Promise<TrainingDataStats> {

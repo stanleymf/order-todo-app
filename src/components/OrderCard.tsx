@@ -665,7 +665,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
                 </Button>
               </div>
               
-              {productVariant && (
+              {productVariant && productVariant !== "Default Title" && productVariant.trim() !== "" && (
                 <p className="text-xs text-muted-foreground truncate mb-1">{productVariant}</p>
               )}
               

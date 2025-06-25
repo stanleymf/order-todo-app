@@ -454,6 +454,31 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           (item.title || item.name || '').toLowerCase().includes('express')
         )
         
+        // Check if order tags contain "pickup" (case-insensitive)
+        let isPickupOrder = false
+        try {
+          const shopifyData = order.shopify_order_data ? JSON.parse(order.shopify_order_data as string) : null
+          if (shopifyData?.tags) {
+            const tags = Array.isArray(shopifyData.tags) ? shopifyData.tags : shopifyData.tags.split(', ')
+            isPickupOrder = tags.some((tag: string) => tag.toLowerCase().includes('pickup'))
+          }
+        } catch (e) {
+          console.log('[PICKUP-DEBUG] Could not parse shopify order data for pickup detection')
+        }
+        
+        console.log('[PICKUP-DEBUG] Pickup detection for order:', {
+          orderId: order.shopify_order_id,
+          isPickupOrder,
+          rawTags: (() => {
+            try {
+              const shopifyData = order.shopify_order_data ? JSON.parse(order.shopify_order_data as string) : null
+              return shopifyData?.tags
+            } catch (e) {
+              return 'parse_error'
+            }
+          })()
+        })
+        
         // Extract express time slot from the express item's variant title if it exists
         let expressTimeSlot = null
         if (hasExpressItem) {
@@ -471,13 +496,18 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             fullItem: expressItem
           })
           
-          if (expressItem && expressItem.variant_title) {
+          if (expressItem && (expressItem.variant_title || expressItem.variant?.title)) {
+            // Get variant title from either REST or GraphQL format
+            const variantTitle = expressItem.variant_title || expressItem.variant?.title
+            
             // Extract time pattern like "10:00 - 12:00", "10:00-12:00", "10:30AM - 11:30AM", or "15:30PM - 16:30PM"
-            const timeMatch = expressItem.variant_title.match(/(\d{1,2}:\d{2}(?:AM|PM)?\s*-\s*\d{1,2}:\d{2}(?:AM|PM)?)/i)
+            const timeMatch = variantTitle.match(/(\d{1,2}:\d{2}(?:AM|PM)?\s*-\s*\d{1,2}:\d{2}(?:AM|PM)?)/i)
             expressTimeSlot = timeMatch ? timeMatch[1] : null
             
             console.log('[EXPRESS-DEBUG] Time extraction:', {
               variant_title: expressItem.variant_title,
+              variant_title_graphql: expressItem.variant?.title,
+              used_title: variantTitle,
               regex_match: timeMatch,
               extracted_time: expressTimeSlot
             })
@@ -490,17 +520,43 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           if ((lineItem.title || lineItem.name || '').toLowerCase().includes('express')) {
             continue
           }
+          
+          // Extract product/variant IDs from different possible formats
+          let productId = lineItem.product_id?.toString() || lineItem.product?.id?.toString() || ''
+          let variantId = lineItem.variant_id?.toString() || lineItem.variant?.id?.toString() || ''
+          
+          // Clean GraphQL IDs if they exist (e.g., "gid://shopify/Product/123" -> "123")
+          if (productId.includes('gid://shopify/Product/')) {
+            productId = productId.split('/').pop() || ''
+          }
+          if (variantId.includes('gid://shopify/ProductVariant/')) {
+            variantId = variantId.split('/').pop() || ''
+          }
+          
+          // Debug line item structure
+          console.log('[LINE-ITEM-DEBUG] Processing line item:', {
+            title: lineItem.title,
+            original_product_id: lineItem.product_id,
+            original_variant_id: lineItem.variant_id,
+            graphql_product_id: lineItem.product?.id,
+            graphql_variant_id: lineItem.variant?.id,
+            cleaned_product_id: productId,
+            cleaned_variant_id: variantId,
+            variant_title: lineItem.variant_title || lineItem.variant?.title
+          })
+          
           // Classify as add-on
-          const isAddOn = isAddOnProduct(
-            lineItem.product_id?.toString() || '', 
-            lineItem.variant_id?.toString() || ''
-          )
+          const isAddOn = isAddOnProduct(productId, variantId)
 
           // Get difficulty label
-          const difficultyLabel = getDifficultyLabel(
-            lineItem.product_id?.toString() || '', 
-            lineItem.variant_id?.toString() || ''
-          )
+          const difficultyLabel = getDifficultyLabel(productId, variantId)
+          
+          console.log('[CLASSIFICATION-DEBUG] Product classification:', {
+            key: `${productId}-${variantId}`,
+            isAddOn,
+            difficultyLabel,
+            hasLabels: productLabelMap.has(`${productId}-${variantId}`)
+          })
 
           // Create individual cards for each quantity
           for (let i = 0; i < (lineItem.quantity || 1); i++) {
@@ -525,17 +581,19 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               sessionId: order.session_id,
               // Line item specific data
               lineItemId: lineItem.id || lineItem.product_id,
-              productTitleId: lineItem.product_id?.toString(),
-              variantId: lineItem.variant_id?.toString(),
+              productTitleId: productId,
+              variantId: variantId,
               title: lineItem.title || lineItem.name,
               quantity: 1, // Individual quantity
               price: parseFloat(lineItem.price || '0'),
-              variantTitle: lineItem.variant_title,
+              variantTitle: lineItem.variant_title || lineItem.variant?.title,
               // Labels from product_labels database
               difficultyLabel: difficultyLabel,
               // Express order detection
               isExpressOrder: hasExpressItem,
               expressTimeSlot: expressTimeSlot,
+              // Pickup order detection
+              isPickupOrder: isPickupOrder,
               // Add-on classification
               isAddOn: isAddOn,
               productCategory: isAddOn ? "add-on" : "main-order",
@@ -621,6 +679,20 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
     console.log(`Main orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
+    
+    // Debug logging for first few orders
+    if (processedOrders.length > 0) {
+      console.log('[DEBUG] Sample order data being sent to frontend:', {
+        cardId: processedOrders[0].cardId,
+        title: processedOrders[0].title,
+        variantTitle: processedOrders[0].variantTitle,
+        difficultyLabel: processedOrders[0].difficultyLabel,
+        isAddOn: processedOrders[0].isAddOn,
+        isExpressOrder: processedOrders[0].isExpressOrder,
+        expressTimeSlot: processedOrders[0].expressTimeSlot,
+        isPickupOrder: processedOrders[0].isPickupOrder
+      })
+    }
     
     return c.json({
       orders: processedOrders,
@@ -2258,21 +2330,48 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
 
     const customerName = `${shopifyOrder.customer?.first_name ?? ""} ${shopifyOrder.customer?.last_name ?? ""}`.trim() || "N/A";
     // Extract delivery date ONLY from Shopify order tags in dd/mm/yyyy format
-    const extractDeliveryDateFromTags = (tags: string): string | null => {
+    const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
       if (!tags) return null;
-      // Split tags and look for date pattern dd/mm/yyyy
-      const tagArray = tags.split(", ");
+      
+      // Handle both string and array formats
+      let tagArray: string[];
+      if (Array.isArray(tags)) {
+        tagArray = tags;
+      } else if (typeof tags === 'string') {
+        tagArray = tags.split(", ");
+      } else {
+        return null;
+      }
+      
       const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
       return dateTag || null;
     };
-    const deliveryDate = extractDeliveryDateFromTags(shopifyOrder.tags);
+    // First try to get delivery date from tags, then from GraphQL custom attributes
+    let deliveryDate = extractDeliveryDateFromTags(shopifyOrder.tags);
     
-    if (!deliveryDate) {
-      console.log("[WEBHOOK] No delivery date found in tags for order:", shopifyOrder.id, "Tags:", shopifyOrder.tags);
-      return c.json({ error: "No delivery date found in order tags" }, 400);
+    // If no delivery date in tags, try custom attributes from GraphQL
+    if (!deliveryDate && shopifyOrderGraphQL && Array.isArray(shopifyOrderGraphQL.customAttributes)) {
+      const deliveryDateAttr = shopifyOrderGraphQL.customAttributes.find((attr: any) => 
+        attr.key === 'delivery_date' || attr.key === 'Delivery Date'
+      );
+      if (deliveryDateAttr && deliveryDateAttr.value) {
+        deliveryDate = deliveryDateAttr.value;
+        console.log("[WEBHOOK] Found delivery date in custom attributes:", deliveryDate);
+      }
     }
     
-    console.log("[WEBHOOK] Extracted delivery date from tags:", deliveryDate, "for order:", shopifyOrder.id);
+    // If still no delivery date, log for debugging
+    if (!deliveryDate) {
+      console.log("[WEBHOOK] No delivery date found in tags or custom attributes for order:", shopifyOrder.id, "Tags:", shopifyOrder.tags);
+      console.log("[WEBHOOK] Custom attributes:", shopifyOrderGraphQL?.customAttributes || 'none');
+    }
+    
+    if (!deliveryDate) {
+      console.log("[WEBHOOK] No delivery date found in tags or custom attributes for order:", shopifyOrder.id, "Tags:", shopifyOrder.tags);
+      return c.json({ error: "No delivery date found in order tags or custom attributes" }, 400);
+    }
+    
+    console.log("[WEBHOOK] Extracted delivery date:", deliveryDate, "for order:", shopifyOrder.id);
     
     const productLabel = shopifyOrder.line_items?.[0]?.properties?.find((p: any) => p.name === '_label')?.value ?? 'default';
 
@@ -2890,6 +2989,140 @@ app.post("/api/tenants/:tenantId/ai/training-data/extract-products", async (c) =
   const tenantId = c.req.param("tenantId");
   const extractedData = await d1DatabaseService.extractTrainingDataFromProducts(c.env, tenantId);
   return c.json(extractedData);
+});
+
+app.post("/api/tenants/:tenantId/ai/training-data/extract-orders", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  
+  try {
+    console.log("[EXTRACT-ORDERS] Starting training data extraction from orders for tenant:", tenantId);
+    
+    // Get all orders from the database (limit to recent orders)
+    const { results: orders } = await c.env.DB.prepare(
+      `SELECT shopify_order_id, customer_name, customer_email, delivery_date, notes, 
+              product_titles, quantities, line_items, total_price, currency, 
+              product_type, shopify_order_data, created_at
+       FROM tenant_orders 
+       WHERE tenant_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT 100`
+    ).bind(tenantId).all();
+
+    if (!orders || orders.length === 0) {
+      return c.json({ success: true, extractedData: [], message: "No orders found" });
+    }
+
+    // Check for existing training data to avoid duplicates
+    const existingSourceIds = await c.env.DB.prepare(
+      `SELECT source_id FROM ai_training_data WHERE tenant_id = ? AND source_type = 'shopify_order'`
+    ).bind(tenantId).all();
+    
+    const existingIds = new Set(existingSourceIds.results.map((row: any) => row.source_id));
+    const newOrders = orders.filter((order: any) => !existingIds.has(order.shopify_order_id));
+    
+    if (newOrders.length === 0) {
+      return c.json({ success: true, extractedData: [], message: `All ${orders.length} orders already processed` });
+    }
+
+    // Process orders and create training data
+    const now = new Date().toISOString();
+    const trainingDataToInsert = [];
+
+    for (const order of newOrders) {
+      try {
+        let productTitles = [];
+        try {
+          productTitles = order.product_titles ? JSON.parse(order.product_titles) : [];
+        } catch {
+          productTitles = [order.product_type || "Unknown Product"];
+        }
+
+        const mainProducts = productTitles.filter((title: string) => 
+          !title.toLowerCase().includes('express') && !title.toLowerCase().includes('delivery')
+        );
+
+        if (mainProducts.length === 0) continue;
+
+        const trainingContent = {
+          customer_context: {
+            customer_name: order.customer_name,
+            delivery_date: order.delivery_date,
+            total_price: order.total_price,
+            currency: order.currency
+          },
+          order_analysis: {
+            main_products: mainProducts,
+            product_count: mainProducts.length,
+            price_range: order.total_price ? 
+              (order.total_price < 50 ? 'budget' : order.total_price < 100 ? 'mid-range' : 'premium') : 'unknown',
+            order_type: order.product_type || 'unknown'
+          },
+          suggested_prompts: [
+            `Create a beautiful ${mainProducts[0]} arrangement for ${order.customer_name}`,
+            `Design a ${order.product_type || 'floral'} arrangement similar to: ${mainProducts.join(', ')}`
+          ]
+        };
+
+        trainingDataToInsert.push({
+          id: crypto.randomUUID(),
+          tenant_id: tenantId,
+          data_type: 'prompt',
+          content: JSON.stringify(trainingContent),
+          metadata: JSON.stringify({
+            shopify_order_id: order.shopify_order_id,
+            customer_name: order.customer_name,
+            main_products: mainProducts,
+            total_price: order.total_price
+          }),
+          source_type: 'shopify_order',
+          source_id: order.shopify_order_id,
+          quality_score: 0.9,
+          is_active: 1,
+          created_at: now,
+          updated_at: now
+        });
+      } catch (error) {
+        console.error(`Error processing order ${order.shopify_order_id}:`, error);
+      }
+    }
+
+    // Insert in batches
+    const batchSize = 10;
+    let insertedCount = 0;
+    
+    for (let i = 0; i < trainingDataToInsert.length; i += batchSize) {
+      const batch = trainingDataToInsert.slice(i, i + batchSize);
+      try {
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const values = batch.flatMap((data: any) => [
+          data.id, data.tenant_id, data.data_type, data.content, data.metadata,
+          data.source_type, data.source_id, data.quality_score, data.is_active,
+          data.created_at, data.updated_at
+        ]);
+
+        await c.env.DB.prepare(
+          `INSERT INTO ai_training_data (id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score, is_active, created_at, updated_at)
+           VALUES ${placeholders}`
+        ).bind(...values).run();
+        
+        insertedCount += batch.length;
+      } catch (error) {
+        console.error(`Error inserting batch:`, error);
+      }
+    }
+
+    return c.json({ 
+      success: true, 
+      extractedData: trainingDataToInsert.slice(0, insertedCount),
+      totalProcessed: insertedCount,
+      totalOrders: orders.length,
+      message: `Successfully extracted training data from ${insertedCount} orders`
+    });
+
+  } catch (error) {
+    console.error("Error extracting training data from orders:", error);
+    return c.json({ error: "Failed to extract training data from orders" }, 500);
+  }
 });
 
 app.get("/api/tenants/:tenantId/ai/training-data/stats", async (c) => {
@@ -4230,10 +4463,19 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c)
     const shopifyOrders = await shopifyApi.getOrders();
     
     // Extract delivery date from tags function
-    const extractDeliveryDateFromTags = (tags: string): string | null => {
+    const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
       if (!tags) return null;
-      // Split tags and look for date pattern dd/mm/yyyy
-      const tagArray = tags.split(", ");
+      
+      // Handle both string and array formats
+      let tagArray: string[];
+      if (Array.isArray(tags)) {
+        tagArray = tags;
+      } else if (typeof tags === 'string') {
+        tagArray = tags.split(", ");
+      } else {
+        return null;
+      }
+      
       const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
       return dateTag || null;
     };
@@ -4436,10 +4678,19 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-all", async (c) => 
     const shopifyOrders = await shopifyApi.getOrders();
     
     // Extract delivery date from tags function
-    const extractDeliveryDateFromTags = (tags: string): string | null => {
+    const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
       if (!tags) return null;
-      // Split tags and look for date pattern dd/mm/yyyy
-      const tagArray = tags.split(", ");
+      
+      // Handle both string and array formats
+      let tagArray: string[];
+      if (Array.isArray(tags)) {
+        tagArray = tags;
+      } else if (typeof tags === 'string') {
+        tagArray = tags.split(", ");
+      } else {
+        return null;
+      }
+      
       const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
       return dateTag || null;
     };
@@ -4595,7 +4846,76 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async 
         
         // Fetch current GraphQL data from Shopify
         const orderGid = `gid://shopify/Order/${dbOrder.shopify_order_id}`;
-        const shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+        console.log("[UPDATE-EXISTING] Attempting GraphQL fetch for order:", dbOrder.shopify_order_id);
+        
+        let shopifyOrderGraphQL = null;
+        try {
+          shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
+          if (shopifyOrderGraphQL) {
+            console.log("[UPDATE-EXISTING] GraphQL fetch SUCCESS for order:", dbOrder.shopify_order_id, "Name:", shopifyOrderGraphQL.name);
+          } else {
+            console.log("[UPDATE-EXISTING] GraphQL fetch returned NULL for order:", dbOrder.shopify_order_id);
+          }
+        } catch (graphqlError) {
+          console.error("[UPDATE-EXISTING] GraphQL fetch FAILED for order:", dbOrder.shopify_order_id, "Error:", graphqlError.message);
+        }
+        
+        // If GraphQL fetch failed or returned null, try REST API as fallback
+        if (!shopifyOrderGraphQL) {
+          console.log("[UPDATE-EXISTING] Trying REST API fallback for order:", dbOrder.shopify_order_id);
+          try {
+            const restOrderData = await shopifyApi.getOrders({ name: `#${dbOrder.shopify_order_id}` });
+            if (restOrderData && restOrderData.length > 0) {
+              const restOrder = restOrderData[0];
+              console.log("[UPDATE-EXISTING] REST API fallback SUCCESS for order:", dbOrder.shopify_order_id);
+              
+              // Convert REST data to GraphQL-like structure for consistency
+              shopifyOrderGraphQL = {
+                id: `gid://shopify/Order/${restOrder.id}`,
+                name: restOrder.name,
+                tags: Array.isArray(restOrder.tags) ? restOrder.tags.join(", ") : restOrder.tags,
+                customer: restOrder.customer ? {
+                  firstName: restOrder.customer.first_name,
+                  lastName: restOrder.customer.last_name,
+                  email: restOrder.customer.email
+                } : null,
+                customAttributes: restOrder.note_attributes || [],
+                totalPriceSet: {
+                  shopMoney: {
+                    amount: restOrder.total_price,
+                    currencyCode: restOrder.currency
+                  }
+                },
+                currencyCode: restOrder.currency,
+                lineItems: {
+                  edges: restOrder.line_items?.map((item: any) => ({
+                    node: {
+                      title: item.title,
+                      quantity: item.quantity,
+                      product: {
+                        productType: item.product_type || ""
+                      }
+                    }
+                  })) || []
+                }
+              };
+            } else {
+              console.log("[UPDATE-EXISTING] REST API fallback also returned no data for order:", dbOrder.shopify_order_id);
+            }
+          } catch (restError) {
+            console.error("[UPDATE-EXISTING] REST API fallback FAILED for order:", dbOrder.shopify_order_id, "Error:", restError.message);
+          }
+        }
+        
+        // If we still don't have data, skip this order but don't fail the entire process
+        if (!shopifyOrderGraphQL) {
+          console.log("[UPDATE-EXISTING] Skipping order due to no data available:", dbOrder.shopify_order_id);
+          failedUpdates.push({
+            shopifyOrderId: dbOrder.shopify_order_id,
+            error: "No data available from GraphQL or REST API"
+          });
+          continue;
+        }
         
         // Prepare Shopify-sourced data while preserving local changes
         const customerName = shopifyOrderGraphQL.customer
@@ -4603,9 +4923,19 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/update-existing", async 
           : "N/A";
         
         // Extract delivery date from updated tags
-        const extractDeliveryDateFromTags = (tags: string): string | null => {
+        const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
           if (!tags) return null;
-          const tagArray = tags.split(", ");
+          
+          // Handle both string and array formats
+          let tagArray: string[];
+          if (Array.isArray(tags)) {
+            tagArray = tags;
+          } else if (typeof tags === 'string') {
+            tagArray = tags.split(", ");
+          } else {
+            return null;
+          }
+          
           const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
           return dateTag || null;
         };
@@ -4706,3 +5036,207 @@ function normalizeDateToISO(dateStr: string): string | null {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   return null;
 }
+
+app.post("/api/tenants/:tenantId/ai/training-data/extract-orders", async (c) => {
+  const tenantId = c.req.param("tenantId");
+  
+  try {
+    console.log("[EXTRACT-ORDERS] Starting training data extraction from orders for tenant:", tenantId);
+    
+    // Get all orders from the database (limit to recent orders)
+    const { results: orders } = await c.env.DB.prepare(
+      `SELECT shopify_order_id, customer_name, customer_email, delivery_date, notes, 
+              product_titles, quantities, line_items, total_price, currency, 
+              product_type, shopify_order_data, created_at
+       FROM tenant_orders 
+       WHERE tenant_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT 100`
+    ).bind(tenantId).all();
+
+    if (!orders || orders.length === 0) {
+      return c.json({ success: true, extractedData: [], message: "No orders found" });
+    }
+
+    // Check for existing training data to avoid duplicates
+    const existingSourceIds = await c.env.DB.prepare(
+      `SELECT source_id FROM ai_training_data WHERE tenant_id = ? AND source_type = 'shopify_order'`
+    ).bind(tenantId).all();
+    
+    const existingIds = new Set(existingSourceIds.results.map((row: any) => row.source_id));
+    
+    // Filter out orders that already have training data
+    const newOrders = orders.filter((order: any) => !existingIds.has(order.shopify_order_id));
+    
+    if (newOrders.length === 0) {
+      return c.json({ 
+        success: true, 
+        extractedData: [], 
+        message: `All ${orders.length} orders already have training data extracted` 
+      });
+    }
+
+    console.log(`[EXTRACT-ORDERS] Processing ${newOrders.length} new orders`);
+
+    // Process each order and create training data
+    const now = new Date().toISOString();
+    const trainingDataToInsert = [];
+
+    for (const order of newOrders) {
+      try {
+        // Parse product titles and line items
+        let productTitles = [];
+        let lineItems = [];
+        
+        try {
+          productTitles = order.product_titles ? JSON.parse(order.product_titles) : [];
+          lineItems = order.line_items ? JSON.parse(order.line_items) : [];
+        } catch (parseError) {
+          console.warn(`[EXTRACT-ORDERS] Failed to parse data for order ${order.shopify_order_id}:`, parseError);
+          productTitles = [order.product_type || "Unknown Product"];
+        }
+
+        // Parse shopify order data for additional context
+        let shopifyData = null;
+        try {
+          shopifyData = order.shopify_order_data ? JSON.parse(order.shopify_order_data) : null;
+        } catch (parseError) {
+          console.warn(`[EXTRACT-ORDERS] Failed to parse Shopify data for order ${order.shopify_order_id}`);
+        }
+
+        // Extract delivery context and customer preferences
+        const deliveryDate = order.delivery_date;
+        const isSpecialOccasion = deliveryDate && (
+          deliveryDate.includes('valentine') || 
+          deliveryDate.includes('mother') || 
+          deliveryDate.includes('christmas') ||
+          deliveryDate.includes('birthday') ||
+          deliveryDate.includes('anniversary')
+        );
+
+        // Extract timing context (express, specific times, etc.)
+        const hasExpressDelivery = lineItems.some((item: any) => 
+          item.title?.toLowerCase().includes('express') || 
+          item.name?.toLowerCase().includes('express')
+        );
+
+        // Create descriptive training prompts based on order data
+        const mainProducts = productTitles.filter((title: string) => 
+          !title.toLowerCase().includes('express') && 
+          !title.toLowerCase().includes('delivery')
+        );
+
+        if (mainProducts.length === 0) continue; // Skip if no main products
+
+        // Generate training content with rich context
+        const trainingContent = {
+          customer_context: {
+            customer_name: order.customer_name,
+            delivery_date: deliveryDate,
+            is_special_occasion: isSpecialOccasion,
+            has_express_delivery: hasExpressDelivery,
+            total_price: order.total_price,
+            currency: order.currency
+          },
+          order_analysis: {
+            main_products: mainProducts,
+            product_count: mainProducts.length,
+            price_range: order.total_price ? 
+              (order.total_price < 50 ? 'budget' : 
+               order.total_price < 100 ? 'mid-range' : 'premium') : 'unknown',
+            order_type: order.product_type || 'unknown'
+          },
+          delivery_instructions: order.notes || null,
+          suggested_prompts: [
+            `Create a beautiful ${mainProducts[0]} arrangement for ${order.customer_name}`,
+            `Design a ${order.product_type || 'floral'} arrangement similar to: ${mainProducts.join(', ')}`,
+            ...(isSpecialOccasion ? [`Create a special occasion arrangement featuring ${mainProducts[0]}`] : []),
+            ...(hasExpressDelivery ? [`Design an elegant same-day delivery arrangement with ${mainProducts[0]}`] : [])
+          ]
+        };
+
+        // Create training data record
+        const trainingDataId = crypto.randomUUID();
+        trainingDataToInsert.push({
+          id: trainingDataId,
+          tenant_id: tenantId,
+          data_type: 'prompt',
+          content: JSON.stringify(trainingContent),
+          metadata: JSON.stringify({
+            shopify_order_id: order.shopify_order_id,
+            customer_name: order.customer_name,
+            delivery_date: deliveryDate,
+            main_products: mainProducts,
+            total_price: order.total_price,
+            extraction_date: now,
+            has_express: hasExpressDelivery,
+            is_special_occasion: isSpecialOccasion
+          }),
+          source_type: 'shopify_order',
+          source_id: order.shopify_order_id,
+          quality_score: 0.9, // High quality since it's real customer data
+          is_active: 1,
+          created_at: now,
+          updated_at: now
+        });
+
+      } catch (orderError) {
+        console.error(`[EXTRACT-ORDERS] Error processing order ${order.shopify_order_id}:`, orderError);
+        // Continue with next order instead of failing completely
+      }
+    }
+
+    // Insert training data in batches
+    const batchSize = 10;
+    let insertedCount = 0;
+    
+    for (let i = 0; i < trainingDataToInsert.length; i += batchSize) {
+      const batch = trainingDataToInsert.slice(i, i + batchSize);
+      
+      try {
+        const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const values = batch.flatMap((data: any) => [
+          data.id,
+          data.tenant_id,
+          data.data_type,
+          data.content,
+          data.metadata,
+          data.source_type,
+          data.source_id,
+          data.quality_score,
+          data.is_active,
+          data.created_at,
+          data.updated_at
+        ]);
+
+        await c.env.DB.prepare(
+          `INSERT INTO ai_training_data (id, tenant_id, data_type, content, metadata, source_type, source_id, quality_score, is_active, created_at, updated_at)
+           VALUES ${placeholders}`
+        ).bind(...values).run();
+        
+        insertedCount += batch.length;
+        console.log(`[EXTRACT-ORDERS] Inserted batch ${Math.floor(i / batchSize) + 1}, total: ${insertedCount}`);
+        
+      } catch (batchError) {
+        console.error(`[EXTRACT-ORDERS] Error inserting batch ${Math.floor(i / batchSize) + 1}:`, batchError);
+      }
+    }
+
+    console.log(`[EXTRACT-ORDERS] Successfully extracted training data from ${insertedCount} orders`);
+
+    return c.json({ 
+      success: true, 
+      extractedData: trainingDataToInsert.slice(0, insertedCount),
+      totalProcessed: insertedCount,
+      totalOrders: orders.length,
+      message: `Successfully extracted training data from ${insertedCount} orders`
+    });
+
+  } catch (error) {
+    console.error("[EXTRACT-ORDERS] Error extracting training data from orders:", error);
+    return c.json({ 
+      error: "Failed to extract training data from orders", 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    }, 500);
+  }
+});

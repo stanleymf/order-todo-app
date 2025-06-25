@@ -728,6 +728,12 @@ export async function extractAITrainingDataFromProducts(tenantId: string): Promi
   })
 }
 
+export async function extractAITrainingDataFromOrders(tenantId: string): Promise<any> {
+  return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/training-data/extract-orders`, {
+    method: "POST",
+  })
+}
+
 export async function getAITrainingDataStats(tenantId: string): Promise<any> {
   return authenticatedRequest<any>(`/api/tenants/${tenantId}/ai/training-data/stats`)
 }

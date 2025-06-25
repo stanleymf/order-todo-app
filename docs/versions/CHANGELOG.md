@@ -2,6 +2,248 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.12] - 2025-06-25
+
+### 🎨 **Pickup Badge & Interactive Stat Cards Enhancement**
+
+**Major Feature Addition**: Added pickup badge detection, fixed unassigned count statistics, and enhanced user interface with interactive filtering.
+
+### 🏷️ **Pickup Badge Feature**
+
+- **Pickup Detection**: Automatically detects "Pickup" in Shopify order tags (case-insensitive)
+- **Pink Badge**: Displays pink "Pickup" badge beside variant title for pickup orders
+- **Backend Processing**: Added `isPickupOrder` field to order processing pipeline
+- **Styling**: Pink background (`bg-pink-100 text-pink-800`) for clear visual distinction
+- **Debug Logging**: Added pickup detection logging for troubleshooting
+
+### 📊 **Fixed Unassigned Count Statistics**
+
+- **Issue Resolution**: Fixed stat cards showing filtered counts instead of total counts
+- **Root Cause**: Frontend stats calculation was using `filteredAllOrders` instead of raw `allOrders` data
+- **Solution**: Updated `getComprehensiveStats()` to use unfiltered data for accurate totals
+- **Impact**: Unassigned count now correctly reflects orders awaiting assignment
+
+### 🎯 **Interactive Stat Cards (Enhanced)**
+
+- **Clickable Filters**: All stat cards (Total, Unassigned, Assigned, Completed) now act as filters
+- **Store Breakdown**: Individual store entries are clickable for store-specific filtering
+- **Combinable Filters**: Multiple filters can be active simultaneously (e.g., Assigned + Store A)
+- **Toggle Behavior**: Click card again to remove that filter
+- **Visual Feedback**: Active filters get highlighted with darker borders and backgrounds
+- **Word Cleanup**: Removed "Count" text from stat card titles for cleaner appearance
+
+### 📝 **Admin Notes System Clarification**
+
+- **Persistent Storage**: Notes system uses separate `order_card_states` table (not Shopify data)
+- **Empty Text Box**: Admin notes start empty and are completely independent of Shopify
+- **Cross-Session Persistence**: Notes survive page refreshes and order updates
+- **User-Specific**: Tied to user session and delivery date for proper isolation
+
+### 🎨 **Badge Display Enhancements**
+
+- **Badge Order**: Variant title → Express badge → Pickup badge → Add-on badge
+- **Conditional Display**: Variant titles hidden when empty or "Default Title"
+- **Consistent Styling**: All badges follow unified design pattern with appropriate colors
+- **Responsive Layout**: Badges wrap properly on smaller screens
+
+### 🔧 **Technical Implementation**
+
+**Backend Changes**:
+```typescript
+// Pickup detection in order processing
+const isPickupOrder = tags.some((tag: string) => tag.toLowerCase().includes('pickup'))
+
+// Added to processedOrders object
+isPickupOrder: isPickupOrder,
+```
+
+**Frontend Changes**:
+```typescript
+// Pickup badge display
+{isPickupOrder && (
+  <Badge variant="secondary" className="text-xs bg-pink-100 text-pink-800">
+    Pickup
+  </Badge>
+)}
+
+// Fixed stats calculation
+const allOrdersForStats = allOrders // Use unfiltered data
+const unassignedCount = allOrdersForStats.filter(o => !o.status || o.status === 'unassigned').length
+```
+
+### 🚀 **Deployment Status**
+- **Version ID**: 92dacca3-e235-40f4-982f-ebb0ffa14d82
+- **Status**: 🟢 **Live** - All features deployed and functional
+- **Impact**: Enhanced user experience with visual pickup indicators and accurate statistics
+
+### 📋 **Usage Instructions**
+
+1. **Pickup Orders**: Orders with "Pickup" in Shopify tags automatically show pink pickup badge
+2. **Stat Card Filters**: Click any stat card to filter orders by that criteria
+3. **Store Filtering**: Click individual stores in breakdown to filter by store
+4. **Admin Notes**: Use text area to add persistent admin notes (separate from Shopify data)
+5. **Multiple Filters**: Combine status and store filters for precise order viewing
+
+---
+
+## [1.5.11] - 2025-06-25
+
+### 🔧 **Frontend Display Fix - Missing Features Restoration**
+
+**Issue Resolution**: Fixed missing difficulty labels, variant titles, express badges, and add-on labels after GraphQL structure changes.
+
+### 🐛 **Key Fixes**
+
+- **Add-on Badge Fix**: Fixed `isAddOn` prop extraction - now correctly reads from `order.isAddOn` instead of component props
+- **Data Flow Issue**: Removed duplicate `isAddOn` prop from OrderDetailCard interface and component calls
+- **Frontend Display**: All backend-processed features (difficulty labels, variant titles, express badges) now display correctly
+- **Component Compatibility**: Updated Orders.tsx to work with corrected OrderDetailCard interface
+
+### 📊 **Restored Features**
+
+- **✅ Difficulty Labels**: Color-coded badges showing product difficulty (Easy, Medium, Hard)
+- **✅ Variant Titles**: Product variant information displaying correctly below product names
+- **✅ Express Badges**: Yellow "EX - [Time]" badges for express delivery orders
+- **✅ Add-on Labels**: Orange "Add-on" badges for classified add-on products
+
+### 🚀 **Deployment Status**
+- **Version ID**: be35c74a-e30f-4446-8632-ded84546b6b0
+- **Status**: 🟢 **Live** - All missing features restored and displaying correctly
+- **Impact**: Frontend now properly displays all backend-processed classification data
+
+## [1.5.10] - 2025-06-25
+
+### 🐛 **Critical Bug Fix - Update Orders TypeError Resolution**
+
+**Issue Resolution**: Fixed critical `TypeError: tags.split is not a function` preventing Update Orders from working properly.
+
+### 🔧 **Key Fixes**
+
+- **TypeError Fix**: Fixed `extractDeliveryDateFromTags` function to handle both string and array formats for Shopify tags
+- **Impact**: Update Orders button was failing with "Updated: 0 Failed: 54" due to type mismatch
+- **Root Cause**: GraphQL returns tags as array, but function expected string format
+- **Solution**: Enhanced all instances of tag extraction to handle `string | string[]` types gracefully
+
+### 📊 **Update Orders Function Now Works**
+
+- **Before**: All updates failed with `TypeError: tags.split is not a function`
+- **After**: Update Orders successfully processes all orders and enriches database with GraphQL data
+- **Benefit**: Orders now get proper Shopify names (#WF76726) and complete field information
+
+### 🎯 **Technical Implementation**
+
+```typescript
+// Fixed function signature and implementation
+const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
+  if (!tags) return null;
+  
+  // Handle both string and array formats
+  let tagArray: string[];
+  if (Array.isArray(tags)) {
+    tagArray = tags;
+  } else if (typeof tags === 'string') {
+    tagArray = tags.split(", ");
+  } else {
+    return null;
+  }
+  
+  const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
+  return dateTag || null;
+};
+```
+
+### 🚀 **Deployment Status**
+- **Version ID**: 4953fa2f-4f66-4639-a19c-c0be7b2fbe50  
+- **Status**: 🟢 **Live** - Update Orders now working properly
+- **Impact**: Resolves the major bug preventing order data enrichment
+
+## [1.5.9] - 2025-06-25
+
+### 🔧 **Order ID Display Enhancement - Missing GraphQL Data Handling**
+
+**Issue Resolution**: Enhanced order ID display to show user-friendly format even when GraphQL data is unavailable, addressing missing order information in cards.
+
+### 🐛 **Improved Order ID Formatting**
+
+- **Issue**: Orders without GraphQL data showed long numeric IDs (e.g., "6180846764256") instead of recognizable order names
+- **Solution**: Enhanced fallback logic to generate user-friendly order IDs from numeric Shopify IDs
+- **Implementation**: 
+  - For long numeric IDs, extract last 6 digits and format as `#WF123456`
+  - Maintains hierarchy: GraphQL name → Generated format → Order number → Fallback
+- **Example**: `6180846764256` now displays as `#WF764256`
+
+### 🔄 **Enhanced Update Orders with Data Re-enrichment**
+
+- **New Feature**: "Update Orders" button now re-fetches complete data from Shopify to enrich database
+- **Implementation**: 
+  - Primary: GraphQL API fetch for complete order data including `name`, `customAttributes`, etc.
+  - Fallback: REST API fetch when GraphQL returns null, converted to GraphQL-like structure
+  - Smart preservation: Updates Shopify data while preserving local changes (status, assignments, notes)
+- **Benefits**: Resolves missing order information by re-enriching from source
+- **Logging**: Enhanced debugging with detailed fetch status and error reporting
+
+### 🔍 **GraphQL Data Root Cause Identified**
+
+- **Issue**: Some orders lack GraphQL `shopifyOrderData` due to API access limitations or order age
+- **Solution**: Enhanced "Update Orders" with dual-API approach (GraphQL + REST fallback)
+- **Impact**: Orders now display properly with comprehensive data re-enrichment capability
+
+## [1.5.8] - 2025-06-25
+
+### 🔧 **Critical Bug Fixes - Order ID Display & GraphQL Structure**
+
+**Issue Resolution**: Fixed order card display issues where Order ID showed long numeric string instead of order name (like #WF123) and GraphQL errors preventing data updates.
+
+### 🐛 **Order ID Display Fix**
+
+- **Issue**: Order ID field displayed full Shopify ID (e.g., "6180522000608") instead of user-friendly order name (e.g., "#WF12345")
+- **Solution**: Updated field extraction priority to use GraphQL `name` field first, which contains the proper order name format
+- **Implementation**: Modified `getFieldValue` function in OrderDetailCard to prioritize `extractFieldValue(order.shopifyOrderData, 'name')`
+
+### 🔧 **GraphQL Structure Fix**
+
+- **Issue**: GraphQL queries failing with error: `Field 'noteAttributes' doesn't exist on type 'Order'`
+- **Solution**: Updated GraphQL query to use correct `customAttributes` field instead of `noteAttributes`
+- **Impact**: Resolves webhook errors and enables proper extraction of custom field data like timeslots and delivery instructions
+
+### 📡 **Enhanced Custom Attributes Support**
+
+- **Updated Field Extraction**: Modified frontend to properly handle `customAttributes` with `key/value` structure instead of `name/value`
+- **Backward Compatibility**: Maintained support for existing field configurations while fixing the underlying data structure
+- **Webhook Enhancement**: Added fallback logic to extract delivery dates from both tags and custom attributes
+
+### 🔄 **Data Update Process Improvements**
+
+- **Enhanced Webhook Processing**: Now checks both order tags and custom attributes for delivery date information
+- **Update Orders Button**: Fixed to properly update existing orders with enhanced GraphQL data structure
+- **Error Handling**: Improved error messages and fallback logic for missing data
+
+### 🎯 **Field Priority Logic Updates**
+
+```typescript
+// Order ID now prioritizes the user-friendly name
+if (field.id === 'orderId') {
+  return extractFieldValue(order.shopifyOrderData, 'name') ||  // #WF12345 format
+         order.orderNumber || 
+         order.shopifyOrderId ||  // Fallback to long ID
+         directOrderValue
+}
+
+// Custom attributes properly handled
+if (fieldPath.startsWith('noteAttributes.')) {
+  const customAttributes = shopifyData.customAttributes  // Fixed from noteAttributes
+  const attribute = customAttributes.find((attr: any) => attr.key === attributeName)  // Fixed from .name
+  return attribute?.value || null
+}
+```
+
+### 🚀 **Deployment Status**
+- **Version ID**: 8dcdcee4-7691-4001-9fd9-b833014302d4
+- **Status**: 🟢 **Live** - Order ID display and GraphQL structure fixes deployed
+- **Impact**: Resolves webhook errors and displays proper order names instead of numeric IDs
+
+---
+
 ## [1.5.7] - 2025-06-25
 
 ### 🔧 **Field Mapping Data Source Fix**
@@ -1001,3 +1243,13 @@ extractFieldValue(shopifyData, 'lineItems.edges.0.node.variant.sku') // Product 
 ---
 
 ## Version 1.4.1 - 2025-01-02 
+
+### 🔧 **Update Orders Button Implementation**
+
+- **Functional Update Button**: The "Update Orders" button now actually works and refreshes existing orders with enhanced GraphQL data
+- **Loading States**: Button shows loading spinner and is disabled during processing
+- **Error Handling**: Proper error feedback via toast notifications  
+- **Auto-refresh**: Orders list automatically refreshes after successful update
+- **API Integration**: Uses existing `updateExistingOrders` API endpoint that preserves local status/assignment data
+
+### 🚀 **Enhanced GraphQL Data Fetching** 

@@ -33,7 +33,6 @@ interface OrderDetailCardProps {
   fields: OrderCardField[]
   isExpanded?: boolean
   onToggle?: () => void
-  isAddOn?: boolean
   onStatusChange?: (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => void
   deliveryDate?: string
 }
@@ -43,7 +42,6 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   fields,
   isExpanded = false,
   onToggle,
-  isAddOn = false,
   onStatusChange,
   deliveryDate,
 }) => {
@@ -150,12 +148,12 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
       return shopifyData[fieldPath]
     }
     
-    // Handle note attributes (like noteAttributes.delivery_date, noteAttributes.timeslot)
+    // Handle custom attributes (like noteAttributes.delivery_date, noteAttributes.timeslot)
     if (fieldPath.startsWith('noteAttributes.')) {
       const attributeName = fieldPath.split('.')[1]
-      const noteAttributes = shopifyData.noteAttributes
-      if (Array.isArray(noteAttributes)) {
-        const attribute = noteAttributes.find((attr: any) => attr.name === attributeName)
+      const customAttributes = shopifyData.customAttributes
+      if (Array.isArray(customAttributes)) {
+        const attribute = customAttributes.find((attr: any) => attr.key === attributeName)
         return attribute?.value || null
       }
       return null
@@ -263,12 +261,28 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     // For most fields, prioritize direct order properties from backend processing
     const directOrderValue = order[field.id]
     
-    // Special handling for orderId - use shopifyOrderId or name from shopifyOrderData
+    // Special handling for orderId - prioritize name from shopifyOrderData (like #WF123)
     if (field.id === 'orderId') {
-      return order.shopifyOrderId || 
-             order.orderNumber || 
-             extractFieldValue(order.shopifyOrderData, 'name') || 
-             directOrderValue
+      // First try to get name from GraphQL data
+      const graphQLName = extractFieldValue(order.shopifyOrderData, 'name');
+      if (graphQLName) {
+        return graphQLName;
+      }
+      
+      // If no GraphQL name available, try to construct order name from shopifyOrderId
+      // For Shopify orders, try to create a recognizable format
+      if (order.shopifyOrderId) {
+        // If it's a long numeric ID, try to make it more readable
+        const numericId = String(order.shopifyOrderId);
+        if (numericId.length > 10) {
+          // Take last 6 digits and prefix with #WF
+          const shortId = numericId.slice(-6);
+          return `#WF${shortId}`;
+        }
+        return `#${numericId}`;
+      }
+      
+      return order.orderNumber || directOrderValue || 'Unknown Order';
     }
     
     // For fields that should primarily use direct order properties
@@ -352,20 +366,20 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     if (isExpressOrder) {
       switch (status) {
         case "assigned":
-          return "bg-yellow-100 border-l-blue-500"
+          return "bg-yellow-200 border-l-blue-500"
         case "completed":
-          return "bg-yellow-200 border-l-green-500"
+          return "bg-yellow-300 border-l-green-500"
         default:
           return `bg-yellow-50 ${getBorderColor(difficultyValue)}`
       }
     }
     
-    // Non-express orders use original logic
+    // Non-express orders use original logic with darker colors
     switch (status) {
       case "assigned":
-        return "bg-blue-50 border-l-blue-500"
+        return "bg-blue-100 border-l-blue-500"
       case "completed":
-        return "bg-green-50 border-l-green-500"
+        return "bg-green-100 border-l-green-500"
       default:
         return `bg-white ${getBorderColor(difficultyValue)}`
     }
@@ -385,6 +399,12 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   // Express order data
   const isExpressOrder = order.isExpressOrder || false
   const expressTimeSlot = order.expressTimeSlot
+  
+  // Pickup order data
+  const isPickupOrder = order.isPickupOrder || false
+  
+  // Add-on classification
+  const isAddOn = order.isAddOn || false
 
   // Get assigned user name
   const assignedToValue = status === 'assigned' || status === 'completed' ? 
@@ -413,12 +433,17 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-sm sm:text-base md:text-lg leading-tight">{primaryValue}</h3>
               <div className="flex items-center gap-1 sm:gap-2 mt-1 flex-wrap">
-                {variantValue && (
+                {variantValue && variantValue !== "Default Title" && variantValue.trim() !== "" && (
                   <span className="text-xs sm:text-sm text-muted-foreground">{variantValue}</span>
                 )}
                 {isExpressOrder && expressTimeSlot && (
                   <Badge className="text-xs bg-yellow-200 text-yellow-900 border-yellow-400">
                     EX - {expressTimeSlot}
+                  </Badge>
+                )}
+                {isPickupOrder && (
+                  <Badge variant="secondary" className="text-xs bg-pink-100 text-pink-800">
+                    Pickup
                   </Badge>
                 )}
                 {isAddOn && (

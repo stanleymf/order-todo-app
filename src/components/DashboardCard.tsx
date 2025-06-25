@@ -415,7 +415,7 @@ export function DashboardCard({
                 </div>
                 
                 {/* Variant Title */}
-                {productInfo.variantTitle && (
+                {productInfo.variantTitle && productInfo.variantTitle !== "Default Title" && productInfo.variantTitle.trim() !== "" && (
                   <p className={`text-gray-600 truncate ${isMobileView ? 'text-xs' : 'text-sm'}`}>
                     {productInfo.variantTitle}
                   </p>
@@ -501,7 +501,7 @@ export function DashboardCard({
               </div>
 
               {/* Variant Title */}
-              {productInfo.variantTitle && (
+              {productInfo.variantTitle && productInfo.variantTitle !== "Default Title" && productInfo.variantTitle.trim() !== "" && (
                 <div>
                   <label className={`text-gray-600 ${isMobileView ? 'text-xs' : 'text-sm'}`}>
                     Variant Title:

@@ -531,8 +531,8 @@ export class ShopifyApiService {
             zip
             phone
           }
-          noteAttributes {
-            name
+          customAttributes {
+            key
             value
           }
           lineItems(first: 50) {

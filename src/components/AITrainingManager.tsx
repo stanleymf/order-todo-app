@@ -258,6 +258,20 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
     }
   };
 
+  const extractTrainingDataFromOrders = async () => {
+    setIsLoading(true);
+    try {
+      const result = await aiTrainingService.extractTrainingDataFromOrders() as any;
+      toast.success(`Successfully extracted training data from ${result.totalProcessed || result.extractedData?.length || 0} orders`);
+      await loadTrainingData(); // Reload stats
+    } catch (error) {
+      console.error('Error extracting training data from orders:', error);
+      toast.error('Failed to extract training data from orders');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const createTrainingSession = async () => {
     try {
       const session = await aiTrainingService.createTrainingSession({
@@ -711,7 +725,7 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
           <CardDescription>
-            Common training data management tasks
+            Extract training data from your Shopify products and real customer orders
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -723,6 +737,14 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
             >
               <Upload className="h-4 w-4" />
               Extract from Products
+            </Button>
+            <Button 
+              onClick={extractTrainingDataFromOrders}
+              disabled={isLoading}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
+            >
+              <Upload className="h-4 w-4" />
+              Extract from Orders
             </Button>
             <Button 
               onClick={createTrainingSession}
