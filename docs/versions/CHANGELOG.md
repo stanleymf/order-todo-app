@@ -2,6 +2,106 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.25] - 2025-06-25
+
+### 🐛 **Critical Fix - Order Sorting Persistence After Refresh**
+
+**Issue Resolved**: Fixed drag-and-drop reordering not persisting after page refresh - orders were reverting to original creation order.
+
+### 🔍 **Root Cause Analysis**
+
+**The Problem**: While v1.5.24 fixed state preservation during reordering, the **custom sort order was not being applied** when loading orders from the database.
+
+**Root Cause Found**: **Missing sort_order integration**:
+
+1. **Card states query** was missing `sort_order` field
+2. **No sorting logic** applied after merging states with orders  
+3. **Default ordering** (`ORDER BY created_at ASC`) was always used, ignoring custom sort_order
+
+**Data Flow Issue**:
+```typescript
+// ❌ WRONG - sort_order not fetched
+SELECT card_id, status, assigned_to, assigned_by, notes, updated_at
+FROM order_card_states
+
+// ❌ WRONG - no sorting applied after merging states
+mainOrders = processedOrders.filter(order => !order.isAddOn)
+// Orders remain in creation order, ignoring sort_order
+```
+
+### 🛠️ **Fix Implementation**
+
+**Three-Step Solution**:
+
+1. **Include sort_order in queries**:
+```sql
+-- ✅ CORRECT - fetch sort_order with other state data
+SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at
+FROM order_card_states
+```
+
+2. **Merge sort_order into processed orders**:
+```typescript
+// Apply sort_order from saved state or default to 0
+order.sortOrder = savedState.sortOrder || 0
+```
+
+3. **Apply custom sorting**:
+```typescript
+// Sort by sort_order (ascending), maintain creation order for ties
+const sortByOrder = (a: any, b: any) => {
+  if (a.sortOrder !== b.sortOrder) {
+    return a.sortOrder - b.sortOrder
+  }
+  return 0 // Keep original order for ties
+}
+
+mainOrders.sort(sortByOrder)
+addOnOrders.sort(sortByOrder)
+```
+
+### ✅ **Behavior Fixed**
+
+**Before Fix**:
+- Drag-and-drop → Position changes temporarily ✅
+- **BUT**: Page refresh → Back to creation order ❌
+- **BUT**: sort_order saved but not applied ❌
+
+**After Fix**:
+- Drag-and-drop → Position changes ✅
+- Page refresh → Custom order maintained ✅  
+- sort_order properly applied on load ✅
+- Both Main Orders and Add-On Orders sorted correctly ✅
+
+### 🔧 **Technical Details**
+
+**Database Operations**:
+- ✅ `sort_order` included in all card state queries
+- ✅ Custom sorting applied to both main orders and add-on orders
+- ✅ Default sort_order (0) for cards without explicit ordering
+- ✅ Maintains creation order as fallback for tied sort_order values
+
+**Sorting Logic**:
+- **Primary**: `sort_order` (10, 20, 30... from drag-and-drop)
+- **Secondary**: Original creation order (for ties)
+- **Scope**: Separate sorting for Main Orders vs Add-On Orders
+
+### 🎯 **Complete Workflow Now Working**
+
+**End-to-End Persistence**:
+1. **Drag-and-drop reorder** → Updates sort_order in database ✅
+2. **Page refresh** → Loads orders with custom sort_order ✅
+3. **Status changes** → Preserved during reordering ✅
+4. **Cross-session** → Order persists across browser sessions ✅
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Feature**: Orders → Drag-and-drop → Refresh page
+**Status**: ✅ **FULLY FUNCTIONAL** - Complete persistence
+
+---
+
 ## [1.5.24] - 2025-06-25
 
 ### 🐛 **Critical Fix - Order State Preservation During Reordering**

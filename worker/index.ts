@@ -641,7 +641,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     let cardStates: Record<string, any> = {}
     try {
       const { results: stateResults } = await c.env.DB.prepare(`
-        SELECT card_id, status, assigned_to, assigned_by, notes, updated_at
+        SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at
         FROM order_card_states 
         WHERE tenant_id = ? AND delivery_date = ?
       `).bind(tenantId, date).all()
@@ -652,6 +652,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           assignedTo: state.assigned_to,
           assignedBy: state.assigned_by,
           notes: state.notes,
+          sortOrder: state.sort_order || 0,
           updatedAt: state.updated_at
         }
       }
@@ -669,13 +670,29 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         order.assignedTo = savedState.assignedTo
         order.assignedBy = savedState.assignedBy
         order.notes = savedState.notes
+        order.sortOrder = savedState.sortOrder
         order.updatedAt = savedState.updatedAt
+      } else {
+        // Default sort order for cards without explicit ordering
+        order.sortOrder = 0
       }
     }
 
     // Separate orders into main orders and add-ons
     const mainOrders = processedOrders.filter(order => !order.isAddOn)
     const addOnOrders = processedOrders.filter(order => order.isAddOn)
+
+    // Sort both main orders and add-on orders by sort_order (ascending), then by created_at for ties
+    const sortByOrder = (a: any, b: any) => {
+      if (a.sortOrder !== b.sortOrder) {
+        return a.sortOrder - b.sortOrder
+      }
+      // For ties, maintain original created_at order
+      return 0
+    }
+
+    mainOrders.sort(sortByOrder)
+    addOnOrders.sort(sortByOrder)
 
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
     console.log(`Main orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
@@ -776,7 +793,7 @@ app.get("/api/tenants/:tenantId/order-card-states", async (c) => {
     console.log(`[ORDER-CARD-STATE] Fetching states for tenant ${tenantId}, date ${date}`)
     
     const { results } = await c.env.DB.prepare(`
-      SELECT card_id, status, assigned_to, assigned_by, notes, updated_at
+      SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at
       FROM order_card_states 
       WHERE tenant_id = ? AND delivery_date = ?
     `).bind(tenantId, date).all()
@@ -791,6 +808,7 @@ app.get("/api/tenants/:tenantId/order-card-states", async (c) => {
         assignedTo: state.assigned_to,
         assignedBy: state.assigned_by,
         notes: state.notes,
+        sortOrder: state.sort_order || 0,
         updatedAt: state.updated_at
       }
     }
