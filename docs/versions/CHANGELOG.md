@@ -2,6 +2,96 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.20] - 2025-06-25
+
+### 🎯 **Major Feature - "Fetch Not-Saved Products" Button**
+
+**New Feature Addition**: Added intelligent "Fetch Not-Saved Products" button that only shows products with variants that haven't been saved yet, optimizing workflow efficiency.
+
+### 🔍 **Smart Filtering Logic**
+
+- **Variant-Level Comparison**: Compares product+variant combinations against saved products in D1 database
+- **Efficient Filtering**: Uses Set-based O(1) lookup for fast performance even with large datasets
+- **Partial Product Display**: Shows products with only their unsaved variants
+- **Complete Product Hiding**: Hides products where all variants are already saved
+- **Store-Specific**: Only compares against saved products from the selected store
+
+### 🔧 **Data Flow Implementation**
+
+**Step-by-Step Process**:
+```typescript
+1. Fetch Products from Shopify → All products with all variants
+2. Get Saved Products from D1 → Current saved products for selected store  
+3. Create Comparison Set → Set of "productId-variantId" combinations
+4. Filter Products → Keep only products with unsaved variants
+5. Update Variants → Show only unsaved variants per product
+6. Display Results → Smart product list with variant counts
+```
+
+### 🎨 **User Interface**
+
+**New Button Placement**: 
+- **Position**: Next to existing "Fetch Products" button
+- **Icon**: FilterX (filter with X symbol)
+- **States**: Loading spinner during operation
+- **Styling**: Outline variant to distinguish from primary fetch
+
+**Enhanced Product Display**:
+- **Variant Counts**: Shows "3 of 5 variants" when partially saved
+- **Smart Messaging**: "Found X products with Y unsaved variants"
+- **Empty State**: "All products fully saved" when no unsaved variants found
+
+### 📊 **Performance Optimization**
+
+**Efficient Comparison**:
+- **Single D1 Query**: Gets all saved products for store in one call
+- **In-Memory Filtering**: Fast Set-based comparison without additional API calls
+- **Batch Processing**: Handles large product catalogs efficiently
+
+**Data Volume Handling**:
+- **Shopify API**: ~250 products per page (standard pagination)
+- **D1 Comparison**: ~1,500 saved products (your current volume)
+- **Memory Usage**: Minimal overhead with Set data structure
+
+### ✅ **User Workflow Benefits**
+
+**Before**:
+```
+1. Fetch Products → See all 250 products
+2. Manual checking → Which ones are already saved?
+3. Visual scanning → Look for "Already Saved" indicators
+4. Selection → Pick only new products manually
+```
+
+**After**:
+```
+1. Fetch Not-Saved → See only 20 products with unsaved variants
+2. Auto-filtered → Only genuinely new products shown
+3. Direct selection → Save all displayed products confidently
+4. Efficient workflow → No duplicate work or confusion
+```
+
+### 🎯 **Smart Examples**
+
+**Scenario 1**: Product with 5 variants, 2 already saved
+- **Result**: Product shows with only 3 remaining variants
+- **Display**: "Product Name (3 of 5 variants available)"
+
+**Scenario 2**: Product with 5 variants, all saved  
+- **Result**: Product completely hidden from list
+- **Display**: Not shown (efficient filtering)
+
+**Scenario 3**: Product with 5 variants, none saved
+- **Result**: Product shows with all 5 variants
+- **Display**: "Product Name (5 variants available)"
+
+### 🚀 **Live Feature**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Location**: Products > All Products > "Fetch Not-Saved" button
+
+---
+
 ## [1.5.19] - 2025-06-25
 
 ### 🔧 **Critical Fix - Product Variants Fetching & Saving**

@@ -28,6 +28,7 @@ import {
   Save,
   Eye,
   Edit,
+  FilterX,
 } from "lucide-react"
 import { useMobileView } from "./Dashboard"
 import { useAuth } from "../contexts/AuthContext"
@@ -72,6 +73,7 @@ export function ProductManagement() {
   const [searchQuery, setSearchQuery] = useState("")
   const [savedProductSearch, setSavedProductSearch] = useState("")
   const [isFetchingProducts, setIsFetchingProducts] = useState(false)
+  const [isFetchingNotSavedProducts, setIsFetchingNotSavedProducts] = useState(false)
   const [syncStoreId, setSyncStoreId] = useState("")
   const [syncTitleFilter, setSyncTitleFilter] = useState("")
   const [syncTagFilter, setSyncTagFilter] = useState("")
@@ -97,13 +99,7 @@ export function ProductManagement() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
-  const [pagination, setPagination] = useState<{
-    page: number
-    limit: number
-    hasNext: boolean
-    total: number
-    nextSinceId?: number
-  } | null>(null)
+  const [pagination, setPagination] = useState<any>(null)
 
   // Search state for All Products
   const [allProductsSearch, setAllProductsSearch] = useState("")
@@ -266,6 +262,102 @@ export function ProductManagement() {
       toast.error("Failed to fetch products. Please try again.")
     } finally {
       setIsFetchingProducts(false)
+    }
+  }
+
+  const handleFetchNotSavedProducts = async (page: number = 1, sinceId?: number, pageInfo?: string) => {
+    if (!tenant?.id || !syncStoreId) {
+      toast.error("Please select a store to fetch from.")
+      return
+    }
+    try {
+      setIsFetchingNotSavedProducts(true)
+      toast.info(`Fetching not-saved products from Shopify (page ${page})...`)
+
+      // Step 1: Fetch all products from Shopify
+      const response = await syncProducts(tenant.id, syncStoreId, {
+        title: syncTitleFilter,
+        tag: syncTagFilter,
+        page,
+        limit: 250,
+        sinceId,
+        pageInfo,
+      })
+
+      if (!response.success || !response.products) {
+        toast.error("No products returned from Shopify")
+        return
+      }
+
+      // Step 2: Get current saved products from D1 (for this store only)
+      const allSavedProducts = await getSavedProducts(tenant.id)
+      const currentSavedProducts = allSavedProducts.filter(p => p.storeId === syncStoreId)
+
+      // Step 3: Create set of saved product+variant combinations for fast lookup
+      const savedCombinations = new Set(
+        currentSavedProducts.map(p => `${p.shopifyProductId}-${p.shopifyVariantId}`)
+      )
+
+      // Step 4: Filter products to show only those with unsaved variants
+      const notSavedProducts = response.products.map((product: any) => {
+        // Filter variants to only include those not yet saved
+        const notSavedVariants = (product.variants || []).filter((variant: any) => {
+          const combination = `${product.shopifyId}-${variant.id}`
+          return !savedCombinations.has(combination)
+        })
+
+        // Return product with only unsaved variants, or null if all variants are saved
+        return notSavedVariants.length > 0 ? {
+          ...product,
+          variants: notSavedVariants,
+          originalVariantCount: product.variants?.length || 0,
+          unsavedVariantCount: notSavedVariants.length
+        } : null
+      }).filter(Boolean) // Remove null entries (products with all variants already saved)
+
+      console.log("Fetch not-saved response:", {
+        totalFromShopify: response.products.length,
+        totalSaved: currentSavedProducts.length,
+        notSavedProducts: notSavedProducts.length
+      })
+
+      if (page === 1) {
+        setFetchedProducts(notSavedProducts)
+        setPagination(response.pagination)
+        setCurrentPage(1)
+      } else {
+        setFetchedProducts((prev) => [...prev, ...notSavedProducts])
+        setPagination(response.pagination)
+        setCurrentPage(page)
+      }
+      setNextPageInfo(response.pagination?.nextPageInfo)
+
+      const totalNewVariants = notSavedProducts.reduce((sum: number, product: any) => 
+        sum + (product.unsavedVariantCount || 0), 0
+      )
+
+      if (notSavedProducts.length > 0) {
+        toast.success(
+          `Found ${notSavedProducts.length} products with ${totalNewVariants} unsaved variants!`,
+          {
+            duration: 4000,
+            description: `These products have variants that aren't saved yet. Products with all variants saved are hidden.`
+          }
+        )
+      } else {
+        toast.info(
+          `All products from this page are already fully saved!`,
+          {
+            duration: 4000,
+            description: `No new variants found. Try fetching more pages or adjusting filters.`
+          }
+        )
+      }
+    } catch (err) {
+      console.error("Error fetching not-saved products:", err)
+      toast.error("Failed to fetch not-saved products. Please try again.")
+    } finally {
+      setIsFetchingNotSavedProducts(false)
     }
   }
 
@@ -1206,6 +1298,20 @@ export function ProductManagement() {
                     <RefreshCw className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
                   )}
                   Fetch Products
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleFetchNotSavedProducts(1)}
+                  disabled={isFetchingNotSavedProducts}
+                  className={isMobileView ? "w-full h-9 text-sm" : ""}
+                >
+                  {isFetchingNotSavedProducts ? (
+                    <Loader2 className={`animate-spin mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  ) : (
+                    <FilterX className={`mr-2 ${isMobileView ? "h-3 w-3" : "h-4 w-4"}`} />
+                  )}
+                  Fetch Not-Saved
                 </Button>
                 <Button
                   size="sm"
