@@ -2,6 +2,93 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.23] - 2025-06-25
+
+### 🐛 **Critical Fix - Route Ordering Bug**
+
+**Issue Resolved**: Fixed "API Error 404: Not Found" when dragging and dropping OrderDetailCards to reorder them.
+
+### 🔍 **Root Cause Analysis**
+
+**The Problem**: Drag-and-drop reordering was failing with 404 errors despite correct database schema and working reorder endpoint.
+
+**Root Cause Found**: **Route ordering conflict** in `worker/index.ts`:
+
+```typescript
+// ❌ WRONG ORDER (Causing 404)
+app.put("/api/tenants/:tenantId/orders/:orderId", ...)     // Line 1112 - Generic route
+app.put("/api/tenants/:tenantId/orders/reorder", ...)     // Line 1127 - Specific route
+
+// ✅ CORRECT ORDER (Fixed)  
+app.put("/api/tenants/:tenantId/orders/reorder", ...)     // Specific route FIRST
+app.put("/api/tenants/:tenantId/orders/:orderId", ...)    // Generic route SECOND
+```
+
+**Why This Caused 404**:
+1. Request: `PUT /api/tenants/1/orders/reorder`
+2. Router matched first pattern: `/api/tenants/:tenantId/orders/:orderId`
+3. Router treated "reorder" as `:orderId` parameter
+4. Single order update endpoint tried to find order with ID "reorder"
+5. No such order exists → **404 Not Found**
+
+### 🛠️ **HTTP Routing Principle**
+
+**Specific Routes Must Come Before General Routes**:
+- More specific patterns like `/orders/reorder` should be defined first
+- More general patterns like `/orders/:id` should come after
+- Router uses first match, not best match
+- This is standard HTTP routing behavior across all frameworks
+
+### ✅ **Fix Applied**
+
+**Route Reordering**:
+- Moved reorder route (`/orders/reorder`) before generic route (`/orders/:orderId`)
+- No code logic changes needed
+- Maintains all existing functionality
+
+**Deployment Status**:
+- ✅ **DEPLOYED**: https://order-to-do.stanleytan92.workers.dev
+- ✅ **TESTED**: Drag-and-drop reordering now works correctly
+- ✅ **VERIFIED**: No impact on other order management endpoints
+
+### 🎯 **User Experience Fixed**
+
+**Before Fix**:
+- Drag-and-drop → "Failed to update order sequence: API Error 404: Not Found"
+- Orders snap back to original positions
+- No persistence of reordering
+
+**After Fix**:
+- Drag-and-drop → "Order sequence updated" ✅
+- Smooth visual feedback
+- Changes persist across page reloads
+- Both Main Orders and Add-On Orders sections work correctly
+
+### 🔧 **Technical Details**
+
+**Request Flow Now Working**:
+```
+1. Frontend: PUT /api/tenants/1/orders/reorder
+2. Router: Matches /api/tenants/:tenantId/orders/reorder (FIRST)
+3. Endpoint: Processes orderIds and deliveryDate 
+4. Database: Updates order_card_states with sort_order
+5. Response: {"success": true, "message": "Updated order sequence..."}
+```
+
+**Database Operations Confirmed Working**:
+- `INSERT OR REPLACE INTO order_card_states` executes successfully
+- `sort_order` values (10, 20, 30...) are properly set
+- `card_id` column correctly receives order IDs
+- Changes persist and load correctly on page refresh
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Feature**: Orders → Drag and drop OrderDetailCards
+**Status**: ✅ **FULLY FUNCTIONAL**
+
+---
+
 ## [1.5.22] - 2025-06-25
 
 ### 🐛 **Critical Fix - OrderDetailCard Field Mapping**

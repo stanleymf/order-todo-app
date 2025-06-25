@@ -1110,20 +1110,6 @@ app.get("/api/tenants/:tenantId/orders/:orderId", async (c) => {
   const order = await d1DatabaseService.getOrder(c.env, tenantId, orderId)
   return order ? c.json(order) : c.json({ error: "Not Found" }, 404)
 })
-app.put("/api/tenants/:tenantId/orders/:orderId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const orderId = c.req.param("orderId")
-  const updateData = await c.req.json()
-  const updatedOrder = await d1DatabaseService.updateOrder(c.env, tenantId, orderId, updateData)
-  return updatedOrder ? c.json(updatedOrder) : c.json({ error: "Not Found" }, 404)
-})
-app.delete("/api/tenants/:tenantId/orders/:orderId", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  const orderId = c.req.param("orderId")
-  const success = await d1DatabaseService.deleteOrder(c.env, tenantId, orderId)
-  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
-})
-
 // --- Order Reordering ---
 app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
   const tenantId = c.req.param("tenantId")
@@ -1168,6 +1154,20 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
       details: error instanceof Error ? error.message : "Unknown error" 
     }, 500)
   }
+})
+
+app.put("/api/tenants/:tenantId/orders/:orderId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const orderId = c.req.param("orderId")
+  const updateData = await c.req.json()
+  const updatedOrder = await d1DatabaseService.updateOrder(c.env, tenantId, orderId, updateData)
+  return updatedOrder ? c.json(updatedOrder) : c.json({ error: "Not Found" }, 404)
+})
+app.delete("/api/tenants/:tenantId/orders/:orderId", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const orderId = c.req.param("orderId")
+  const success = await d1DatabaseService.deleteOrder(c.env, tenantId, orderId)
+  return success ? c.json({ success: true }) : c.json({ error: "Not Found" }, 404)
 })
 
 // --- Camera Widget Templates ---
