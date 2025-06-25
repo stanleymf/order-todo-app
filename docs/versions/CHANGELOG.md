@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.27] - 2025-01-13
+
+### Fixed
+- **Store Name Display**: Fixed store containers showing cryptic store IDs instead of readable names
+- Updated backend to derive store names from `shopify_domain` field instead of non-existent `name` field
+- Store ID `40a6082e-14ed-4b7c-b3fd-4d9bc67c1cf7` now correctly displays as "WindflowerFlorist"
+- Store ID `2a23fac3-625d-4ee8-95d9-33153c7d5535` now correctly displays as "HelloFlowers Singapore"
+
+### Technical Details
+- Modified store data query to use actual database schema (`shopify_domain` field)
+- Added domain-to-name mapping logic for windflowerflorist and helloflowerssg domains
+- Enhanced debugging and error handling for store name resolution
+- Improved fallback logic for store name detection
+
+---
+
+## [1.5.26] - 2025-01-13
+
+### Added
+- **Store-Based Container Organization**: Replaced "Main Orders" and "Add-Ons" grouping with dynamic store containers
+- Store containers now group orders by actual Shopify store (WindflowerFlorist, HelloFlowers Singapore, etc.)
+- Individual drag-and-drop zones per store container with proper reordering
+- Store-specific icons and color coding for better visual organization
+- Order count display per store container
+
+### Enhanced
+- Backend API `/api/tenants/:tenantId/orders-from-db-by-date` now returns `storeContainers` structure
+- Smart store detection with fallback logic using order name prefixes (WF→WindflowerFlorist, HF→HelloFlowers)
+- Store containers sorted by order count (most orders displayed first)
+- Maintained backward compatibility with existing `mainOrders` and `addOnOrders` arrays
+
+### Maintained
+- ✅ All existing drag-and-drop functionality preserved within store containers
+- ✅ Status management (unassigned/assigned/completed) fully functional
+- ✅ Order deletion and modification capabilities unchanged
+- ✅ Search and filtering work across all store containers
+- ✅ Statistics and analytics continue to function
+- ✅ Add-on orders container remains separate and unchanged
+- ✅ Sort order persistence across page refreshes
+
+### Technical Details
+- Enhanced state management to synchronize legacy arrays with new store containers
+- Updated drag-and-drop logic to handle nested store container structure
+- Added comprehensive error handling and fallback mechanisms
+- Improved type safety for order processing and store mapping
+
+---
+
 ## [1.5.25] - 2025-06-25
 
 ### 🐛 **Critical Fix - Order Sorting Persistence After Refresh**

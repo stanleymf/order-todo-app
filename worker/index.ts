@@ -682,17 +682,28 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     const storesMap = new Map<string, any>()
     try {
       const { results: storeResults } = await c.env.DB.prepare(`
-        SELECT id, name, shopify_domain FROM shopify_stores 
+        SELECT id, shopify_domain FROM shopify_stores 
         WHERE tenant_id = ?
       `).bind(tenantId).all()
 
       for (const store of storeResults || []) {
         const storeId = String(store.id || '')
+        const domain = store.shopify_domain as string
+        
+        // Derive readable name from domain
+        let storeName = 'Unknown Store'
+        if (domain?.includes('windflowerflorist')) {
+          storeName = 'WindflowerFlorist'
+        } else if (domain?.includes('helloflowerssg') || domain?.includes('helloflowers')) {
+          storeName = 'HelloFlowers Singapore'
+        }
+        
         storesMap.set(storeId, {
           id: store.id,
-          name: store.name,
-          domain: store.shopify_domain
+          name: storeName,
+          domain: domain
         })
+        console.log(`[STORE-GROUPING] Added store: ${storeId} -> ${storeName} (${domain})`)
       }
       console.log(`[STORE-GROUPING] Loaded ${storesMap.size} stores for grouping`)
     } catch (error) {
@@ -702,20 +713,25 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     // Helper function to get store name with fallbacks
     const getStoreName = (order: any): string => {
       const storeId = order.storeId || order.store_id
+      console.log(`[STORE-NAME] Processing order: storeId=${storeId}, hasMap=${storesMap.has(String(storeId))}, mapSize=${storesMap.size}`)
+      
       if (storeId && storesMap.has(String(storeId))) {
         const store = storesMap.get(String(storeId))
+        console.log(`[STORE-NAME] Found store in map: ${store?.name}`)
         return store?.name || `Store ${storeId}`
       }
       
-      // Fallback to store ID if available
+      // Enhanced fallback logic with order name detection FIRST
+      const orderName = order.shopifyOrderId || order.orderId || order.name || ''
+      console.log(`[STORE-NAME] Checking order name: ${orderName}`)
+      
+      if (orderName.startsWith('WF') || orderName.includes('WF')) return 'WindflowerFlorist'
+      if (orderName.startsWith('HF') || orderName.includes('HF')) return 'HelloFlowers Singapore'
+      
+      // Fallback to store ID if available  
       if (storeId) {
         return `Store ${storeId}`
       }
-      
-      // Final fallback to order name prefix detection
-      const orderName = order.shopifyOrderId || order.orderId || ''
-      if (orderName.startsWith('WF')) return 'WindflowerFlorist'
-      if (orderName.startsWith('HF')) return 'HelloFlowers'
       
       return 'Unknown Store'
     }
