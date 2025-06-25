@@ -220,8 +220,10 @@ class AITrainingService {
   }
 
   async updateDesignRating(designId: string, rating: number, feedback?: string): Promise<void> {
-    // This would need to be implemented in the backend
-    throw new Error('Not implemented yet');
+    return await updateAIGeneratedDesign(this.tenantId, designId, {
+      rating,
+      feedback: feedback || ''
+    });
   }
 
   async toggleDesignFavorite(designId: string): Promise<void> {
