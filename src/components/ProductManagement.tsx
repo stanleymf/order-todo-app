@@ -500,50 +500,86 @@ export function ProductManagement() {
   }
 
   const handleSaveSelectedProducts = async () => {
-    if (!tenant?.id || selectedProducts.size === 0) return
+    if (!tenant?.id || selectedProducts.size === 0) {
+      toast.error("Please select products to save.")
+      return
+    }
 
-    setIsSavingProducts(true)
     try {
-      const productsToSave = fetchedProducts.filter((product) => selectedProducts.has(product.id))
+      setIsSavingProducts(true)
 
-      // Check for duplicates by comparing shopifyProductId
-      const existingProductIds = new Set(savedProducts.map((sp) => sp.shopifyProductId))
-      const newProducts = productsToSave.filter(
-        (product) => !existingProductIds.has(product.shopifyId)
-      )
-      const duplicates = productsToSave.filter((product) =>
-        existingProductIds.has(product.shopifyId)
+             const productsToSave = fetchedProducts.filter((product) => selectedProducts.has(product.id))
+
+             // Check for duplicates by comparing shopify product ID + variant ID combinations
+       const allProductVariantPairs = productsToSave.flatMap((product) =>
+         (product.variants || []).map((variant: any) => ({
+           shopifyProductId: product.shopifyId,
+           shopifyVariantId: variant.id,
+         }))
+       )
+
+      const savedProductVariantPairs = savedProducts.map((product) => ({
+        shopifyProductId: product.shopifyProductId,
+        shopifyVariantId: product.shopifyVariantId,
+      }))
+
+      const duplicates = allProductVariantPairs.filter((newPair) =>
+        savedProductVariantPairs.some(
+          (savedPair) =>
+            savedPair.shopifyProductId === newPair.shopifyProductId &&
+            savedPair.shopifyVariantId === newPair.shopifyVariantId
+        )
       )
 
-      if (newProducts.length === 0) {
-        // All products are duplicates
-        toast.info(`ℹ️ All ${productsToSave.length} selected products are already saved!`, {
+      const newProductVariantPairs = allProductVariantPairs.filter(
+        (newPair) =>
+          !savedProductVariantPairs.some(
+            (savedPair) =>
+              savedPair.shopifyProductId === newPair.shopifyProductId &&
+              savedPair.shopifyVariantId === newPair.shopifyVariantId
+          )
+      )
+
+      if (newProductVariantPairs.length === 0) {
+        toast.info(`ℹ️ All variants of the ${productsToSave.length} selected products are already saved!`, {
           duration: 4000,
-          description: `No new products were added to your saved products.`,
+          description: `No new product variants were added to your saved products.`,
         })
         setSelectedProducts(new Set())
         return
       }
 
-      const productsData = newProducts.map((product) => ({
-        shopifyProductId: product.shopifyId,
-        shopifyVariantId: product.variants?.[0]?.id || "",
-        title: product.title,
-        variantTitle: product.variants?.[0]?.title,
-        description: product.description,
-        price: parseFloat(product.variants?.[0]?.price || "0"),
-        tags: product.tags || [],
-        productType: product.productType,
-        vendor: product.vendor,
-        handle: product.handle,
-        imageUrl: product.images?.[0]?.src,
-        imageAlt: product.images?.[0]?.alt,
-        imageWidth: product.images?.[0]?.width,
-        imageHeight: product.images?.[0]?.height,
-        storeId: syncStoreId, // Add store ID to saved products
-      }))
+             // Create a product data entry for EACH variant of each selected product
+       const productsData = productsToSave.flatMap((product) =>
+         (product.variants || []).map((variant: any) => ({
+          shopifyProductId: product.shopifyId,
+          shopifyVariantId: variant.id,
+          title: product.title,
+          variantTitle: variant.title,
+          description: product.description,
+          price: parseFloat(variant.price || "0"),
+          tags: product.tags || [],
+          productType: product.productType,
+          vendor: product.vendor,
+          handle: product.handle,
+          imageUrl: product.images?.[0]?.src,
+          imageAlt: product.images?.[0]?.alt,
+          imageWidth: product.images?.[0]?.width,
+          imageHeight: product.images?.[0]?.height,
+          storeId: syncStoreId, // Add store ID to saved products
+        }))
+      )
 
-      await saveProducts(tenant.id, productsData)
+      // Filter out variants that are already saved
+      const newProductsData = productsData.filter((productData) =>
+        newProductVariantPairs.some(
+          (newPair) =>
+            newPair.shopifyProductId === productData.shopifyProductId &&
+            newPair.shopifyVariantId === productData.shopifyVariantId
+        )
+      )
+
+      await saveProducts(tenant.id, newProductsData)
 
       // Update saved products state directly instead of calling loadData()
       const newSavedProducts = await getSavedProducts(tenant.id)
@@ -552,20 +588,24 @@ export function ProductManagement() {
       setSelectedProducts(new Set())
 
       // Show appropriate toast based on results
-      if (duplicates.length > 0) {
+      const totalVariants = productsData.length
+      const newVariants = newProductsData.length
+      const duplicateVariants = duplicates.length
+
+      if (duplicateVariants > 0) {
         toast.success(
-          `✅ Saved ${newProducts.length} new products! ${duplicates.length} were already saved.`,
+          `✅ Saved ${newVariants} new product variants! ${duplicateVariants} variants were already saved.`,
           {
             duration: 4000,
-            description: `You can now find the new products in the "Saved Products" section below.`,
+            description: `Total: ${totalVariants} variants from ${productsToSave.length} products. You can find them in "Saved Products".`,
           }
         )
       } else {
         toast.success(
-          `✅ Successfully saved ${productsData.length} products to your saved products!`,
+          `✅ Successfully saved ${newVariants} product variants from ${productsToSave.length} products!`,
           {
             duration: 4000,
-            description: `You can now find them in the "Saved Products" section below.`,
+            description: `Each variant is saved separately. You can now find them in the "Saved Products" section.`,
           }
         )
       }

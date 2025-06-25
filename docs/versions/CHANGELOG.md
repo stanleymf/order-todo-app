@@ -2,6 +2,75 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.19] - 2025-06-25
+
+### 🔧 **Critical Fix - Product Variants Fetching & Saving**
+
+**Issue Resolution**: Fixed major limitation where "Fetch Products" only saved the first variant of each product instead of ALL variants, causing incomplete product data.
+
+### 🐛 **Product Variants Issues Fixed**
+
+- **Root Cause**: `handleSaveSelectedProducts` was only processing `product.variants?.[0]` (first variant only)
+- **Impact**: Multi-variant products were missing most of their variants in saved products
+- **Solution**: Updated to process ALL variants using `flatMap` to create separate saved product entries for each variant
+- **Result**: All product variants are now properly fetched and saved individually
+
+### 🔧 **Technical Implementation**
+
+**Before (First Variant Only)**:
+```typescript
+const productsData = newProducts.map((product) => ({
+  shopifyProductId: product.shopifyId,
+  shopifyVariantId: product.variants?.[0]?.id || "", // ONLY FIRST VARIANT
+  title: product.title,
+  variantTitle: product.variants?.[0]?.title,
+  price: parseFloat(product.variants?.[0]?.price || "0"),
+  // ... other fields
+}))
+```
+
+**After (ALL Variants)**:
+```typescript
+const productsData = productsToSave.flatMap((product) =>
+  (product.variants || []).map((variant: any) => ({
+    shopifyProductId: product.shopifyId,
+    shopifyVariantId: variant.id, // EACH VARIANT SEPARATELY
+    title: product.title,
+    variantTitle: variant.title,
+    price: parseFloat(variant.price || "0"),
+    // ... other fields
+  }))
+)
+```
+
+### 🎯 **Enhanced Functionality**
+
+- **Complete Variant Processing**: Each variant becomes a separate saved product entry
+- **Improved Duplicate Detection**: Checks for existing product+variant combinations instead of just product ID
+- **Better Toast Messages**: Shows variant counts instead of just product counts
+- **Variant-Level Pricing**: Each variant retains its specific price
+- **Enhanced Store Association**: All variants properly associated with their store
+
+### ✅ **User Impact**
+
+- **✅ Complete Product Data**: All variants of multi-variant products are now saved
+- **✅ Individual Variant Management**: Each variant can be labeled and managed separately
+- **✅ Accurate Pricing**: Variant-specific pricing is maintained
+- **✅ Better Organization**: Variants are saved as distinct entities in saved products
+- **✅ No Data Loss**: Previously missing variants are now captured
+
+### 📋 **Usage Impact**
+
+**Before**: 
+- Product with 5 variants → Only 1 saved product entry
+- Missing 4 variants worth of data
+
+**After**:
+- Product with 5 variants → 5 saved product entries
+- Complete variant data preserved
+
+---
+
 ## [1.5.18] - 2025-06-25
 
 ### 🏪 **Major Feature - Store Filtering for Saved Products**
