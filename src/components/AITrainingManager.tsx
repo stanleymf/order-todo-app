@@ -221,28 +221,33 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
   }, [mainTab, trainingDataSubTab, aiConfigSubTab, tenantId]);
 
   const loadTrainingData = async () => {
-    setIsLoading(true);
+    setIsLoading(true)
     try {
-      const [stats, styles, prompts, configs, designs] = await Promise.all([
+      const [trainingStatsResults, generatedDesignsResults] = await Promise.all([
         aiTrainingService.getTrainingDataStats(),
-        aiTrainingService.getStyleTemplates(),
-        aiTrainingService.getPromptTemplates(),
-        aiTrainingService.getModelConfigs(),
         aiTrainingService.getGeneratedDesigns()
-      ]);
-
-      setTrainingStats(stats);
-      setStyleTemplates(styles);
-      setPromptTemplates(prompts);
-      setModelConfigs(configs);
-      setGeneratedDesigns(designs);
+      ])
+      
+      // More visible debugging
+      alert('[DEBUG] Found ' + generatedDesignsResults.length + ' designs');
+      console.log('[DEBUG] Generated designs data:', generatedDesignsResults);
+      console.log('[DEBUG] First design image data:', generatedDesignsResults[0] ? {
+        id: generatedDesignsResults[0].id,
+        generated_image_url: generatedDesignsResults[0].generated_image_url,
+        generated_image_data: generatedDesignsResults[0].generated_image_data,
+        prompt: generatedDesignsResults[0].prompt?.substring(0, 50) + '...'
+      } : 'No designs found');
+      
+      setTrainingStats(trainingStatsResults)
+      setGeneratedDesigns(generatedDesignsResults)
     } catch (error) {
-      console.error('Error loading training data:', error);
-      toast.error('Failed to load training data');
+      console.error('Error loading training data:', error)
+      alert('Error loading training data: ' + (error as Error).message);
+      toast.error('Failed to load training data')
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   const extractTrainingDataFromProducts = async () => {
     setIsLoading(true);
@@ -677,6 +682,31 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
   const openRatingModal = (design: any) => {
     setSelectedDesign(design);
     setShowRatingModal(true);
+  };
+
+  const getImageSrc = (design: any) => {
+    // Try generated_image_url first
+    if (design.generated_image_url && design.generated_image_url.trim()) {
+      return design.generated_image_url;
+    }
+    
+    // Try generated_image_data (base64)
+    if (design.generated_image_data && design.generated_image_data.trim()) {
+      // Check if it's already a data URL
+      if (design.generated_image_data.startsWith('data:image/')) {
+        return design.generated_image_data;
+      }
+      // If it's just base64, add the data URL prefix
+      return `data:image/png;base64,${design.generated_image_data}`;
+    }
+    
+    // Fallback placeholder - simple data URL
+    return 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+CiAgPHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzlCA0E4QTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5ObyBJbWFnZTwvdGV4dD4KICA8L3N2Zz4=';
+  };
+
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.target as HTMLImageElement;
+    img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZmJjZjk3Ii8+CiAgPHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzkyNDAwZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkVycm9yPC90ZXh0Pgo8L3N2Zz4=';
   };
 
   const renderOverviewTab = () => (
@@ -2135,9 +2165,10 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
             {generatedDesigns.filter(d => d.quality_rating).map((design) => (
               <div key={design.id} className="flex items-center gap-4 p-4 border rounded-lg">
                 <img 
-                  src={design.generated_image_url || design.generated_image_data} 
+                  src={getImageSrc(design)} 
                   alt="Generated design"
                   className="w-16 h-16 object-cover rounded-lg"
+                  onError={handleImageError}
                 />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
@@ -2201,9 +2232,10 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
             {generatedDesigns.filter(d => !d.quality_rating).slice(0, 5).map((design) => (
               <div key={design.id} className="flex items-center gap-4 p-4 border rounded-lg">
                 <img 
-                  src={design.generated_image_url || design.generated_image_data} 
+                  src={getImageSrc(design)} 
                   alt="Generated design"
                   className="w-16 h-16 object-cover rounded-lg"
+                  onError={handleImageError}
                 />
                 <div className="flex-1">
                   <p className="text-sm text-gray-600 line-clamp-2">
@@ -2237,7 +2269,7 @@ const AITrainingManager: React.FC<AITrainingManagerProps> = ({ tenantId }) => {
           isOpen={showRatingModal}
           onClose={() => setShowRatingModal(false)}
           designId={selectedDesign.id}
-          designImage={selectedDesign.generated_image_url || selectedDesign.generated_image_data}
+          designImage={getImageSrc(selectedDesign)}
           prompt={selectedDesign.prompt}
           onRatingSubmit={(rating: number, feedback: string) => handleRatingSubmit(selectedDesign.id, rating, feedback)}
         />

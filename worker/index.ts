@@ -2399,7 +2399,7 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
       "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
     ).bind(tenantId, String(shopifyOrder.id)).first();
     if (existingOrder) {
-      await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: JSON.stringify(shopifyOrderGraphQL) });
+      await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
       console.log("[WEBHOOK] Updated existing order with GraphQL data:", existingOrder.id);
       return c.json({ success: true, orderId: existingOrder.id, updated: true });
     }
