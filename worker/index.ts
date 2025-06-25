@@ -4591,7 +4591,7 @@ app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c)
           orderName: shopifyOrderGraphQL?.name,
           orderId: shopifyOrderGraphQL?.id
         });
-        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: JSON.stringify(shopifyOrderGraphQL) });
+        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
         console.log("[SYNC-BY-DATE] Updated existing order with GraphQL data:", existingOrder.id);
         updatedOrders.push(existingOrder.id);
       } else {
