@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { Label } from "./ui/label"
-import { Badge } from "./ui/badge"
+
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
 
 import { Separator } from "./ui/separator"
@@ -14,17 +14,13 @@ import {
   Download,
   Upload,
   Trash2,
-  User,
-  Clock,
-  MapPin,
   CheckCircle,
-  AlertCircle,
   BarChart3,
   Gift,
   ChevronDown,
   Store,
   Tags,
-  Layers,
+
   UserCheck,
   Circle,
   AlertTriangle
@@ -56,7 +52,7 @@ import { OrderCardField } from "../types/orderCardFields"
 import { toast } from "sonner"
 
 export const Orders: React.FC = () => {
-  const { user, tenant } = useAuth()
+  const { tenant } = useAuth()
   
   // State for controls
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
@@ -509,7 +505,7 @@ export const Orders: React.FC = () => {
             }
             
             // Extract order IDs in new sequence for this store
-            const orderIds = newOrders.map(order => order.cardId || order.id)
+            const orderIds = newOrders.map((order: any) => order.cardId || order.id)
             const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
             // Auto-save the new order
@@ -539,7 +535,7 @@ export const Orders: React.FC = () => {
             setAddOnOrders(newAddOnOrders)
             
             // Extract order IDs in new sequence
-            const orderIds = newAddOnOrders.map(order => order.cardId || order.id)
+            const orderIds = newAddOnOrders.map((order: any) => order.cardId || order.id)
             const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
             // Auto-save the new order
