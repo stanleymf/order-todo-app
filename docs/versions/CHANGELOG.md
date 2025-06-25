@@ -1346,3 +1346,43 @@ extractFieldValue(shopifyData, 'lineItems.edges.0.node.variant.sku') // Product 
 - **API Integration**: Uses existing `updateExistingOrders` API endpoint that preserves local status/assignment data
 
 ### 🚀 **Enhanced GraphQL Data Fetching** 
+
+## [1.5.15] - 2025-06-25
+
+### 🔧 **Critical Fix - Order Fields & Update Orders Functionality**
+
+**Issue Resolution**: Fixed critical JSON double-encoding bug in Shopify webhook handler that corrupted order data and prevented proper display of order fields in OrderDetailCard.
+
+### 🐛 **Root Cause & Technical Fix**
+
+- **Double JSON Encoding**: Webhook handler was calling `JSON.stringify()` before passing data to `updateOrder()`, but `updateOrder()` was already doing `JSON.stringify()` internally
+- **Data Corruption**: This caused `shopify_order_data` to be stored as escaped JSON string instead of proper JSON object
+- **Display Issues**: OrderDetailCard couldn't parse corrupted data, showing order IDs as digits instead of proper names (e.g., "996192" instead of "#WF76764")
+
+### 📊 **Impact & Resolution**
+
+**Before Fix**:
+- Order fields missing in OrderDetailCard  
+- Order names showing as digit IDs instead of "#WF76764" format
+- "Update Orders" returning 0 updates despite having valid delivery date tags
+- `shopifyOrderData` stored as string: `"{\"id\":\"gid://shopify/Order/..."`
+
+**After Fix**:
+- ✅ Order fields properly displayed (customer name, delivery address, notes, etc.)
+- ✅ Order names show correctly as "#WF76764" format  
+- ✅ "Update Orders" properly extracts delivery dates from tags
+- ✅ `shopifyOrderData` stored as proper JSON object
+
+### 🛠️ **Technical Changes**
+
+- **Webhook Handler** (`worker/index.ts:2391`): Removed `JSON.stringify()` call when updating existing orders
+- **Database Service**: `updateOrder()` function already handles JSON serialization correctly
+- **Repair Script**: Created `scripts/fix-corrupted-shopify-data.ts` to identify and fix corrupted existing orders
+
+### 📋 **Affected Orders**
+
+- **Identified**: Orders #WF76760 and #WF76764 have corrupted data
+- **Status**: New orders will be properly formatted; existing corrupted orders need manual repair
+- **Verification**: All other orders (7 out of 9) already have correct JSON object format
+
+--- 
