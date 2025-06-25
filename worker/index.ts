@@ -1142,7 +1142,7 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
       
       const result = await c.env.DB.prepare(`
         INSERT OR REPLACE INTO order_card_states 
-        (tenant_id, delivery_date, order_id, sort_order, updated_at)
+        (tenant_id, delivery_date, card_id, sort_order, updated_at)
         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       `).bind(tenantId, deliveryDate, orderId, sortOrder).run()
 

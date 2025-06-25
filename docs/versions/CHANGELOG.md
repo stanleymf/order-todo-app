@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.21] - 2025-06-25
+
+### 🐛 **Critical Fix - Drag-and-Drop Order Reordering**
+
+**Issue Resolved**: Fixed "API Error 404: Not Found" when dragging and dropping OrderDetailCards to reorder them.
+
+### 🔍 **Root Cause Analysis**
+
+The reordering functionality was failing due to two issues:
+1. **Missing Database Column**: The `sort_order` column was missing from the remote D1 database `order_card_states` table
+2. **Wrong Column Name**: The API was trying to insert into `order_id` instead of the correct `card_id` column
+
+### 🛠️ **Fix Implementation**
+
+**Database Migration Applied**:
+- Applied migration `0019_add_order_card_sort_order.sql` to remote D1 database
+- Added `sort_order INTEGER DEFAULT 0` column to `order_card_states` table
+- Created performance index: `idx_order_card_states_sort`
+- Updated existing records with incremental sort_order values
+
+**API Code Fix**:
+```sql
+-- Before (Incorrect)
+INSERT OR REPLACE INTO order_card_states 
+(tenant_id, delivery_date, order_id, sort_order, updated_at)
+
+-- After (Correct)  
+INSERT OR REPLACE INTO order_card_states 
+(tenant_id, delivery_date, card_id, sort_order, updated_at)
+```
+
+### ✅ **Functionality Restored**
+
+**Drag-and-Drop Behavior**:
+- ✅ Orders can now be reordered by dragging and dropping
+- ✅ Position changes are automatically saved to database
+- ✅ Sort order persists across page reloads
+- ✅ Separate ordering for Main Orders and Add-On Orders
+- ✅ Visual feedback during drag operations
+
+**Performance Optimizations**:
+- Database index ensures fast queries when loading ordered cards
+- Incremental sort_order values (10, 20, 30...) allow easy insertion
+- Atomic database operations ensure data consistency
+
+### 🎯 **User Experience**
+
+**Before Fix**: 
+- Drag-and-drop resulted in "Failed to update order sequence: API Error 404: Not Found"
+- Orders remained in original position
+- No visual feedback of save state
+
+**After Fix**:
+- Smooth drag-and-drop with immediate visual feedback
+- "Order sequence updated" success toast notification  
+- Changes persist immediately and across sessions
+- Reordering works for both Main Orders and Add-On Orders sections
+
+### 🚀 **Live Fix**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Location**: Orders → Any order list → Drag and drop order cards
+**Status**: ✅ **RESOLVED** - Drag-and-drop reordering now works correctly
+
+---
+
 ## [1.5.20] - 2025-06-25
 
 ### 🎯 **Major Feature - "Fetch Not-Saved Products" Button**
