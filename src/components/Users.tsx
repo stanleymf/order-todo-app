@@ -34,6 +34,8 @@ import { useIsMobile } from "./hooks/use-mobile"
 import { getUsers, createUser, updateUser, deleteUser } from "../services/api"
 import type { User as UserType } from "../types"
 import { toast } from "sonner"
+import { formatSingaporeTime, formatSingaporeRelativeTime } from "../lib/utils"
+import { TimezoneIndicator } from "./TimezoneIndicator"
 
 const userRoles = ["admin", "florist"] as const
 type UserRole = (typeof userRoles)[number]
@@ -216,10 +218,15 @@ export const Users: React.FC = () => {
         <CardHeader className={isMobile ? "pb-3" : ""}>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className={isMobile ? "text-lg" : ""}>User Management</CardTitle>
-              <CardDescription className={isMobile ? "text-sm" : ""}>
-                Manage users and their roles within your organization.
-              </CardDescription>
+              <div className="flex justify-between items-start w-full">
+                <div>
+                  <CardTitle className={isMobile ? "text-lg" : ""}>User Management</CardTitle>
+                  <CardDescription className={isMobile ? "text-sm" : ""}>
+                    Manage users and their roles within your organization.
+                  </CardDescription>
+                </div>
+                <TimezoneIndicator showLabel={false} className="text-xs mt-1" />
+              </div>
             </div>
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
@@ -353,7 +360,7 @@ export const Users: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-2 text-xs text-gray-400">
                             <Calendar className="h-3 w-3" />
-                            Joined {new Date(user.createdAt).toLocaleDateString()}
+                            Joined {formatSingaporeTime(user.createdAt)}
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2 ml-4">
@@ -420,7 +427,7 @@ export const Users: React.FC = () => {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {new Date(user.createdAt).toLocaleDateString()}
+                          {formatSingaporeTime(user.createdAt)}
                         </TableCell>
                         <TableCell className="text-right">
                           {user.id !== currentUser?.id ? (

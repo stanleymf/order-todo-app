@@ -24,6 +24,8 @@ import { useMobileView } from "./Dashboard"
 import { useAuth } from "../contexts/AuthContext"
 import { getAnalytics, getFloristStats, getStores } from "../services/api"
 import type { FloristStats, TimeFrame, Store } from "../types"
+import { getSingaporeDateRange, formatSingaporeDate, formatSingaporeTime } from "../lib/utils"
+import { TimezoneIndicator } from "./TimezoneIndicator"
 
 // Generate a consistent color based on store ID
 const generateStoreColor = (storeId: string): string => {
@@ -104,15 +106,16 @@ export function Analytics() {
   }
 
   const getTimeFrameLabel = (frame: TimeFrame): string => {
+    const { endDateSG } = getSingaporeDateRange(1) // Get current Singapore date
     switch (frame) {
       case "daily":
-        return "Today"
+        return `Today (${endDateSG})`
       case "weekly":
-        return "This Week"
+        return `This Week (Singapore time)`
       case "monthly":
-        return "This Month"
+        return `This Month (Singapore time)`
       default:
-        return "This Week"
+        return `This Week (Singapore time)`
     }
   }
 
@@ -169,9 +172,12 @@ export function Analytics() {
       <div
         className={`flex justify-between ${isMobileView ? "flex-col gap-3" : "items-center"}`}
       >
-        <h2 className={`font-bold text-gray-900 ${isMobileView ? "text-lg" : "text-2xl"}`}>
-          {isMobileView ? "Analytics" : "Analytics Dashboard"}
-        </h2>
+        <div className="flex flex-col gap-2">
+          <h2 className={`font-bold text-gray-900 ${isMobileView ? "text-lg" : "text-2xl"}`}>
+            {isMobileView ? "Analytics" : "Analytics Dashboard"}
+          </h2>
+          <TimezoneIndicator showLabel={false} />
+        </div>
         <div className={`flex ${isMobileView ? "flex-col gap-2" : "items-center space-x-4"}`}>
           <StoreSelector
             stores={stores}

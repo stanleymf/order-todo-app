@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { getCurrentSingaporeTime } from '../lib/utils'
 
 // API configuration
 const API_BASE_URL = "https://order-to-do.stanleytan92.workers.dev"
@@ -22,7 +23,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
   const { enabled = true, pollInterval = 5000, onUpdate } = options
   const { tenant } = useAuth()
   const [isConnected, setIsConnected] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState<string>(new Date().toISOString())
+  const [lastUpdate, setLastUpdate] = useState<string>(getCurrentSingaporeTime())
   const [updates, setUpdates] = useState<RealtimeUpdate[]>([])
   const pollIntervalRef = useRef<number | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)

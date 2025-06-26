@@ -778,7 +778,13 @@ export function DashboardView() {
       {/* Last Sync Info */}
       {lastSyncTime && (
         <div className="text-xs text-gray-500 text-center">
-          Last updated: {format(lastSyncTime, "HH:mm:ss")}
+          Last updated: {lastSyncTime.toLocaleTimeString('en-SG', {
+            timeZone: 'Asia/Singapore',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          })} (Singapore time)
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Wifi, WifiOff, RefreshCw, Users, Clock } from 'lucide-react'
 import { useRealtimeUpdates } from '../hooks/use-realtime-updates'
+import { formatSingaporeTime } from '../lib/utils'
 
 export const RealtimeDemo: React.FC = () => {
   const handleUpdate = useCallback((update: any) => {
@@ -17,7 +18,15 @@ export const RealtimeDemo: React.FC = () => {
   })
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString()
+    // Use Singapore timezone for consistent display
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString('en-SG', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
   }
 
   return (
