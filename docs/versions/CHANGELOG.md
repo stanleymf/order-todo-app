@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.29] - 2025-01-13
+
+### 🇸🇬 **Singapore Timezone Support Added**
+
+**Enhancement**: Implemented comprehensive Singapore timezone support for improved user experience while maintaining perfect order processing functionality.
+
+### ✅ **What's Working Perfectly (Unchanged)**
+- **Order Processing**: All order delivery dates, time slots, and scheduling remain perfectly functional
+- **Singapore Orders**: `26/06/2025`, `10:00-14:00`, `14:00-18:00`, `18:00-22:00` time slots work flawlessly
+- **Express Delivery**: `11:30AM - 12:30PM` time extraction working correctly
+- **Store Recognition**: `WindflowerFlorist: 22, HelloFlowers Singapore: 4` orders properly grouped
+
+### 🎯 **Singapore Timezone Improvements**
+
+#### **System Timestamps**
+- ✅ **User Management**: Created/updated timestamps now display in Singapore time
+- ✅ **Analytics Dashboard**: All date ranges and reports use Singapore business hours context
+- ✅ **Real-time Updates**: Live timestamps converted to Singapore timezone for consistency
+
+#### **New Components**
+- **TimezoneIndicator**: Shows current Singapore time with visual indicator
+- **Timezone Utilities**: Comprehensive Singapore timezone conversion functions
+- **Context Notices**: Clear indication when Singapore time is being used
+
+#### **Enhanced User Experience**
+- **Analytics**: Time frame labels now show "(Singapore time)" for clarity
+- **Real-time Demo**: Consistent Singapore time display in all real-time updates
+- **User Timestamps**: Join dates and activity times in local Singapore context
+- **Visual Indicators**: Green Singapore timezone badges throughout the interface
+
+### 🔧 **Technical Implementation**
+
+**New Utility Functions**:
+```javascript
+- formatSingaporeTime() // Convert UTC to Singapore time display
+- formatSingaporeDate() // Singapore date formatting (dd/mm/yyyy)
+- getCurrentSingaporeTime() // Current Singapore time as ISO
+- formatSingaporeRelativeTime() // "2 hours ago" in Singapore context
+- getSingaporeDateRange() // Business hour date ranges
+```
+
+**Components Updated**:
+- ✅ Analytics Dashboard - Singapore timezone indicators
+- ✅ Users Management - Singapore timestamp display  
+- ✅ Real-time Updates - Consistent Singapore time
+- ✅ System Logs - Singapore time for better debugging
+
+### 📊 **Business Impact**
+
+**Before**: System timestamps in UTC/browser timezone caused confusion
+**After**: All system times clearly displayed in Singapore business context
+
+**User Benefits**:
+- 🕐 **Clear Time Context**: Know exactly when actions occurred in Singapore time
+- 📈 **Accurate Analytics**: Business metrics aligned with Singapore business hours
+- 🔄 **Consistent Experience**: All timestamps follow Singapore timezone standards
+- 🎯 **Local Relevance**: Time displays match Singapore business operations
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Status**: ✅ **DEPLOYED** - Singapore timezone support active
+**Order Processing**: ✅ **100% FUNCTIONAL** - No changes to core order logic
+
+---
+
 ## [1.5.28] - 2025-01-13
 
 ### Improved

@@ -1,6 +1,6 @@
 {
   "name": "starter-react",
-  "version": "1.5.28",
+  "version": "1.5.29",
   "description": "A starter template for building React applications with Vite",
   "type": "module",
   "private": true,
