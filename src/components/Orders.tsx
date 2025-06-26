@@ -13,7 +13,6 @@ import {
   Package,
   Download,
   Upload,
-  Trash2,
   CheckCircle,
   BarChart3,
   Gift,
@@ -149,9 +148,7 @@ export const Orders: React.FC = () => {
         const response = await getOrdersFromDbByDate(tenant.id, dateStr)
         console.log("Orders response after sync:", response)
         
-        // FOCUS: Check if Baby's Breath order exists in API response
-        const hasBabysBreath = JSON.stringify(response).includes("Baby's Breath")
-        console.error(`[CACHE-DEBUG] API returned Baby's Breath: ${hasBabysBreath}`)
+        // Debug logs removed - double-encoding fix completed
         
         // CACHE-FIX: Force clear all order state before setting new data
         setAllOrders([])
@@ -200,9 +197,7 @@ export const Orders: React.FC = () => {
       const response = await getOrdersFromDbByDate(tenant.id, dateStr)
       console.log("Orders response:", response)
       
-              // FOCUS: Check if Baby's Breath order exists in API response
-        const hasBabysBreath = JSON.stringify(response).includes("Baby's Breath")
-        console.error(`[CACHE-DEBUG] API returned Baby's Breath: ${hasBabysBreath}`)
+      // Debug logs removed - double-encoding fix completed
         
         // CACHE-FIX: Force clear all order state before setting new data
         setAllOrders([])
@@ -215,14 +210,7 @@ export const Orders: React.FC = () => {
         // Old format - treat all as main orders
         console.log("Setting orders (old format):", response.length)
         // DEBUG: Check shopifyOrderData in first order
-        if (response.length > 0) {
-          console.error('[ORDERS-DEBUG] First order from API (old format):', {
-            cardId: response[0].cardId,
-            hasShopifyOrderData: !!response[0].shopifyOrderData,
-            shopifyOrderDataKeys: response[0].shopifyOrderData ? Object.keys(response[0].shopifyOrderData) : 'none',
-            shopifyOrderName: response[0].shopifyOrderData?.name
-          })
-        }
+        // Debug logs removed - double-encoding fix completed
         setAllOrders(response)
         setMainOrders(response)
         setAddOnOrders([])
@@ -236,15 +224,7 @@ export const Orders: React.FC = () => {
           storeContainers: response.storeContainers?.length || 0
         })
         // DEBUG: Check shopifyOrderData in first order
-        if (response.orders && response.orders.length > 0) {
-          console.error('[ORDERS-DEBUG] First order from API (new format):', {
-            cardId: response.orders[0].cardId,
-            hasShopifyOrderData: !!response.orders[0].shopifyOrderData,
-            shopifyOrderDataKeys: response.orders[0].shopifyOrderData ? Object.keys(response.orders[0].shopifyOrderData) : 'none',
-            shopifyOrderName: response.orders[0].shopifyOrderData?.name,
-            fullOrder: response.orders[0]
-          })
-        }
+        // Debug logs removed - double-encoding fix completed
         setAllOrders(response.orders || [])
         setMainOrders(response.mainOrders || [])
         setAddOnOrders(response.addOnOrders || [])
@@ -315,6 +295,8 @@ export const Orders: React.FC = () => {
     setCollapsedContainers(expanded)
   }
 
+
+
   const handleUpdateOrders = async () => {
     if (!tenant?.id || !stores.length) {
       toast.error("No stores configured")
@@ -353,17 +335,9 @@ export const Orders: React.FC = () => {
     }
   }
 
-  const handleDeleteOrders = () => {
-    if (window.confirm("Are you sure you want to delete selected orders?")) {
-      console.log("Deleting orders...")
-      toast.info("Delete functionality coming soon")
-    }
-  }
 
-  const handleExportOrders = () => {
-    console.log("Exporting orders...")
-    toast.info("Export functionality coming soon")
-  }
+
+
 
   // Filter orders based on search term and store
   const filterOrders = (orders: any[]) => {
@@ -974,7 +948,7 @@ export const Orders: React.FC = () => {
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                Fetch Orders from Shopify
+                Fetch Orders (Date)
               </Button>
               
               <Button 
@@ -1005,15 +979,7 @@ export const Orders: React.FC = () => {
                 Update Orders for {selectedDate}
               </Button>
               
-              <Button variant="outline" onClick={handleExportOrders} className="gap-2">
-                <Download className="h-4 w-4" />
-                Export Data
-              </Button>
-              
-              <Button variant="destructive" onClick={handleDeleteOrders} className="gap-2">
-                <Trash2 className="h-4 w-4" />
-                Delete Selected
-              </Button>
+
             </div>
           </div>
         </CardContent>
@@ -1042,10 +1008,12 @@ export const Orders: React.FC = () => {
                 }
               </p>
               {allOrders.length === 0 && (
+                              <div className="flex gap-2">
                 <Button onClick={handleFetchOrders} disabled={loading || !stores.length}>
                   <Download className="h-4 w-4 mr-2" />
-                  Fetch Orders from Shopify
+                  Fetch Orders (Date)
                 </Button>
+              </div>
               )}
             </div>
           </CardContent>
@@ -1190,17 +1158,7 @@ export const Orders: React.FC = () => {
                       >
                         <div className="space-y-3">
                           {container.orders.map((order: any) => {
-                            // CRITICAL: Debug what data each container order has
-                            if (order.title?.includes("Baby's Breath")) {
-                              console.error('[CONTAINER-DEBUG] Baby\'s Breath order in container:', {
-                                containerKey: container.containerKey,
-                                orderShopifyId: order.shopifyOrderId,
-                                orderTitle: order.title,
-                                hasShopifyOrderData: !!order.shopifyOrderData,
-                                shopifyOrderDataName: order.shopifyOrderData?.name,
-                                entireOrder: order
-                              });
-                            }
+                            // Debug logs removed - double-encoding fix completed
                             
                             return isReorderingEnabled ? (
                               <SortableOrderCard

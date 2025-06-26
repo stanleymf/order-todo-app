@@ -15,7 +15,8 @@
     "lint:rest": "biome lint --write",
     "migrate:to-multi-tenant": "tsx scripts/migrate-to-multi-tenant.ts",
     "test:migration": "tsx scripts/test-migration.ts",
-    "sync-saved-products": "tsx scripts/run-sync.ts"
+    "sync-saved-products": "tsx scripts/run-sync.ts",
+    "sync-10k-orders": "tsx scripts/sync-10k-orders-to-d1.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

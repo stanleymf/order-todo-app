@@ -1085,17 +1085,7 @@ export async function syncOrdersByDate(
   );
 }
 
-export async function syncAllOrders(
-  tenantId: string,
-  storeId: string
-): Promise<any> {
-  return authenticatedRequest<any>(
-    `/api/tenants/${tenantId}/stores/${storeId}/orders/sync-all`,
-    {
-      method: "POST",
-    }
-  );
-}
+
 
 export async function updateExistingOrders(
   tenantId: string,

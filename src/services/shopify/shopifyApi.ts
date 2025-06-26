@@ -255,38 +255,129 @@ export class ShopifyApiService {
     }
   }
 
-  // Fetch all orders from Shopify
-  async getOrders(filters?: { name?: string; status?: string }): Promise<any[]> {
+  // Fetch all orders from Shopify with pagination support
+  async getOrders(filters?: { name?: string; status?: string; limit?: number; maxTotal?: number; dateRange?: { start: string; end: string } }): Promise<any[]> {
     try {
-      const params = new URLSearchParams()
+      const allOrders: any[] = []
+      let pageInfo: string | undefined = undefined
+      const limit = filters?.limit || 250 // Use maximum limit for efficiency
+      const maxTotal = filters?.maxTotal || Infinity // Maximum total orders to fetch
       
-      // Add status filter if provided
-      if (filters?.status) {
-        params.append("status", filters.status)
-      } else {
-        params.append("status", "any") // Default to all orders
-      }
+      console.log(`[SHOPIFY-ORDERS] Starting paginated fetch with limit: ${limit}, maxTotal: ${maxTotal === Infinity ? 'unlimited' : maxTotal}`)
       
-      // Add name filter if provided (for order lookup)
-      if (filters?.name) {
-        params.append("name", filters.name)
-      }
-      
-      const url = `${this.getBaseUrl()}/orders.json?${params.toString()}`
-      const response = await fetch(url, {
-        method: "GET",
-        headers: this.getHeaders(),
-      })
+      do {
+        const params = new URLSearchParams()
+        
+        // Add pagination parameters
+        params.append("limit", limit.toString())
+        if (pageInfo) {
+          // CRITICAL FIX: When using page_info, we cannot include status or name filters
+          params.append("page_info", pageInfo)
+        } else {
+          // Only add filters on the first page (when no page_info)
+          if (filters?.status) {
+            params.append("status", filters.status)
+          }
+          // Remove default "status=any" to avoid pagination conflicts
+          
+          // Add name filter if provided (for order lookup)
+          if (filters?.name) {
+            params.append("name", filters.name)
+          }
+          
+          // Add date range filtering if provided
+          if (filters?.dateRange) {
+            params.append("created_at_min", filters.dateRange.start)
+            params.append("created_at_max", filters.dateRange.end)
+            console.log(`[SHOPIFY-ORDERS] Filtering by date range: ${filters.dateRange.start} to ${filters.dateRange.end}`)
+          }
+          
+          // CRITICAL: Sort by created_at descending to get latest orders first
+          params.append("order", "created_at desc")
+        }
+        
+        const url = `${this.getBaseUrl()}/orders.json?${params.toString()}`
+        console.log(`[SHOPIFY-ORDERS] Fetching page: ${url}`)
+        
+        const response = await fetch(url, {
+          method: "GET",
+          headers: this.getHeaders(),
+        })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(
-          `Shopify API error: ${response.status} ${response.statusText} - ${errorText}`
-        )
-      }
+        // Handle rate limiting with retry logic
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After") || "1"
+          const waitTime = parseInt(retryAfter) * 1000
+          console.log(`[SHOPIFY-ORDERS] Rate limited. Waiting ${waitTime}ms before retry...`)
+          await new Promise(resolve => setTimeout(resolve, waitTime))
+          continue // Retry the same request
+        }
 
-      const data = await response.json()
-      return data.orders
+        if (!response.ok) {
+          const errorText = await response.text()
+          throw new Error(
+            `Shopify API error: ${response.status} ${response.statusText} - ${errorText}`
+          )
+        }
+
+        const data = await response.json()
+        const orders = data.orders || []
+        
+        // Check if adding all orders would exceed maxTotal
+        if (allOrders.length + orders.length > maxTotal) {
+          const remainingSlots = maxTotal - allOrders.length
+          allOrders.push(...orders.slice(0, remainingSlots))
+          console.log(`[SHOPIFY-ORDERS] Page fetched: ${remainingSlots} orders (limited), Final total: ${allOrders.length}`)
+          break // Stop fetching as we've reached the limit
+        } else {
+          allOrders.push(...orders)
+          console.log(`[SHOPIFY-ORDERS] Page fetched: ${orders.length} orders, Total so far: ${allOrders.length}`)
+        }
+        
+        // Check for next page using Link header
+        const linkHeader = response.headers.get("Link")
+        pageInfo = undefined
+        
+        if (linkHeader) {
+          // Parse Link header to find next page
+          const links = linkHeader.split(",").map((link) => {
+            const [url, rel] = link.split(";").map((s) => s.trim())
+            const relMatch = rel.match(/rel="([^"]+)"/)
+            return {
+              url: url.replace(/[<>]/g, ""),
+              rel: relMatch ? relMatch[1] : "",
+            }
+          })
+
+          const nextLink = links.find((link) => link.rel === "next")
+          if (nextLink) {
+            // Extract page_info from next URL
+            const nextUrl = new URL(nextLink.url)
+            const pageInfoParam = nextUrl.searchParams.get("page_info")
+            if (pageInfoParam) {
+              pageInfo = pageInfoParam
+              console.log(`[SHOPIFY-ORDERS] Found next page_info:`, pageInfo.substring(0, 20) + "...")
+            }
+          }
+        }
+        
+                 // Break if we got less than the limit (last page) or no more page_info
+         if (orders.length < limit || !pageInfo) {
+           console.log(`[SHOPIFY-ORDERS] Reached last page. Final count: ${allOrders.length} orders`)
+           break
+         }
+         
+         // Add small delay between requests to be respectful of API limits
+         if (pageInfo) {
+           console.log(`[SHOPIFY-ORDERS] Waiting 500ms before next page...`)
+           await new Promise(resolve => setTimeout(resolve, 500))
+         }
+         
+       } while (pageInfo)
+      
+      console.log(`[SHOPIFY-ORDERS] Pagination complete. Total orders fetched: ${allOrders.length}`)
+      return allOrders
+      
     } catch (error) {
       console.error("Error fetching Shopify orders:", error)
       throw error
