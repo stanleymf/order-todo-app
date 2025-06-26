@@ -479,7 +479,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           })()
         })
         
-        // Extract express time slot from the express item's variant title if it exists
+        // Extract express time slot from the express item's variant title OR item title
         let expressTimeSlot = null
         if (hasExpressItem) {
           const expressItem = lineItems.find((item: any) => 
@@ -496,18 +496,39 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             fullItem: expressItem
           })
           
-          if (expressItem && (expressItem.variant_title || expressItem.variant?.title)) {
-            // Get variant title from either REST or GraphQL format
+          if (expressItem) {
+            // Time pattern regex for formats like "10:00 - 12:00", "10:00-12:00", "10:30AM - 11:30AM", "14:30PM - 15:30PM"
+            const timeRegex = /(\d{1,2}:\d{2}(?:AM|PM)?\s*-\s*\d{1,2}:\d{2}(?:AM|PM)?)/i
+            
+            // First, try to extract from variant title (original method)
             const variantTitle = expressItem.variant_title || expressItem.variant?.title
+            let timeMatch = null
+            let sourceLocation = 'none'
             
-            // Extract time pattern like "10:00 - 12:00", "10:00-12:00", "10:30AM - 11:30AM", or "15:30PM - 16:30PM"
-            const timeMatch = variantTitle.match(/(\d{1,2}:\d{2}(?:AM|PM)?\s*-\s*\d{1,2}:\d{2}(?:AM|PM)?)/i)
-            expressTimeSlot = timeMatch ? timeMatch[1] : null
+            if (variantTitle) {
+              timeMatch = variantTitle.match(timeRegex)
+              if (timeMatch) {
+                sourceLocation = 'variant_title'
+                expressTimeSlot = timeMatch[1]
+              }
+            }
             
-            console.log('[EXPRESS-DEBUG] Time extraction:', {
+            // If no time found in variant title, try the item title/name (NEW FEATURE)
+            if (!expressTimeSlot) {
+              const itemTitle = expressItem.title || expressItem.name || ''
+              timeMatch = itemTitle.match(timeRegex)
+              if (timeMatch) {
+                sourceLocation = 'item_title'
+                expressTimeSlot = timeMatch[1]
+              }
+            }
+            
+            console.log('[EXPRESS-DEBUG] Enhanced time extraction:', {
               variant_title: expressItem.variant_title,
               variant_title_graphql: expressItem.variant?.title,
-              used_title: variantTitle,
+              item_title: expressItem.title,
+              item_name: expressItem.name,
+              source_location: sourceLocation,
               regex_match: timeMatch,
               extracted_time: expressTimeSlot
             })
