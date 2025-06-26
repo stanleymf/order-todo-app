@@ -170,6 +170,14 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
   // Mouse events
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Don't start swipe gesture if clicking on textarea or other interactive elements
+    if ((e.target as HTMLElement).closest('.notes-textarea') || 
+        (e.target as HTMLElement).closest('.status-buttons') ||
+        (e.target as HTMLElement).closest('.eye-icon') ||
+        (e.target as HTMLElement).closest('textarea') ||
+        (e.target as HTMLElement).closest('button')) {
+      return
+    }
     e.preventDefault()
     handleStart(e.clientX, e.clientY)
   }
@@ -184,6 +192,14 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
   // Touch events
   const handleTouchStart = (e: React.TouchEvent) => {
+    // Don't start swipe gesture if touching textarea or other interactive elements
+    if ((e.target as HTMLElement).closest('.notes-textarea') || 
+        (e.target as HTMLElement).closest('.status-buttons') ||
+        (e.target as HTMLElement).closest('.eye-icon') ||
+        (e.target as HTMLElement).closest('textarea') ||
+        (e.target as HTMLElement).closest('button')) {
+      return
+    }
     const touch = e.touches[0]
     handleStart(touch.clientX, touch.clientY)
   }
@@ -711,16 +727,25 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
             )}
 
             {/* Editable Notes Section - Only visible when expanded */}
-            <div className="mt-4 border-t pt-4 notes-textarea">
+            <div className="mt-4 border-t pt-4 notes-textarea" style={{ userSelect: 'text' }}>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">
+                Admin Notes:
+              </label>
               <Textarea
                 placeholder="Add admin notes or special instructions..."
                 value={notes}
                 onChange={(e) => handleNotesChange(e.target.value)}
-                className="min-h-[60px] sm:min-h-[80px] resize-none border-0 bg-transparent p-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-xs sm:text-sm"
+                className="min-h-[60px] sm:min-h-[80px] resize-none border border-gray-200 rounded-md bg-white p-3 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-0 text-xs sm:text-sm hover:border-gray-300 transition-colors"
                 onClick={(e) => e.stopPropagation()}
                 onFocus={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
                 disabled={isSaving}
+                style={{ userSelect: 'text' }}
               />
+              {isSaving && (
+                <p className="text-xs text-gray-500 mt-1">Saving...</p>
+              )}
             </div>
           </div>
         )}
