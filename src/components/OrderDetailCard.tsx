@@ -83,6 +83,9 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   const [startPosition, setStartPosition] = useState({ x: 0, y: 0 })
   const cardRef = useRef<HTMLDivElement>(null)
   const swipeThreshold = 150 // pixels to trigger delete action
+  
+  // Textarea ref for auto-resizing
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const { user, tenant } = useAuth()
 
@@ -134,6 +137,15 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     setStatus(order.status || 'unassigned')
     setNotes(order.notes || "")
   }, [order.status, order.notes])
+
+  // Auto-resize textarea when content changes or component expands
+  useEffect(() => {
+    if (textareaRef.current && expanded) {
+      const textarea = textareaRef.current
+      textarea.style.height = 'auto'
+      textarea.style.height = `${Math.max(60, textarea.scrollHeight)}px`
+    }
+  }, [notes, expanded])
 
   // Touch/Mouse gesture handlers
   const handleStart = (clientX: number, clientY: number) => {
@@ -736,7 +748,8 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
                   Shift+Enter for new line
                 </span>
               </div>
-              <Textarea
+                              <Textarea
+                ref={textareaRef}
                 placeholder="Add admin notes or special instructions..."
                 value={notes}
                 onChange={(e) => handleNotesChange(e.target.value)}
@@ -749,13 +762,24 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
                   // Prevent other key events from bubbling up
                   e.stopPropagation()
                 }}
-                className="min-h-[60px] sm:min-h-[80px] resize-none border border-gray-200 rounded-md bg-white p-3 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-0 text-xs sm:text-sm hover:border-gray-300 transition-colors whitespace-pre-wrap"
+                className="min-h-[60px] sm:min-h-[80px] max-h-none resize-none border border-gray-200 rounded-md bg-white p-3 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-0 text-xs sm:text-sm hover:border-gray-300 transition-colors whitespace-pre-wrap overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
                 onFocus={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onTouchStart={(e) => e.stopPropagation()}
                 disabled={isSaving}
-                style={{ userSelect: 'text' }}
+                style={{ 
+                  userSelect: 'text',
+                  height: 'auto',
+                  minHeight: '60px'
+                }}
+                rows={1}
+                onInput={(e) => {
+                  // Auto-resize textarea based on content
+                  const target = e.target as HTMLTextAreaElement
+                  target.style.height = 'auto'
+                  target.style.height = `${Math.max(60, target.scrollHeight)}px`
+                }}
               />
               {isSaving && (
                 <p className="text-xs text-gray-500 mt-1">Saving...</p>
