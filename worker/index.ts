@@ -1459,24 +1459,47 @@ app.get("/api/tenants/:tenantId/orders/unscheduled", async (c) => {
   try {
     console.log(`[UNSCHEDULED-ORDERS] Fetching unscheduled orders for tenant: ${tenantId}`)
     
-    // Get orders without delivery date or with null/empty delivery date and without timeslot tags
-    const { results: orders } = await c.env.DB.prepare(`
-      SELECT 
-        o.*,
-        s.name as store_name,
-        s.shopify_domain
-      FROM tenant_orders o
-      LEFT JOIN shopify_stores s ON o.store_id = s.id
-      WHERE o.tenant_id = ? 
-      AND (
-        o.delivery_date IS NULL 
-        OR o.delivery_date = '' 
-        OR o.delivery_date = 'undefined'
-        OR o.delivery_date = 'null'
-      )
-      ORDER BY o.created_at DESC
-      LIMIT 1000
-    `).bind(tenantId).all()
+    // First try to get orders without proper delivery dates
+    let orders: any[] = []
+    try {
+      const result = await c.env.DB.prepare(`
+        SELECT 
+          o.*,
+          s.name as store_name,
+          s.shopify_domain
+        FROM tenant_orders o
+        LEFT JOIN shopify_stores s ON o.store_id = s.id
+        WHERE o.tenant_id = ? 
+        AND (
+          o.delivery_date IS NULL 
+          OR o.delivery_date = '' 
+          OR o.delivery_date = 'undefined'
+          OR o.delivery_date = 'null'
+          OR o.delivery_date = 'No delivery date found'
+        )
+        ORDER BY o.created_at DESC
+        LIMIT 1000
+      `).bind(tenantId).all()
+      orders = result.results as any[] || []
+    } catch (sqlError) {
+      console.error(`[UNSCHEDULED-ORDERS] SQL error:`, sqlError)
+      // Fallback to simpler query without JOIN if shopify_stores doesn't exist
+      const result = await c.env.DB.prepare(`
+        SELECT o.*
+        FROM tenant_orders o
+        WHERE o.tenant_id = ? 
+        AND (
+          o.delivery_date IS NULL 
+          OR o.delivery_date = '' 
+          OR o.delivery_date = 'undefined'
+          OR o.delivery_date = 'null'
+          OR o.delivery_date = 'No delivery date found'
+        )
+        ORDER BY o.created_at DESC
+        LIMIT 1000
+      `).bind(tenantId).all()
+      orders = result.results as any[] || []
+    }
     
     console.log(`[UNSCHEDULED-ORDERS] Found ${orders?.length || 0} unscheduled orders`)
     
