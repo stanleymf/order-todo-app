@@ -728,14 +728,28 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
             {/* Editable Notes Section - Only visible when expanded */}
             <div className="mt-4 border-t pt-4 notes-textarea" style={{ userSelect: 'text' }}>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Admin Notes:
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Admin Notes:
+                </label>
+                <span className="text-xs text-gray-500">
+                  Shift+Enter for new line
+                </span>
+              </div>
               <Textarea
                 placeholder="Add admin notes or special instructions..."
                 value={notes}
                 onChange={(e) => handleNotesChange(e.target.value)}
-                className="min-h-[60px] sm:min-h-[80px] resize-none border border-gray-200 rounded-md bg-white p-3 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-0 text-xs sm:text-sm hover:border-gray-300 transition-colors"
+                onKeyDown={(e) => {
+                  // Allow Shift+Enter for new lines
+                  if (e.key === 'Enter' && e.shiftKey) {
+                    // Let the default behavior handle the new line
+                    return
+                  }
+                  // Prevent other key events from bubbling up
+                  e.stopPropagation()
+                }}
+                className="min-h-[60px] sm:min-h-[80px] resize-none border border-gray-200 rounded-md bg-white p-3 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-0 text-xs sm:text-sm hover:border-gray-300 transition-colors whitespace-pre-wrap"
                 onClick={(e) => e.stopPropagation()}
                 onFocus={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
