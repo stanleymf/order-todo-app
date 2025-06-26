@@ -1124,3 +1124,11 @@ export async function clearAllOrders(
     }
   );
 }
+
+export async function getUnscheduledOrders(
+  tenantId: string
+): Promise<any[]> {
+  return authenticatedRequest<any[]>(
+    `/api/tenants/${tenantId}/orders/unscheduled`
+  );
+}

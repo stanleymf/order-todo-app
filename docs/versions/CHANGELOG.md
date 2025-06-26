@@ -2,6 +2,113 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.38] - 2025-01-26
+
+### 🌟 **New Features - Unscheduled Orders Container**
+
+**Major Enhancement**: Added dedicated "Unscheduled - All" container for comprehensive management of orders without delivery dates or timeslot tags.
+
+### ✨ **Unscheduled Orders Management**
+
+**Complete Unscheduled Workflow**: New container provides visibility and searchability for orders missing delivery scheduling information.
+
+#### **🎯 Container Features**
+- **Strategic Positioning**: Located below Add-Ons container (or below stores if no Add-Ons exist)
+- **Default Collapsed**: Starts collapsed to maintain clean UI while remaining accessible
+- **Built-in Search**: Dedicated search bar for finding orders by Shopify order names (#WF12345)
+- **Always Visible**: Appears regardless of date filters or store selections
+- **Proper Order Names**: Uses GraphQL data for proper order name display instead of numeric IDs
+
+#### **🔧 Backend Implementation**
+- **New API Endpoint**: `/api/tenants/:tenantId/orders/unscheduled`
+- **Smart Filtering**: Finds orders with NULL, empty, 'undefined', or 'null' delivery dates
+- **GraphQL Integration**: Includes shopifyOrderData with double-encoding bug fix
+- **Performance Optimized**: Limited to 1000 orders with efficient query structure
+
+#### **🎨 UI/UX Design**
+- **Red Theme**: AlertTriangle icon with red color scheme for easy identification
+- **Dedicated Search**: Independent search functionality within the container
+- **Real-time Filtering**: Instant search results as you type
+- **Load Button**: Manual loading with count display in Quick Actions
+- **State Management**: Proper loading states and error handling
+
+#### **🔍 Enhanced Search Capabilities**
+**Search Criteria**:
+- **Shopify Order Names**: Primary search by order names like `#WF76814`
+- **Customer Names**: Find orders by customer information  
+- **Product Titles**: Search within product and variant titles
+- **Order IDs**: Search by internal order identifiers
+- **GraphQL Data**: Utilizes complete Shopify order data for accurate results
+
+#### **📊 Technical Implementation**
+
+**Frontend State Management**:
+```typescript
+const [unscheduledOrders, setUnscheduledOrders] = useState<any[]>([])
+const [unscheduledSearchTerm, setUnscheduledSearchTerm] = useState<string>("")
+const [loadingUnscheduled, setLoadingUnscheduled] = useState(false)
+```
+
+**Backend SQL Query**:
+```sql
+SELECT o.*, s.name as store_name, s.shopify_domain
+FROM tenant_orders o
+LEFT JOIN shopify_stores s ON o.store_id = s.id
+WHERE o.tenant_id = ? 
+AND (
+  o.delivery_date IS NULL 
+  OR o.delivery_date = '' 
+  OR o.delivery_date = 'undefined'
+  OR o.delivery_date = 'null'
+)
+ORDER BY o.created_at DESC
+LIMIT 1000
+```
+
+**Auto-loading Integration**:
+```typescript
+useEffect(() => {
+  if (tenant?.id) {
+    handleLoadUnscheduledOrders()
+  }
+}, [handleLoadUnscheduledOrders, tenant?.id])
+```
+
+#### **🔄 Integration Features**
+- **Container Controls**: Updated expand/collapse all to include unscheduled container
+- **Order Management**: Status changes and deletions properly update unscheduled orders
+- **State Synchronization**: Maintains consistency across all order containers
+- **Error Handling**: Graceful degradation and user feedback
+
+#### **🚀 Performance & Usability**
+- **Efficient Loading**: Loads automatically on component mount
+- **Smart Defaults**: Collapsed by default to avoid UI clutter
+- **Independent Filtering**: Search doesn't interfere with date-based containers
+- **Memory Efficient**: Proper cleanup and state management
+
+### 🎯 **Impact & Use Cases**
+
+#### **Operational Benefits**
+- **Complete Visibility**: See all orders that need delivery scheduling
+- **Quick Location**: Find specific unscheduled orders instantly by order name
+- **Workflow Management**: Identify orders requiring delivery date assignment
+- **Data Integrity**: Proper GraphQL order names prevent confusion
+
+#### **User Experience**
+- **Intuitive Design**: Clear visual distinction with red theme and warning icon
+- **Efficient Search**: Find orders quickly without scrolling through date-filtered lists
+- **Clean Organization**: Separates unscheduled orders from scheduled containers
+- **Responsive UI**: Works seamlessly on desktop and mobile
+
+### 🚀 **Deployment Status**
+
+**Version ID**: d542a522-f2aa-44d8-96cf-6d28bfb1eb2a  
+**Bundle Size**: 783.75 kB (223.57 kB gzipped)  
+**Build Status**: ✅ 1430 modules transformed successfully  
+**Deployment**: ✅ Live at https://order-to-do.stanleytan92.workers.dev
+
+---
+
 ## [1.5.37] - 2025-06-26
 
 ### 🚀 **Enhanced Backend Sync with GraphQL Data Enrichment**

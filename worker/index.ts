@@ -1451,6 +1451,90 @@ app.get("/api/tenants/:tenantId/orders", async (c) => {
   const orders = await d1DatabaseService.getOrders(c.env, tenantId)
   return c.json(orders)
 })
+
+// --- Unscheduled Orders ---
+app.get("/api/tenants/:tenantId/orders/unscheduled", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  
+  try {
+    console.log(`[UNSCHEDULED-ORDERS] Fetching unscheduled orders for tenant: ${tenantId}`)
+    
+    // Get orders without delivery date or with null/empty delivery date and without timeslot tags
+    const { results: orders } = await c.env.DB.prepare(`
+      SELECT 
+        o.*,
+        s.name as store_name,
+        s.shopify_domain
+      FROM tenant_orders o
+      LEFT JOIN shopify_stores s ON o.store_id = s.id
+      WHERE o.tenant_id = ? 
+      AND (
+        o.delivery_date IS NULL 
+        OR o.delivery_date = '' 
+        OR o.delivery_date = 'undefined'
+        OR o.delivery_date = 'null'
+      )
+      ORDER BY o.created_at DESC
+      LIMIT 1000
+    `).bind(tenantId).all()
+    
+    console.log(`[UNSCHEDULED-ORDERS] Found ${orders?.length || 0} unscheduled orders`)
+    
+    if (!orders || orders.length === 0) {
+      return c.json([])
+    }
+    
+    // Transform to match frontend expectations
+    const processedOrders = orders.map((order: any) => {
+      let shopifyOrderData = null
+      if (order.shopify_order_data) {
+        try {
+          shopifyOrderData = JSON.parse(order.shopify_order_data)
+          // Handle double-encoded JSON bug fix
+          if (typeof shopifyOrderData === 'string') {
+            shopifyOrderData = JSON.parse(shopifyOrderData)
+          }
+        } catch (e) {
+          console.warn(`[UNSCHEDULED-ORDERS] Failed to parse shopifyOrderData for order ${order.id}:`, e)
+        }
+      }
+      
+      return {
+        id: order.id,
+        cardId: order.id,
+        orderId: order.id,
+        shopifyOrderId: order.shopify_order_id,
+        customerName: order.customer_name,
+        deliveryDate: order.delivery_date,
+        status: order.status,
+        priority: order.priority,
+        assignedTo: order.assigned_to,
+        notes: order.notes,
+        productLabel: order.product_label,
+        productType: order.product_type,
+        totalPrice: order.total_price,
+        currency: order.currency,
+        customerEmail: order.customer_email,
+        storeId: order.store_id,
+        storeName: order.store_name,
+        sessionId: order.session_id,
+        title: shopifyOrderData?.lineItems?.edges?.[0]?.node?.title || order.product_titles || 'Unknown Product',
+        variantTitle: shopifyOrderData?.lineItems?.edges?.[0]?.node?.variant?.title || '',
+        quantity: 1,
+        shopifyOrderData: shopifyOrderData,
+        createdAt: order.created_at,
+        updatedAt: order.updated_at
+      }
+    })
+    
+    console.log(`[UNSCHEDULED-ORDERS] Processed ${processedOrders.length} orders successfully`)
+    
+    return c.json(processedOrders)
+  } catch (error: any) {
+    console.error("[UNSCHEDULED-ORDERS] Error fetching unscheduled orders:", error)
+    return c.json({ error: "Failed to fetch unscheduled orders", details: error.message }, 500)
+  }
+})
 app.post("/api/tenants/:tenantId/orders", async (c) => {
   const tenantId = c.req.param("tenantId")
   const orderData = await c.req.json()

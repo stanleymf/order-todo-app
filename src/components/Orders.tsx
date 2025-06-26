@@ -30,7 +30,7 @@ import {
   Calendar
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
-import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate } from "../services/api"
+import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate, getUnscheduledOrders } from "../services/api"
 import { OrderDetailCard } from "./OrderDetailCard"
 import { SortableOrderCard } from "./SortableOrderCard"
 import {
@@ -72,8 +72,15 @@ export const Orders: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [isStatsOpen, setIsStatsOpen] = useState(false)
   
+  // Unscheduled orders state
+  const [unscheduledOrders, setUnscheduledOrders] = useState<any[]>([])
+  const [unscheduledSearchTerm, setUnscheduledSearchTerm] = useState<string>("")
+  const [loadingUnscheduled, setLoadingUnscheduled] = useState(false)
+  
   // Collapsible state management
-  const [collapsedContainers, setCollapsedContainers] = useState<Record<string, boolean>>({})
+  const [collapsedContainers, setCollapsedContainers] = useState<Record<string, boolean>>({
+    'unscheduled-all': true // Default collapsed state for unscheduled container
+  })
   
   // Filter state management
   const [activeFilters, setActiveFilters] = useState<{
@@ -279,7 +286,8 @@ export const Orders: React.FC = () => {
     const allKeys = [
       ...filteredStoreContainers.map(c => c.containerKey || c.storeName),
       'main-orders',
-      'add-ons'
+      'add-ons',
+      'unscheduled-all'
     ]
     const collapsed = allKeys.reduce((acc, key) => ({ ...acc, [key]: true }), {})
     setCollapsedContainers(collapsed)
@@ -289,13 +297,38 @@ export const Orders: React.FC = () => {
     const allKeys = [
       ...filteredStoreContainers.map(c => c.containerKey || c.storeName),
       'main-orders',
-      'add-ons'
+      'add-ons',
+      'unscheduled-all'
     ]
     const expanded = allKeys.reduce((acc, key) => ({ ...acc, [key]: false }), {})
     setCollapsedContainers(expanded)
   }
 
+  // Function to load unscheduled orders
+  const handleLoadUnscheduledOrders = useCallback(async () => {
+    if (!tenant?.id) return
 
+    setLoadingUnscheduled(true)
+    try {
+      console.log("Loading unscheduled orders...")
+      const unscheduledData = await getUnscheduledOrders(tenant.id)
+      console.log("Unscheduled orders loaded:", unscheduledData)
+      setUnscheduledOrders(unscheduledData || [])
+      toast.success(`Loaded ${unscheduledData?.length || 0} unscheduled orders`)
+    } catch (error) {
+      console.error("Failed to load unscheduled orders:", error)
+      toast.error("Failed to load unscheduled orders")
+    } finally {
+      setLoadingUnscheduled(false)
+    }
+  }, [tenant?.id])
+
+  // Auto-load unscheduled orders when tenant changes
+  useEffect(() => {
+    if (tenant?.id) {
+      handleLoadUnscheduledOrders()
+    }
+  }, [handleLoadUnscheduledOrders, tenant?.id])
 
   const handleUpdateOrders = async () => {
     if (!tenant?.id || !stores.length) {
@@ -447,6 +480,40 @@ export const Orders: React.FC = () => {
     orders: filterOrders(container.orders)
   })).filter(container => container.orders.length > 0)
 
+  // Filter unscheduled orders by search term only (ignore date/store filters)
+  const filteredUnscheduledOrders = unscheduledOrders.filter(order => {
+    if (!unscheduledSearchTerm) return true
+    
+    const searchLower = unscheduledSearchTerm.toLowerCase()
+    
+    // Search by Shopify order name (like #WF123456)
+    let orderNameMatch = false
+    if (order.shopifyOrderData?.name) {
+      orderNameMatch = order.shopifyOrderData.name.toLowerCase().includes(searchLower)
+    }
+    // Also check shopifyOrderId for order numbers
+    if (order.shopifyOrderId) {
+      const orderNumber = `#WF${String(order.shopifyOrderId).slice(-6)}`
+      orderNameMatch = orderNameMatch || orderNumber.toLowerCase().includes(searchLower)
+      orderNameMatch = orderNameMatch || String(order.shopifyOrderId).toLowerCase().includes(searchLower)
+    }
+    
+    // Basic order fields
+    const customerNameMatch = order.customerName?.toLowerCase().includes(searchLower)
+    const orderIdMatch = order.id?.toLowerCase().includes(searchLower)
+    const titleMatch = order.title?.toLowerCase().includes(searchLower)
+    
+    // Product titles from line items
+    let productTitleMatch = false
+    if (order.shopifyOrderData?.lineItems?.edges) {
+      productTitleMatch = order.shopifyOrderData.lineItems.edges.some((edge: any) => 
+        edge.node?.title?.toLowerCase().includes(searchLower)
+      )
+    }
+    
+    return orderNameMatch || customerNameMatch || orderIdMatch || titleMatch || productTitleMatch
+  })
+
   const getComprehensiveStats = () => {
     // Use unfiltered data for stats (show total counts, not filtered counts)
     const allOrdersForStats = allOrders
@@ -516,6 +583,7 @@ export const Orders: React.FC = () => {
     setAllOrders(prev => updateOrderStatus(prev))
     setMainOrders(prev => updateOrderStatus(prev))
     setAddOnOrders(prev => updateOrderStatus(prev))
+    setUnscheduledOrders(prev => updateOrderStatus(prev))
     
     // Also update store containers
     setStoreContainers(prev => 
@@ -549,6 +617,7 @@ export const Orders: React.FC = () => {
       setAllOrders(prev => removeOrder(prev))
       setMainOrders(prev => removeOrder(prev))
       setAddOnOrders(prev => removeOrder(prev))
+      setUnscheduledOrders(prev => removeOrder(prev))
       
       // Also remove from store containers
       setStoreContainers(prev => 
@@ -979,6 +1048,20 @@ export const Orders: React.FC = () => {
                 Update Orders for {selectedDate}
               </Button>
               
+              <Button 
+                variant="outline" 
+                onClick={handleLoadUnscheduledOrders} 
+                disabled={loadingUnscheduled}
+                className="gap-2"
+              >
+                {loadingUnscheduled ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4" />
+                )}
+                Load Unscheduled ({unscheduledOrders.length})
+              </Button>
+              
 
             </div>
           </div>
@@ -1021,7 +1104,7 @@ export const Orders: React.FC = () => {
       ) : (
         <div className="space-y-6">
           {/* Container Controls */}
-          {(filteredStoreContainers.length > 0 || filteredAddOnOrders.length > 0) && (
+          {(filteredStoreContainers.length > 0 || filteredAddOnOrders.length > 0 || unscheduledOrders.length > 0) && (
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">Order Containers</h3>
               <div className="flex items-center gap-2">
@@ -1339,6 +1422,88 @@ export const Orders: React.FC = () => {
                   </SortableContext>
                 </DndContext>
               )}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+
+          {/* Unscheduled - All Container */}
+          <Collapsible 
+            open={collapsedContainers['unscheduled-all'] !== true} // Default to collapsed (true)
+            onOpenChange={() => toggleContainer('unscheduled-all')}
+          >
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="cursor-pointer hover:bg-red-50 transition-colors">
+                  <CardTitle className="flex items-center gap-1 sm:gap-2 min-w-0">
+                    <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-red-500 flex-shrink-0" />
+                    <span className="flex-1 text-sm sm:text-base truncate">Unscheduled - All ({filteredUnscheduledOrders.length})</span>
+                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                      <span className="text-xs text-muted-foreground bg-red-100 px-2 py-1 rounded">
+                        No delivery date/timeslot
+                      </span>
+                      <ChevronDown 
+                        className={`h-4 w-4 text-red-500 transition-transform ${collapsedContainers['unscheduled-all'] !== true ? 'rotate-180' : ''} flex-shrink-0`} 
+                      />
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
+                  {/* Built-in Search Bar */}
+                  <div className="mb-4">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search by Shopify order name (#WF12345)..."
+                        value={unscheduledSearchTerm}
+                        onChange={(e) => setUnscheduledSearchTerm(e.target.value)}
+                        className="pl-8"
+                      />
+                    </div>
+                  </div>
+
+                  {filteredUnscheduledOrders.length === 0 ? (
+                    <div className="text-center py-8">
+                      <AlertTriangle className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">
+                        {unscheduledOrders.length === 0 
+                          ? "No unscheduled orders found. Click 'Load Unscheduled' to fetch from database."
+                          : "No orders match your search criteria"
+                        }
+                      </p>
+                      {unscheduledOrders.length === 0 && (
+                        <Button 
+                          onClick={handleLoadUnscheduledOrders} 
+                          disabled={loadingUnscheduled}
+                          className="mt-3 gap-2"
+                          variant="outline"
+                        >
+                          {loadingUnscheduled ? (
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4" />
+                          )}
+                          Load Unscheduled Orders
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredUnscheduledOrders.map(order => (
+                        <OrderDetailCard
+                          key={order.cardId || order.id}
+                          order={order}
+                          fields={orderFields}
+                          isExpanded={false}
+                          onStatusChange={handleOrderStatusChange}
+                          onDelete={handleOrderDelete}
+                          deliveryDate={undefined} // No delivery date for unscheduled orders
+                        />
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </CollapsibleContent>
             </Card>
