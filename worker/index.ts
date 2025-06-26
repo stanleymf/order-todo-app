@@ -754,6 +754,63 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       return 'Unknown Store'
     }
 
+    // Helper function to extract time window from order tags
+    const getTimeWindow = (order: any): string => {
+      try {
+        // Get shopify order data and extract tags
+        let tags: string[] = []
+        
+        if (order.shopifyOrderData && typeof order.shopifyOrderData === 'object') {
+          const orderData = order.shopifyOrderData
+          if (typeof orderData.tags === 'string') {
+            tags = orderData.tags.split(',').map(tag => tag.trim())
+          } else if (Array.isArray(orderData.tags)) {
+            tags = orderData.tags
+          }
+        }
+        
+        // Look for time slot patterns in tags
+        for (const tag of tags) {
+          const timeSlot = tag.trim()
+          
+          // Morning: 10:00-14:00, 10:00-13:00
+          if (timeSlot.match(/^10:00[-–]1[3-4]:00$/)) {
+            return 'Morning'
+          }
+          
+          // Afternoon: 14:00-18:00, 14:00-16:00  
+          if (timeSlot.match(/^14:00[-–]1[6-8]:00$/)) {
+            return 'Afternoon'
+          }
+          
+          // Night: 18:00-22:00
+          if (timeSlot.match(/^18:00[-–]22:00$/)) {
+            return 'Night'
+          }
+        }
+        
+        // Default fallback based on express delivery times
+        if (order.isExpressOrder && order.expressTimeSlot) {
+          const expressTime = order.expressTimeSlot
+          // Parse hour from express time (e.g., "11:30AM" -> 11, "14:30PM" -> 14)
+          const hourMatch = expressTime.match(/(\d{1,2}):/)
+          if (hourMatch) {
+            const hour = parseInt(hourMatch[1])
+            
+            if (hour >= 10 && hour < 14) return 'Morning'
+            if (hour >= 14 && hour < 18) return 'Afternoon'  
+            if (hour >= 18 && hour < 22) return 'Night'
+          }
+        }
+        
+        return 'Unscheduled' // Default for orders without clear time window
+        
+      } catch (error) {
+        console.error('[TIME-WINDOW] Error extracting time window:', error)
+        return 'Unscheduled'
+      }
+    }
+
     // Separate orders into main orders and add-ons
     const mainOrders = processedOrders.filter(order => !order.isAddOn)
     const addOnOrders = processedOrders.filter(order => order.isAddOn)
@@ -767,36 +824,54 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       return 0
     }
 
-    // Group main orders by store
-    const storeGroups: Record<string, any> = {}
+    // Group main orders by store and time window
+    const storeTimeGroups: Record<string, any> = {}
     for (const order of mainOrders) {
       const storeName = getStoreName(order)
+      const timeWindow = getTimeWindow(order)
       const storeId = order.storeId || order.store_id || 'unknown'
       
-      if (!storeGroups[storeName]) {
-        storeGroups[storeName] = {
+      // Create unique key for store + time window combination
+      const containerKey = `${timeWindow} - ${storeName}`
+      
+      if (!storeTimeGroups[containerKey]) {
+        storeTimeGroups[containerKey] = {
+          containerKey,
           storeName,
           storeId,
+          timeWindow,
           orders: []
         }
       }
-      storeGroups[storeName].orders.push(order)
+      storeTimeGroups[containerKey].orders.push(order)
     }
 
-    // Sort orders within each store group and sort stores by order count (most orders first)
-    const sortedStoreContainers = Object.values(storeGroups)
+    // Sort orders within each time window group and sort containers by time window priority
+    const timeWindowPriority = { 'Morning': 1, 'Afternoon': 2, 'Night': 3, 'Unscheduled': 4 }
+    
+    const sortedTimeWindowContainers = Object.values(storeTimeGroups)
       .map(group => ({
         ...group,
-        orders: group.orders.sort(sortByOrder)
+        orders: group.orders.sort(sortByOrder),
+        orderCount: group.orders.length
       }))
-      .sort((a, b) => b.orders.length - a.orders.length)
+      .sort((a, b) => {
+        // First sort by store name (alphabetical)
+        if (a.storeName !== b.storeName) {
+          return a.storeName.localeCompare(b.storeName)
+        }
+        // Then sort by time window priority (Morning, Afternoon, Night, Unscheduled)
+        const aPriority = timeWindowPriority[a.timeWindow as keyof typeof timeWindowPriority] || 5
+        const bPriority = timeWindowPriority[b.timeWindow as keyof typeof timeWindowPriority] || 5
+        return aPriority - bPriority
+      })
 
     // Sort add-on orders separately
     addOnOrders.sort(sortByOrder)
 
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
-    console.log(`Store containers: ${sortedStoreContainers.length}, Add-ons: ${addOnOrders.length}`)
-    console.log(`Store breakdown:`, sortedStoreContainers.map(sc => `${sc.storeName}: ${sc.orders.length}`).join(', '))
+    console.log(`Time window containers: ${sortedTimeWindowContainers.length}, Add-ons: ${addOnOrders.length}`)
+    console.log(`Time window breakdown:`, sortedTimeWindowContainers.map(sc => `${sc.containerKey}: ${sc.orderCount}`).join(', '))
     
     // Debug logging for first few orders
     if (processedOrders.length > 0) {
@@ -817,11 +892,13 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       orders: processedOrders,
       mainOrders: mainOrders, // Keep for backward compatibility
       addOnOrders: addOnOrders,
-      storeContainers: sortedStoreContainers, // New store-based grouping
+      storeContainers: sortedTimeWindowContainers, // Enhanced time window-based grouping
+      timeWindowContainers: sortedTimeWindowContainers, // New time window containers
       stats: {
         total: processedOrders.length,
         mainOrders: mainOrders.length,
         addOns: addOnOrders.length,
+        timeWindows: sortedTimeWindowContainers.length,
         // Add status-based stats
         unassigned: processedOrders.filter(o => !o.status || o.status === 'unassigned').length,
         assigned: processedOrders.filter(o => o.status === 'assigned').length,
