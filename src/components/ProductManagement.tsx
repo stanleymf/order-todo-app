@@ -1546,6 +1546,8 @@ export function ProductManagement() {
                               finalFilteredProducts.length > 0
                             }
                             onCheckedChange={handleToggleSelectAll}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                           />
                           {!isMobileView && (
                             <span className="text-xs text-gray-400 ml-1" title="Drag to select multiple">
@@ -1567,6 +1569,8 @@ export function ProductManagement() {
                           <Checkbox
                             checked={selectedProducts.has(product.id)}
                             onCheckedChange={() => handleToggleSelectProduct(product.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                           />
                         </TableCell>
                         <TableCell className={isMobileView ? "px-2" : ""}>
@@ -1837,6 +1841,8 @@ export function ProductManagement() {
                               paginatedSavedProducts.length > 0
                             }
                             onCheckedChange={handleToggleSelectAllSavedProducts}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                           />
                           {!isMobileView && (
                             <span className="text-xs text-gray-400 ml-1" title="Drag to select multiple">
@@ -1859,6 +1865,8 @@ export function ProductManagement() {
                           <Checkbox
                             checked={selectedSavedProducts.has(product.id)}
                             onCheckedChange={() => handleToggleSelectSavedProduct(product.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                           />
                         </TableCell>
                         <TableCell className={isMobileView ? "px-2" : ""}>

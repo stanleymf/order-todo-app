@@ -398,15 +398,16 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     
     // Debug logs removed - double-encoding fix completed
 
-    // Build product label map for add-on classification
+    // Build product label map for add-on classification and priority sorting
     const productLabelMap = new Map<string, any[]>()
     try {
       const { results: labelMappings } = await c.env.DB.prepare(`
-        SELECT sp.shopify_product_id, sp.shopify_variant_id, pl.name, pl.category
+        SELECT sp.shopify_product_id, sp.shopify_variant_id, pl.name, pl.category, pl.priority
         FROM saved_products sp
         JOIN product_label_mappings plm ON sp.id = plm.saved_product_id
         JOIN product_labels pl ON plm.label_id = pl.id
         WHERE sp.tenant_id = ?
+        ORDER BY pl.priority ASC
       `).bind(tenantId).all()
 
       for (const mapping of labelMappings || []) {
@@ -416,7 +417,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         }
         productLabelMap.get(key)?.push(mapping)
       }
-      console.log(`Loaded ${productLabelMap.size} product label mappings for classification`)
+      console.log(`Loaded ${productLabelMap.size} product label mappings for classification and priority sorting`)
     } catch (error) {
       console.error("Failed to load product labels for classification:", error)
     }
@@ -441,6 +442,36 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
         label.category?.toLowerCase() === "difficulty"
       )
       return difficultyLabel?.name || null
+    }
+
+    // Get product type label for product
+    const getProductTypeLabel = (productId: string, variantId: string): string | null => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const productTypeLabel = labels.find((label: any) => 
+        label.category?.toLowerCase() === "producttype"
+      )
+      return productTypeLabel?.name || null
+    }
+
+    // Get difficulty priority (lower number = higher priority)
+    const getDifficultyPriority = (productId: string, variantId: string): number => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const difficultyLabel = labels.find((label: any) => 
+        label.category?.toLowerCase() === "difficulty"
+      )
+      return difficultyLabel?.priority || 999 // Default to low priority if no difficulty label
+    }
+
+    // Get product type priority (lower number = higher priority)
+    const getProductTypePriority = (productId: string, variantId: string): number => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const productTypeLabel = labels.find((label: any) => 
+        label.category?.toLowerCase() === "producttype"
+      )
+      return productTypeLabel?.priority || 999 // Default to low priority if no product type label
     }
 
     // Process each order into line items
@@ -571,8 +602,11 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           // Classify as add-on
           const isAddOn = isAddOnProduct(productId, variantId)
 
-          // Get difficulty label
+          // Get labels and priorities for sorting
           const difficultyLabel = getDifficultyLabel(productId, variantId)
+          const productTypeLabel = getProductTypeLabel(productId, variantId)
+          const difficultyPriority = getDifficultyPriority(productId, variantId)
+          const productTypePriority = getProductTypePriority(productId, variantId)
           
           console.log('[CLASSIFICATION-DEBUG] Product classification:', {
             key: `${productId}-${variantId}`,
@@ -612,6 +646,10 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               variantTitle: lineItem.variant_title || lineItem.variant?.title,
               // Labels from product_labels database
               difficultyLabel: difficultyLabel,
+              productTypeLabel: productTypeLabel,
+              // Priority values for sorting (lower number = higher priority)
+              difficultyPriority: difficultyPriority,
+              productTypePriority: productTypePriority,
               // Express order detection
               isExpressOrder: hasExpressItem,
               expressTimeSlot: expressTimeSlot,
@@ -880,12 +918,29 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     
     console.log(`[ADDON-CLASSIFICATION] Final counts - Main Orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
 
-    // Sort function for consistent ordering
+    // Enhanced sort function with label priority hierarchy
     const sortByOrder = (a: any, b: any) => {
+      // 1. HIGHEST PRIORITY: Manual drag-and-drop ordering
       if (a.sortOrder !== b.sortOrder) {
         return a.sortOrder - b.sortOrder
       }
-      // For ties, maintain original created_at order
+      
+      // 2. DIFFICULTY LABELS: Easy → Medium → Hard (lower priority number = higher priority)
+      if (a.difficultyPriority !== b.difficultyPriority) {
+        return a.difficultyPriority - b.difficultyPriority
+      }
+      
+      // 3. PRODUCT TYPE LABELS: Bouquet → Arrangement → etc. (lower priority number = higher priority)
+      if (a.productTypePriority !== b.productTypePriority) {
+        return a.productTypePriority - b.productTypePriority
+      }
+      
+      // 4. SAME PRODUCT NAMES: Alphabetical sorting for identical products
+      if (a.title && b.title && a.title !== b.title) {
+        return a.title.localeCompare(b.title)
+      }
+      
+      // 5. FINAL FALLBACK: Creation time
       return 0
     }
 
