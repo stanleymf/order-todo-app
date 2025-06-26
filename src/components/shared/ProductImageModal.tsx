@@ -61,7 +61,6 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
 
   // Reset state when modal opens/closes
   useEffect(() => {
-    console.log('ProductImageModal useEffect triggered', { isOpen, shopifyProductId, shopifyVariantId, tenantId });
     if (isOpen && shopifyProductId) {
       fetchProductImage();
     }
@@ -103,7 +102,6 @@ export const ProductImageModal: React.FC<ProductImageModalProps> = ({
       const product = await response.json()
       
       // Map the saved product data to the expected ProductImageData format
-      console.log('Product fetched for modal:', product);
       const imageUrl = product?.imageUrl || product?.image_url;
       const imageAlt = product?.imageAlt || product?.image_alt || 'Product image';
 
