@@ -20,11 +20,12 @@ export function formatSingaporeTime(utcTimestamp: string | null | undefined): st
     const date = new Date(utcTimestamp)
     if (isNaN(date.getTime())) return 'Invalid date'
     
+    // Format the UTC date to Singapore timezone
     return date.toLocaleString('en-SG', {
       timeZone: SINGAPORE_TIMEZONE,
-      year: 'numeric',
-      month: '2-digit',
       day: '2-digit',
+      month: '2-digit', 
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -65,9 +66,9 @@ export function formatSingaporeDate(utcTimestamp: string | null | undefined): st
  * @returns Current time in Singapore timezone as ISO string
  */
 export function getCurrentSingaporeTime(): string {
-  return new Date().toLocaleString('sv-SE', {
-    timeZone: SINGAPORE_TIMEZONE,
-  }).replace(' ', 'T') + 'Z'
+  // Get current time and just return it as ISO - this will be UTC
+  // The formatting functions will handle the Singapore timezone conversion
+  return new Date().toISOString()
 }
 
 /**
@@ -116,19 +117,32 @@ export function getSingaporeDateRange(days: number = 7): {
   endDateSG: string
 } {
   const now = new Date()
-  const sgNow = new Date(now.toLocaleString('en-US', { timeZone: SINGAPORE_TIMEZONE }))
   
-  // End date is today in Singapore
-  const endDate = sgNow.toISOString().split('T')[0]
+  // Get current date in Singapore timezone
+  const endDateSG = now.toLocaleDateString('en-SG', {
+    timeZone: SINGAPORE_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit', 
+    year: 'numeric'
+  })
   
-  // Start date is N days ago in Singapore
-  const startDateObj = new Date(sgNow.getTime() - (days * 24 * 60 * 60 * 1000))
+  // Get date N days ago in Singapore timezone
+  const startDateObj = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000))
+  const startDateSG = startDateObj.toLocaleDateString('en-SG', {
+    timeZone: SINGAPORE_TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })
+  
+  // Convert to ISO format for API (use UTC dates)
+  const endDate = now.toISOString().split('T')[0]
   const startDate = startDateObj.toISOString().split('T')[0]
   
   return {
     startDate, // ISO format for API
     endDate,   // ISO format for API
-    startDateSG: formatSingaporeDate(startDateObj.toISOString()), // Display format
-    endDateSG: formatSingaporeDate(sgNow.toISOString())          // Display format
+    startDateSG, // Display format
+    endDateSG    // Display format
   }
 }

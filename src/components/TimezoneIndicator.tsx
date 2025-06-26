@@ -1,7 +1,6 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Badge } from './ui/badge'
 import { Clock } from 'lucide-react'
-import { formatSingaporeTime, getCurrentSingaporeTime } from '../lib/utils'
 
 interface TimezoneIndicatorProps {
   showLabel?: boolean
@@ -12,13 +11,38 @@ export const TimezoneIndicator: React.FC<TimezoneIndicatorProps> = ({
   showLabel = true, 
   className = "" 
 }) => {
-  const currentSGTime = formatSingaporeTime(getCurrentSingaporeTime())
+  const [currentTime, setCurrentTime] = useState('')
+
+  useEffect(() => {
+    const updateTime = () => {
+      // Get current Singapore time directly using the browser's timezone conversion
+      const sgTime = new Date().toLocaleString('en-SG', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      })
+      setCurrentTime(sgTime)
+    }
+
+    // Update immediately
+    updateTime()
+    
+    // Update every second
+    const interval = setInterval(updateTime, 1000)
+    
+    return () => clearInterval(interval)
+  }, [])
   
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <Clock className="h-4 w-4 text-emerald-600" />
       <Badge variant="outline" className="text-emerald-700 border-emerald-200 bg-emerald-50">
-        {showLabel && "Singapore: "}{currentSGTime}
+        {showLabel && "Singapore: "}{currentTime}
       </Badge>
     </div>
   )
