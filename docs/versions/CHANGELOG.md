@@ -2,6 +2,310 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.36] - 2025-01-13
+
+### 🔧 **Critical GraphQL Data Double-Encoding Bug Fix**
+
+**Critical Fix**: Resolved double-encoded JSON strings in shopifyOrderData causing missing order names and incorrect container placement.
+
+### ✨ **GraphQL Data Parsing Enhancement**
+
+**Data Integrity Fix**: Fixed double-encoded JSON strings that were causing orders to display incorrect information.
+
+#### **🐛 Bug Symptoms**
+- **Incorrect Order Names**: Orders showing fallback IDs (e.g., `#WF678048`) instead of proper Shopify names (e.g., `#WF76760`)
+- **Missing Order Details**: Delivery time slots and dates not displaying in OrderDetailCard
+- **Wrong Container Placement**: Orders appearing in "Unscheduled" instead of correct time windows
+- **Undefined GraphQL Data**: `shopifyOrderData.name` returning `undefined` despite data being present
+
+#### **🔍 Root Cause Analysis**
+- **Double-Encoded JSON**: Some orders stored `shopifyOrderData` as double-encoded strings: `"\"{ \\\"name\\\": \\\"#WF76760\\\" }\""`
+- **Single Parse Failure**: Standard `JSON.parse()` returned a string instead of an object
+- **Property Access Failure**: Trying to access `.name` on a string returned `undefined`
+- **Fallback ID Display**: OrderDetailCard fell back to constructing IDs from shopifyOrderId
+
+#### **🛠️ Technical Solution**
+```javascript
+// CRITICAL FIX: Handle double-encoded JSON strings
+if (typeof parsedData === 'string') {
+  console.log('[DOUBLE-ENCODING-FIX] Detected double-encoded JSON for order:', order.shopify_order_id);
+  parsedData = JSON.parse(parsedData);
+}
+```
+
+#### **✅ Fix Results**
+- **Correct Order Names**: All orders now display proper Shopify order names
+- **Complete Order Details**: Delivery times, customer info, and line items properly displayed
+- **Accurate Container Placement**: Orders appear in correct time window containers
+- **Preserved GraphQL Data**: Full GraphQL data structure available to OrderDetailCard
+
+#### **🔄 Affected Systems**
+- **OrderDetailCard Component**: Now receives proper `shopifyOrderData.name`
+- **Container Grouping**: Time window detection works correctly with proper tags
+- **Order Display**: Customer names, delivery addresses, and order notes display properly
+- **Backend Parsing**: GraphQL preservation logic handles both single and double-encoded JSON
+
+#### **📊 Data Consistency**
+- **Mixed Encoding Detection**: Automatically detects and handles both encoding types
+- **Backward Compatibility**: Works with existing properly-encoded orders
+- **Forward Compatibility**: Prevents future double-encoding issues
+- **Debug Logging**: Added logging to identify double-encoded orders for monitoring
+
+---
+
+## [1.5.35] - 2025-01-13
+
+### ⬆️ **Back to Top Navigation**
+
+**UX Enhancement**: Added smooth "Back to Top" button for effortless navigation on long order lists.
+
+### ✨ **New Navigation Feature**
+
+**Smart Back to Top**: Floating action button appears automatically when scrolling through orders.
+
+#### **🎯 Back to Top Features**
+- **Smart Visibility**: Button appears after scrolling 300px down
+- **Smooth Animation**: Smooth scroll behavior with elegant transitions
+- **Strategic Positioning**: Fixed bottom-left position for easy access
+- **Visual Feedback**: Hover effects with scale animation
+- **Accessible**: Proper ARIA labels for screen readers
+
+#### **🎨 Design Elements**
+- **Circular Button**: Clean, modern rounded design
+- **Blue Theme**: Consistent with app color scheme (`bg-blue-600`)
+- **Shadow Effect**: Subtle shadow for depth and visibility
+- **Hover Animation**: 10% scale increase on hover for feedback
+- **Z-Index Priority**: High z-index (50) ensures visibility over content
+
+#### **⚡ Performance & UX**
+- **Minimal DOM Impact**: Only renders when needed (scroll > 300px)
+- **Event Cleanup**: Proper scroll listener cleanup on unmount
+- **Smooth Scrolling**: Native browser smooth scroll for optimal performance
+- **Mobile Friendly**: Touch-optimized size and positioning
+
+---
+
+## [1.5.34] - 2025-01-13
+
+### 🔍 **Enhanced Search Functionality**
+
+**Search Enhancement**: Comprehensive search functionality now includes order names/numbers and product titles for superior order discovery.
+
+### ✨ **Enhanced Search Features**
+
+**Comprehensive Search**: Search bar now searches across all relevant order fields for faster order location.
+
+#### **🎯 New Search Fields**
+- **Order Names/Numbers**: Search by Shopify order names (e.g., `#WF123456`, `#1234`)
+- **Product Titles**: Search within product names from line items
+- **Product Variants**: Search within product variant titles
+- **Shopify Order IDs**: Search by full or partial Shopify order IDs
+- **Stored Product Titles**: Search fallback product titles from database
+
+#### **🔧 Search Logic Enhancements**
+- **Multi-Field Search**: Single search term checks multiple data sources
+- **Case-Insensitive**: All searches ignore case for better usability
+- **JSON Data Parsing**: Safely parses stored JSON product data
+- **GraphQL Integration**: Searches within Shopify GraphQL data structure
+- **Fallback Support**: Uses database fields when GraphQL data unavailable
+
+#### **📋 Complete Search Coverage**
+- **Customer Names**: Existing customer name search maintained
+- **Order IDs**: Internal order ID search maintained  
+- **Main Product Titles**: Primary product title search maintained
+- **+ Order Names**: NEW - Shopify order names like `#WF123456`
+- **+ Product Line Items**: NEW - All product titles in the order
+- **+ Variant Titles**: NEW - Product variant specifications
+
+---
+
+## [1.5.33] - 2025-01-13
+
+### 📱 **Mobile-Optimized Collapsible Containers**
+
+**UX Enhancement**: Enhanced collapsible containers with mobile-first design and collapsed-by-default behavior for optimal workflow management.
+
+### ✨ **Enhanced Mobile & Collapsible Features**
+
+**Mobile-First Design**: Completely redesigned container headers for optimal mobile experience with smart responsive behavior and collapsed-by-default state.
+
+#### **📁 Collapsible Containers**
+- **Time Window Containers**: Morning, Sunday, Afternoon, Night, Unscheduled
+- **Main Orders Container**: Legacy fallback container
+- **Add-ons Container**: Separate add-on items container
+- **Visual Indicators**: Rotating chevron icons show collapse/expand state
+
+#### **🎮 Global Controls**
+- **Expand All Button**: Quickly expand all containers at once
+- **Collapse All Button**: Minimize all containers for overview
+- **Individual Toggle**: Click any container header to toggle state
+- **Persistent State**: Container states maintained during session
+
+#### **🎨 Enhanced Visual Design**
+- **Hover Effects**: Container headers highlight on hover
+- **Smooth Transitions**: Animated chevron rotation and content reveal
+- **Theme Integration**: Collapse controls match each time window's color theme
+- **Responsive Layout**: Clean, organized container management interface
+
+### 🛠️ **Technical Implementation**
+
+**State Management**:
+```typescript
+const [collapsedContainers, setCollapsedContainers] = useState<Record<string, boolean>>({})
+```
+
+**Interactive Components**:
+- `CollapsibleTrigger` - Clickable container headers
+- `CollapsibleContent` - Animated content reveal/hide
+- `ChevronDown` icons with rotation transitions
+
+**Container Keys**:
+- Time windows: `${timeWindow} - ${storeName}`
+- Main orders: `main-orders`
+- Add-ons: `add-ons`
+
+### 💡 **Business Benefits**
+
+- **Improved Focus**: Collapse unused time windows to focus on active periods
+- **Screen Optimization**: Better use of screen space with many containers
+- **Workflow Control**: Quick overview mode vs detailed working mode
+- **Reduced Scrolling**: Navigate large order lists more efficiently
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+#### **📱 Key Mobile Improvements**
+- **Collapsed by Default**: All containers start minimized for cleaner interface
+- **Responsive Design**: Proper text truncation and flexible spacing on mobile
+- **Touch-Optimized**: Larger icons and touch-friendly controls
+- **No Overflow**: Fixed container content spillage on small screens
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Status**: ✅ **DEPLOYED** - Back to Top navigation now live
+**Version ID**: `75bb75e3-e425-40c3-a9e0-28018b01d6d4`
+
+---
+
+## [1.5.31] - 2025-01-13
+
+### 🚀 **Enhanced Time Window Sorting & Store Organization**
+
+**Major Enhancement**: Added Sunday time window support and improved store sorting by creation date for optimal workflow management.
+
+### ✨ **New Sunday Time Window**
+
+**NEW Feature**: Added dedicated Sunday time window for weekend/holiday deliveries.
+
+#### **📅 Sunday Container**
+- **Time Window**: `11:00-15:00` (Sunday delivery hours)
+- **Visual Theme**: Green calendar icon with fresh green theme
+- **Smart Detection**: Recognizes both tags and express delivery times in 11-15 range
+- **Priority**: Positioned between Morning and Afternoon containers
+
+#### **🔄 Updated Time Window Priority**
+```
+1. Morning (10:00-14:00) - Amber theme with sunrise icon
+2. Sunday (11:00-15:00) - Green theme with calendar icon  
+3. Afternoon (14:00-18:00) - Blue theme with sun icon
+4. Night (18:00-22:00) - Purple theme with moon icon
+5. Unscheduled - Gray theme with clock icon
+```
+
+### 🏪 **Store Sorting by Creation Date**
+
+**Enhanced**: Multi-store orders now organized by **date store was added** instead of alphabetical order.
+
+#### **📊 New Sorting Logic**
+- **Primary Sort**: Store creation date (chronological - oldest first)
+- **Secondary Sort**: Time window priority within each store
+- **Benefit**: Stores appear in the order they were added to the system
+- **Database**: Uses `shopify_stores.created_at` field for accurate ordering
+
+#### **💡 Business Impact**
+- **Main stores appear first** (typically added first)
+- **New partner stores** appear after established stores
+- **Consistent ordering** based on business relationship timeline
+- **Intuitive workflow** matching business expansion history
+
+### 🎯 **Technical Implementation**
+
+**Backend Changes**:
+```sql
+-- New query to fetch store creation dates
+SELECT id, shopify_domain, created_at 
+FROM shopify_stores 
+WHERE tenant_id = ?
+```
+
+**Enhanced Time Window Detection**:
+```regex
+// Added Sunday pattern matching
+/^11:00[-–]15:00$/  // Sunday time window
+```
+
+**Updated Priority System**:
+```javascript
+timeWindowPriority = { 
+  'Morning': 1, 'Sunday': 2, 'Afternoon': 3, 
+  'Night': 4, 'Unscheduled': 5 
+}
+```
+
+### 🚀 **Live Status**
+
+**URL**: https://order-to-do.stanleytan92.workers.dev
+**Status**: ✅ **DEPLOYED** - Sunday time window and store date sorting active
+
+---
+
+## [1.5.30] - 2025-01-13
+
+### 🚀 **Major Order Management Enhancements**
+
+**Breaking Enhancement**: Implemented Time Window Sorting and Enhanced Express Detection for superior order organization.
+
+### 🎯 **Time Window Sorting (NEW)**
+
+**Revolutionary Feature**: Orders now automatically sorted into time-based containers within each store for optimal workflow management.
+
+#### **📋 Time Window Categories**
+- **Morning Container**: `10:00-14:00` & `10:00-13:00` time slots
+- **Afternoon Container**: `14:00-18:00` & `14:00-16:00` time slots  
+- **Night Container**: `18:00-22:00` time slots
+- **Unscheduled Container**: Orders without clear time windows
+
+#### **🏪 New Container Structure**
+```
+Morning - WindflowerFlorist - 22 orders
+Afternoon - WindflowerFlorist - 30 orders
+Night - WindflowerFlorist - 5 orders
+Morning - HelloFlowers Singapore - 4 orders
+Afternoon - HelloFlowers Singapore - 2 orders
+```
+
+#### **✨ Smart Fallback Logic**
+- Extracts time windows from Shopify order tags
+- Uses express delivery times when tags unavailable
+- Intelligent sorting: stores alphabetically, then time window priority
+
+### 🏷️ **Enhanced Express Detection**
+
+**Critical Fix**: Express badges now work with flexible Shopify configurations for order #WF76778 and similar cases.
+
+#### **📍 Dual Detection Method**
+- **Method 1**: Variant Title - `Express Delivery` + variant_title: `14:30PM - 15:30PM`
+- **Method 2**: Item Title - title: `Express Delivery 14:30PM - 15:30PM` (no variant_title needed)
+
+#### **🔧 Enhanced Debug Logging**
+```javascript
+[EXPRESS-DEBUG] Enhanced time extraction: {
+  source_location: 'item_title',
+  item_title: 'Express Delivery 14:30PM - 15:30PM',
+  extracted_time: '14:30PM - 15:30PM'
+}
+```
+
 ## [1.5.29] - 2025-01-13
 
 ### 🇸🇬 **Singapore Timezone Support Added**

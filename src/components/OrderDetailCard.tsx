@@ -49,6 +49,25 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   onDelete,
   deliveryDate,
 }) => {
+  // FOCUS: Only log the essential OrderDetailCard data
+  React.useEffect(() => {
+    if (isExpanded) {
+      console.error(`[ORDERDETAIL-DEBUG] Expanded order: ${order?.shopifyOrderId}, GraphQL name: ${order?.shopifyOrderData?.name || 'MISSING'}`);
+      
+      // CRITICAL: Debug the exact data structure being received
+      console.error('[ORDERDETAIL-CRITICAL] Complete order object:', {
+        shopifyOrderId: order?.shopifyOrderId,
+        cardId: order?.cardId,
+        title: order?.title,
+        hasShopifyOrderData: !!order?.shopifyOrderData,
+        shopifyOrderDataType: typeof order?.shopifyOrderData,
+        shopifyOrderDataName: order?.shopifyOrderData?.name,
+        shopifyOrderDataKeys: order?.shopifyOrderData ? Object.keys(order.shopifyOrderData) : 'none',
+        entireShopifyOrderData: order?.shopifyOrderData
+      });
+    }
+  }, [isExpanded, order]);
+
   const [expanded, setExpanded] = useState(isExpanded)
   const [status, setStatus] = useState<'unassigned' | 'assigned' | 'completed'>(
     order.status || 'unassigned'

@@ -18,12 +18,17 @@ import {
   BarChart3,
   Gift,
   ChevronDown,
+  ChevronUp,
   Store,
   Tags,
-
   UserCheck,
   Circle,
-  AlertTriangle
+  AlertTriangle,
+  Sunrise,
+  Sun,
+  Moon,
+  Clock,
+  Calendar
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate } from "../services/api"
@@ -68,11 +73,17 @@ export const Orders: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [isStatsOpen, setIsStatsOpen] = useState(false)
   
+  // Collapsible state management
+  const [collapsedContainers, setCollapsedContainers] = useState<Record<string, boolean>>({})
+  
   // Filter state management
   const [activeFilters, setActiveFilters] = useState<{
     status?: 'unassigned' | 'assigned' | 'completed'
     stores?: string[]
   }>({})
+
+  // Back to Top functionality
+  const [showBackToTop, setShowBackToTop] = useState(false)
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -138,22 +149,25 @@ export const Orders: React.FC = () => {
         const response = await getOrdersFromDbByDate(tenant.id, dateStr)
         console.log("Orders response after sync:", response)
         
+        // FOCUS: Check if Baby's Breath order exists in API response
+        const hasBabysBreath = JSON.stringify(response).includes("Baby's Breath")
+        console.error(`[CACHE-DEBUG] API returned Baby's Breath: ${hasBabysBreath}`)
+        
+        // CACHE-FIX: Force clear all order state before setting new data
+        setAllOrders([])
+        setMainOrders([])
+        setAddOnOrders([])
+        setStoreContainers([])
+        
         // Handle both old format (array) and new format (object with categories)
         if (Array.isArray(response)) {
           // Old format - treat all as main orders
-          console.log("Setting orders (old format):", response.length)
           setAllOrders(response)
           setMainOrders(response)
           setAddOnOrders([])
           setStoreContainers([])
         } else {
           // New format with categories and store containers
-          console.log("Setting orders (new format):", {
-            all: response.orders?.length || 0,
-            main: response.mainOrders?.length || 0,
-            addOns: response.addOnOrders?.length || 0,
-            storeContainers: response.storeContainers?.length || 0
-          })
           setAllOrders(response.orders || [])
           setMainOrders(response.mainOrders || [])
           setAddOnOrders(response.addOnOrders || [])
@@ -170,7 +184,7 @@ export const Orders: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [tenant?.id, selectedDate, selectedStore, stores])
+  }, [tenant?.id, selectedDate, selectedStore, stores, syncOrdersByDate, getOrdersFromDbByDate])
 
   const handleRefreshFromDatabase = useCallback(async () => {
     if (!tenant?.id || !selectedDate) {
@@ -186,10 +200,29 @@ export const Orders: React.FC = () => {
       const response = await getOrdersFromDbByDate(tenant.id, dateStr)
       console.log("Orders response:", response)
       
-      // Handle both old format (array) and new format (object with categories)
+              // FOCUS: Check if Baby's Breath order exists in API response
+        const hasBabysBreath = JSON.stringify(response).includes("Baby's Breath")
+        console.error(`[CACHE-DEBUG] API returned Baby's Breath: ${hasBabysBreath}`)
+        
+        // CACHE-FIX: Force clear all order state before setting new data
+        setAllOrders([])
+        setMainOrders([])
+        setAddOnOrders([])
+        setStoreContainers([])
+        
+        // Handle both old format (array) and new format (object with categories)
       if (Array.isArray(response)) {
         // Old format - treat all as main orders
         console.log("Setting orders (old format):", response.length)
+        // DEBUG: Check shopifyOrderData in first order
+        if (response.length > 0) {
+          console.error('[ORDERS-DEBUG] First order from API (old format):', {
+            cardId: response[0].cardId,
+            hasShopifyOrderData: !!response[0].shopifyOrderData,
+            shopifyOrderDataKeys: response[0].shopifyOrderData ? Object.keys(response[0].shopifyOrderData) : 'none',
+            shopifyOrderName: response[0].shopifyOrderData?.name
+          })
+        }
         setAllOrders(response)
         setMainOrders(response)
         setAddOnOrders([])
@@ -202,6 +235,16 @@ export const Orders: React.FC = () => {
           addOns: response.addOnOrders?.length || 0,
           storeContainers: response.storeContainers?.length || 0
         })
+        // DEBUG: Check shopifyOrderData in first order
+        if (response.orders && response.orders.length > 0) {
+          console.error('[ORDERS-DEBUG] First order from API (new format):', {
+            cardId: response.orders[0].cardId,
+            hasShopifyOrderData: !!response.orders[0].shopifyOrderData,
+            shopifyOrderDataKeys: response.orders[0].shopifyOrderData ? Object.keys(response.orders[0].shopifyOrderData) : 'none',
+            shopifyOrderName: response.orders[0].shopifyOrderData?.name,
+            fullOrder: response.orders[0]
+          })
+        }
         setAllOrders(response.orders || [])
         setMainOrders(response.mainOrders || [])
         setAddOnOrders(response.addOnOrders || [])
@@ -224,6 +267,53 @@ export const Orders: React.FC = () => {
       handleRefreshFromDatabase()
     }
   }, [handleRefreshFromDatabase, tenant?.id, selectedDate])
+
+  // Back to Top scroll listener
+  useEffect(() => {
+    const handleScroll = () => {
+      // Show button when user scrolls down 300px from top
+      setShowBackToTop(window.scrollY > 300)
+    }
+
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    })
+  }
+
+  // Collapsible container helper functions
+  const toggleContainer = (containerKey: string) => {
+    setCollapsedContainers(prev => ({
+      ...prev,
+      [containerKey]: !prev[containerKey]
+    }))
+  }
+
+  const collapseAllContainers = () => {
+    const allKeys = [
+      ...filteredStoreContainers.map(c => c.containerKey || c.storeName),
+      'main-orders',
+      'add-ons'
+    ]
+    const collapsed = allKeys.reduce((acc, key) => ({ ...acc, [key]: true }), {})
+    setCollapsedContainers(collapsed)
+  }
+
+  const expandAllContainers = () => {
+    const allKeys = [
+      ...filteredStoreContainers.map(c => c.containerKey || c.storeName),
+      'main-orders',
+      'add-ons'
+    ]
+    const expanded = allKeys.reduce((acc, key) => ({ ...acc, [key]: false }), {})
+    setCollapsedContainers(expanded)
+  }
 
   const handleUpdateOrders = async () => {
     if (!tenant?.id || !stores.length) {
@@ -278,10 +368,56 @@ export const Orders: React.FC = () => {
   // Filter orders based on search term and store
   const filterOrders = (orders: any[]) => {
     return orders.filter(order => {
-      const matchesSearch = !searchTerm || 
-        order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.title?.toLowerCase().includes(searchTerm.toLowerCase())
+      const matchesSearch = !searchTerm || (() => {
+        const searchLower = searchTerm.toLowerCase()
+        
+        // Basic order fields
+        const customerNameMatch = order.customerName?.toLowerCase().includes(searchLower)
+        const orderIdMatch = order.id?.toLowerCase().includes(searchLower)
+        const titleMatch = order.title?.toLowerCase().includes(searchLower)
+        
+        // Order name/number from Shopify (like #WF123456)
+        let orderNameMatch = false
+        if (order.shopifyOrderData?.name) {
+          orderNameMatch = order.shopifyOrderData.name.toLowerCase().includes(searchLower)
+        }
+        // Also check shopifyOrderId for order numbers
+        if (order.shopifyOrderId) {
+          const orderNumber = `#WF${String(order.shopifyOrderId).slice(-6)}`
+          orderNameMatch = orderNameMatch || orderNumber.toLowerCase().includes(searchLower)
+          orderNameMatch = orderNameMatch || String(order.shopifyOrderId).toLowerCase().includes(searchLower)
+        }
+        
+        // Product titles from line items
+        let productTitleMatch = false
+        if (order.shopifyOrderData?.lineItems?.edges) {
+          productTitleMatch = order.shopifyOrderData.lineItems.edges.some((edge: any) => 
+            edge.node?.title?.toLowerCase().includes(searchLower)
+          )
+        }
+        // Also check variant titles
+        if (order.shopifyOrderData?.lineItems?.edges) {
+          const variantTitleMatch = order.shopifyOrderData.lineItems.edges.some((edge: any) => 
+            edge.node?.variant?.title?.toLowerCase().includes(searchLower)
+          )
+          productTitleMatch = productTitleMatch || variantTitleMatch
+        }
+        // Check stored product titles if lineItems not available
+        if (order.productTitles) {
+          try {
+            const titles = JSON.parse(order.productTitles)
+            if (Array.isArray(titles)) {
+              productTitleMatch = productTitleMatch || titles.some((title: string) => 
+                title?.toLowerCase().includes(searchLower)
+              )
+            }
+          } catch (e) {
+            // Ignore JSON parse errors
+          }
+        }
+        
+        return customerNameMatch || orderIdMatch || titleMatch || orderNameMatch || productTitleMatch
+      })()
       
       const matchesStore = selectedStore === "all" || 
         order.storeId === selectedStore ||
@@ -916,27 +1052,126 @@ export const Orders: React.FC = () => {
         </Card>
       ) : (
         <div className="space-y-6">
-          {/* Store Containers - New Layout */}
+          {/* Container Controls */}
+          {(filteredStoreContainers.length > 0 || filteredAddOnOrders.length > 0) && (
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Order Containers</h3>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={expandAllContainers}
+                  className="gap-2"
+                >
+                  <ChevronDown className="h-4 w-4 rotate-180" />
+                  Expand All
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={collapseAllContainers}
+                  className="gap-2"
+                >
+                  <ChevronDown className="h-4 w-4" />
+                  Collapse All
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          {/* Time Window Containers - Enhanced Layout */}
           {filteredStoreContainers.map((container, containerIndex) => {
-            const storeIconColor = containerIndex === 0 ? 'text-blue-500' : 
-                                  containerIndex === 1 ? 'text-green-500' : 'text-purple-500'
-            const bgColor = containerIndex === 0 ? 'bg-blue-100' : 
-                           containerIndex === 1 ? 'bg-green-100' : 'bg-purple-100'
+            // Enhanced color scheme and icons based on time window
+            const getTimeWindowInfo = (timeWindow: string) => {
+              switch (timeWindow?.toLowerCase()) {
+                case 'morning':
+                  return { 
+                    icon: Sunrise, 
+                    iconColor: 'text-amber-600', 
+                    bg: 'bg-amber-50', 
+                    border: 'border-amber-200',
+                    description: '10:00-14:00'
+                  }
+                case 'sunday':
+                  return { 
+                    icon: Calendar, 
+                    iconColor: 'text-green-600', 
+                    bg: 'bg-green-50', 
+                    border: 'border-green-200',
+                    description: '11:00-15:00'
+                  }
+                case 'afternoon':
+                  return { 
+                    icon: Sun, 
+                    iconColor: 'text-blue-600', 
+                    bg: 'bg-blue-50', 
+                    border: 'border-blue-200',
+                    description: '14:00-18:00'
+                  }
+                case 'night':
+                  return { 
+                    icon: Moon, 
+                    iconColor: 'text-purple-600', 
+                    bg: 'bg-purple-50', 
+                    border: 'border-purple-200',
+                    description: '18:00-22:00'
+                  }
+                default:
+                  return { 
+                    icon: Clock, 
+                    iconColor: 'text-gray-600', 
+                    bg: 'bg-gray-50', 
+                    border: 'border-gray-200',
+                    description: 'Unscheduled'
+                  }
+              }
+            }
+            
+            const timeWindow = container.timeWindow || 'Unscheduled'
+            const timeInfo = getTimeWindowInfo(timeWindow)
+            const displayTitle = container.containerKey || `${container.storeName} - ${container.orders.length}`
+            const TimeIcon = timeInfo.icon
+            const containerKey = container.containerKey || container.storeName
+            const isCollapsed = collapsedContainers[containerKey] !== false // Default to collapsed (true)
             
             return (
-              <Card key={container.storeName}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Store className={`h-5 w-5 ${storeIconColor}`} />
-                    {container.storeName} - {container.orders.length}
-                    {isReorderingEnabled && container.orders.length > 1 && (
-                      <span className={`text-xs text-muted-foreground ${bgColor} px-2 py-1 rounded`}>
-                        Drag to reorder
-                      </span>
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
+              <Collapsible 
+                key={containerKey} 
+                open={!isCollapsed}
+                onOpenChange={() => toggleContainer(containerKey)}
+              >
+                <Card className={`${timeInfo.border} border-2`}>
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className={`${timeInfo.bg} cursor-pointer hover:opacity-80 transition-opacity`}>
+                      <CardTitle className="flex items-center gap-1 sm:gap-2 min-w-0">
+                        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                          <TimeIcon className={`h-4 w-4 sm:h-5 sm:w-5 ${timeInfo.iconColor}`} />
+                          <Store className={`h-3 w-3 sm:h-4 sm:w-4 ${timeInfo.iconColor}`} />
+                        </div>
+                        <div className="flex items-center gap-1 sm:gap-2 flex-1 min-w-0">
+                          <span className="font-bold text-sm sm:text-base truncate">{displayTitle}</span>
+                          <span className={`text-xs px-1 sm:px-2 py-1 rounded-full bg-white ${timeInfo.iconColor} border flex-shrink-0`}>
+                            {container.orderCount || container.orders.length}
+                          </span>
+                          <span className={`hidden sm:inline text-xs px-1 py-1 rounded bg-white/80 ${timeInfo.iconColor} text-[10px] flex-shrink-0`}>
+                            {timeInfo.description}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                          {isReorderingEnabled && container.orders.length > 1 && (
+                            <span className={`hidden lg:inline text-xs text-muted-foreground bg-white px-2 py-1 rounded border`}>
+                              Drag to reorder
+                            </span>
+                          )}
+                          <ChevronDown 
+                            className={`h-4 w-4 ${timeInfo.iconColor} transition-transform ${isCollapsed ? '' : 'rotate-180'} flex-shrink-0`} 
+                          />
+                        </div>
+                      </CardTitle>
+                    </CardHeader>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent>
                   {container.orders.length === 0 ? (
                     <div className="text-center py-8">
                       <Store className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -954,8 +1189,20 @@ export const Orders: React.FC = () => {
                         strategy={verticalListSortingStrategy}
                       >
                         <div className="space-y-3">
-                          {container.orders.map((order: any) => (
-                            isReorderingEnabled ? (
+                          {container.orders.map((order: any) => {
+                            // CRITICAL: Debug what data each container order has
+                            if (order.title?.includes("Baby's Breath")) {
+                              console.error('[CONTAINER-DEBUG] Baby\'s Breath order in container:', {
+                                containerKey: container.containerKey,
+                                orderShopifyId: order.shopifyOrderId,
+                                orderTitle: order.title,
+                                hasShopifyOrderData: !!order.shopifyOrderData,
+                                shopifyOrderDataName: order.shopifyOrderData?.name,
+                                entireOrder: order
+                              });
+                            }
+                            
+                            return isReorderingEnabled ? (
                               <SortableOrderCard
                                 key={order.cardId || order.id}
                                 id={order.cardId || order.id}
@@ -978,31 +1225,45 @@ export const Orders: React.FC = () => {
                                 deliveryDate={selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : undefined}
                               />
                             )
-                          ))}
+                          })}
                         </div>
                       </SortableContext>
                     </DndContext>
                   )}
-                </CardContent>
-              </Card>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             )
           })}
           
           {/* Fallback to legacy Main Orders if no store containers */}
           {filteredStoreContainers.length === 0 && filteredMainOrders.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Package className="h-5 w-5 text-blue-500" />
-                  Main Orders - {filteredMainOrders.length}
-                  {isReorderingEnabled && filteredMainOrders.length > 1 && (
-                    <span className="text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
-                      Drag to reorder
-                    </span>
-                  )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+            <Collapsible 
+              open={collapsedContainers['main-orders'] === false}
+              onOpenChange={() => toggleContainer('main-orders')}
+            >
+              <Card>
+                <CollapsibleTrigger asChild>
+                  <CardHeader className="cursor-pointer hover:bg-blue-50 transition-colors">
+                    <CardTitle className="flex items-center gap-1 sm:gap-2 min-w-0">
+                      <Package className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500 flex-shrink-0" />
+                      <span className="flex-1 text-sm sm:text-base truncate">Main Orders - {filteredMainOrders.length}</span>
+                      <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                        {isReorderingEnabled && filteredMainOrders.length > 1 && (
+                          <span className="hidden lg:inline text-xs text-muted-foreground bg-blue-100 px-2 py-1 rounded">
+                            Drag to reorder
+                          </span>
+                        )}
+                        <ChevronDown 
+                          className={`h-4 w-4 text-blue-500 transition-transform ${collapsedContainers['main-orders'] === false ? 'rotate-180' : ''} flex-shrink-0`} 
+                        />
+                      </div>
+                    </CardTitle>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent>
                 <DndContext
                   sensors={sensors}
                   collisionDetection={closestCenter}
@@ -1042,24 +1303,38 @@ export const Orders: React.FC = () => {
                     </div>
                   </SortableContext>
                 </DndContext>
-              </CardContent>
-            </Card>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
           )}
 
           {/* Add-ons Container */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Gift className="h-5 w-5 text-orange-500" />
-                Add-ons - {filteredAddOnOrders.length}
-                {isReorderingEnabled && filteredAddOnOrders.length > 1 && (
-                  <span className="text-xs text-muted-foreground bg-orange-100 px-2 py-1 rounded">
-                    Drag to reorder
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Collapsible 
+            open={collapsedContainers['add-ons'] === false}
+            onOpenChange={() => toggleContainer('add-ons')}
+          >
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="cursor-pointer hover:bg-orange-50 transition-colors">
+                  <CardTitle className="flex items-center gap-1 sm:gap-2 min-w-0">
+                    <Gift className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500 flex-shrink-0" />
+                    <span className="flex-1 text-sm sm:text-base truncate">Add-ons - {filteredAddOnOrders.length}</span>
+                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                      {isReorderingEnabled && filteredAddOnOrders.length > 1 && (
+                        <span className="hidden lg:inline text-xs text-muted-foreground bg-orange-100 px-2 py-1 rounded">
+                          Drag to reorder
+                        </span>
+                      )}
+                      <ChevronDown 
+                        className={`h-4 w-4 text-orange-500 transition-transform ${collapsedContainers['add-ons'] === false ? 'rotate-180' : ''} flex-shrink-0`} 
+                      />
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
               {filteredAddOnOrders.length === 0 ? (
                 <div className="text-center py-8">
                   <Gift className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -1106,9 +1381,23 @@ export const Orders: React.FC = () => {
                   </SortableContext>
                 </DndContext>
               )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
         </div>
+      )}
+
+      {/* Back to Top Button */}
+      {showBackToTop && (
+        <Button
+          onClick={scrollToTop}
+          className="fixed bottom-6 left-6 z-50 h-12 w-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-all duration-300 ease-in-out hover:scale-110"
+          size="icon"
+          aria-label="Back to top"
+        >
+          <ChevronUp className="h-5 w-5" />
+        </Button>
       )}
     </div>
   )

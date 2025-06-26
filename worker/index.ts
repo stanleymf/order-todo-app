@@ -395,6 +395,20 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
     ).bind(tenantId, date).all()
 
     console.log(`Found ${results?.length || 0} orders in database for date ${date}`)
+    
+    // CRITICAL: Debug all Baby's Breath orders
+    for (const order of results || []) {
+      if (order.shopify_order_id === '6181593678048') {
+        console.error('[QUERY-DEBUG] Found Baby\'s Breath in database query:', {
+          orderId: order.id,
+          shopifyOrderId: order.shopify_order_id,
+          customerName: order.customer_name,
+          hasShopifyOrderData: !!order.shopify_order_data,
+          shopifyOrderDataType: typeof order.shopify_order_data,
+          shopifyOrderDataLength: order.shopify_order_data?.length
+        });
+      }
+    }
 
     // Build product label map for add-on classification
     const productLabelMap = new Map<string, any[]>()
@@ -620,15 +634,46 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               productCategory: isAddOn ? "add-on" : "main-order",
               // Shopify order data (preserve original GraphQL data if available)
               shopifyOrderData: (() => {
+                // CRITICAL: Debug Baby's Breath shopify_order_data parsing
+                if (order.shopify_order_id === '6181593678048') {
+                  console.error('[PARSE-DEBUG] Baby\'s Breath raw data:', {
+                    hasShopifyOrderData: !!order.shopify_order_data,
+                    dataType: typeof order.shopify_order_data,
+                    dataLength: order.shopify_order_data?.length,
+                    firstChars: order.shopify_order_data?.substring?.(0, 100)
+                  });
+                }
+                
                 try {
                   // Try to parse stored GraphQL data first
                   if (order.shopify_order_data && typeof order.shopify_order_data === 'string' && order.shopify_order_data.trim() !== '') {
-                    const parsedData = JSON.parse(order.shopify_order_data);
+                    let parsedData = JSON.parse(order.shopify_order_data);
+                    
+                    // CRITICAL FIX: Handle double-encoded JSON strings
+                    if (typeof parsedData === 'string') {
+                      console.log('[DOUBLE-ENCODING-FIX] Detected double-encoded JSON for order:', order.shopify_order_id);
+                      parsedData = JSON.parse(parsedData);
+                    }
+                    
+                    // CRITICAL: Debug Baby's Breath parsed data
+                    if (order.shopify_order_id === '6181593678048') {
+                      console.error('[PARSE-DEBUG] Baby\'s Breath parsed data:', {
+                        hasName: !!parsedData.name,
+                        orderName: parsedData.name,
+                        orderId: parsedData.id,
+                        hasLineItems: !!parsedData.lineItems,
+                        parsedDataKeys: Object.keys(parsedData || {})
+                      });
+                    }
+                    
                     console.log('[GRAPHQL-PRESERVATION] Using original GraphQL data for order:', order.shopify_order_id);
                     return parsedData;
                   }
-                } catch (e) {
-                  console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data, using fallback:', e);
+                                  } catch (e) {
+                    console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data, using fallback:', e);
+                    if (order.shopify_order_id === '6181593678048') {
+                      console.error('[PARSE-DEBUG] Baby\'s Breath parse error details:', e);
+                    }
                 }
                 
                 // Fallback to reconstructed data
@@ -756,10 +801,12 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
     // Helper function to extract time window from order tags
     const getTimeWindow = (order: any): string => {
+      console.log('[TIME-WINDOW-START] Processing order:', order.shopifyOrderId || order.cardId)
       try {
         // Get shopify order data and extract tags
         let tags: string[] = []
         
+        // Try multiple approaches to get tags
         if (order.shopifyOrderData && typeof order.shopifyOrderData === 'object') {
           const orderData = order.shopifyOrderData
           if (typeof orderData.tags === 'string') {
@@ -767,24 +814,60 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           } else if (Array.isArray(orderData.tags)) {
             tags = orderData.tags
           }
+        } else if (typeof order.shopifyOrderData === 'string') {
+          // Handle case where shopifyOrderData is stored as JSON string
+          try {
+            const parsedData = JSON.parse(order.shopifyOrderData)
+            if (typeof parsedData.tags === 'string') {
+              tags = parsedData.tags.split(',').map(tag => tag.trim())
+            } else if (Array.isArray(parsedData.tags)) {
+              tags = parsedData.tags
+            }
+            console.log('[TIME-WINDOW-DEBUG] Parsed JSON string data for order:', order.shopifyOrderId)
+          } catch (parseError) {
+            console.log('[TIME-WINDOW-ERROR] Failed to parse JSON string shopifyOrderData for order:', order.shopifyOrderId, parseError)
+          }
         }
+        
+        // Fallback: try to extract from stored tags field directly
+        if (tags.length === 0 && order.tags) {
+          if (typeof order.tags === 'string') {
+            tags = order.tags.split(',').map(tag => tag.trim())
+          } else if (Array.isArray(order.tags)) {
+            tags = order.tags
+          }
+          console.log('[TIME-WINDOW-DEBUG] Using fallback tags field for order:', order.shopifyOrderId)
+        }
+        
+        // Log for debugging
+        console.log('[TIME-WINDOW-DEBUG] Order:', order.shopifyOrderId || order.cardId, 'Tags:', tags, 'GraphQL data type:', typeof order.shopifyOrderData)
         
         // Look for time slot patterns in tags
         for (const tag of tags) {
           const timeSlot = tag.trim()
+          console.log('[TIME-WINDOW-DEBUG] Checking tag:', timeSlot)
           
           // Morning: 10:00-14:00, 10:00-13:00
           if (timeSlot.match(/^10:00[-–]1[3-4]:00$/)) {
+            console.log('[TIME-WINDOW-DEBUG] Matched Morning for:', timeSlot)
             return 'Morning'
+          }
+          
+          // Sunday: 11:00-15:00
+          if (timeSlot.match(/^11:00[-–]15:00$/)) {
+            console.log('[TIME-WINDOW-DEBUG] Matched Sunday for:', timeSlot)
+            return 'Sunday'
           }
           
           // Afternoon: 14:00-18:00, 14:00-16:00  
           if (timeSlot.match(/^14:00[-–]1[6-8]:00$/)) {
+            console.log('[TIME-WINDOW-DEBUG] Matched Afternoon for:', timeSlot)
             return 'Afternoon'
           }
           
           // Night: 18:00-22:00
           if (timeSlot.match(/^18:00[-–]22:00$/)) {
+            console.log('[TIME-WINDOW-DEBUG] Matched Night for:', timeSlot)
             return 'Night'
           }
         }
@@ -798,6 +881,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             const hour = parseInt(hourMatch[1])
             
             if (hour >= 10 && hour < 14) return 'Morning'
+            if (hour >= 11 && hour < 15) return 'Sunday'  // Sunday fallback for express orders 11-15
             if (hour >= 14 && hour < 18) return 'Afternoon'  
             if (hour >= 18 && hour < 22) return 'Night'
           }
@@ -811,9 +895,21 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       }
     }
 
+    // Check if we reached the classification stage
+    console.log(`[PRE-CLASSIFICATION] About to start classification with ${processedOrders.length} processed orders`)
+    
     // Separate orders into main orders and add-ons
-    const mainOrders = processedOrders.filter(order => !order.isAddOn)
+    console.log(`[ADDON-CLASSIFICATION] Total processed orders: ${processedOrders.length}`)
+    
+    const mainOrders = processedOrders.filter(order => {
+      const isMain = !order.isAddOn
+      console.log(`[ADDON-CLASSIFICATION] Order ${order.shopifyOrderId || order.cardId}: isAddOn=${order.isAddOn}, classified as ${isMain ? 'MAIN' : 'ADDON'}`)
+      return isMain
+    })
+    
     const addOnOrders = processedOrders.filter(order => order.isAddOn)
+    
+    console.log(`[ADDON-CLASSIFICATION] Final counts - Main Orders: ${mainOrders.length}, Add-ons: ${addOnOrders.length}`)
 
     // Sort function for consistent ordering
     const sortByOrder = (a: any, b: any) => {
@@ -824,54 +920,142 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       return 0
     }
 
-    // Group main orders by store and time window
+    // Fetch store creation dates for sorting
+    const storeCreationDates: Record<string, string> = {}
+    try {
+      const { results: storeResults } = await c.env.DB.prepare(`
+        SELECT id, shopify_domain, created_at 
+        FROM shopify_stores 
+        WHERE tenant_id = ?
+      `).bind(tenantId).all()
+      
+      for (const store of storeResults || []) {
+        storeCreationDates[store.id] = store.created_at || '1970-01-01'
+        // Also map by domain name for fallback
+        storeCreationDates[store.shopify_domain] = store.created_at || '1970-01-01'
+      }
+    } catch (error) {
+      console.error('[STORE-DATES] Error fetching store creation dates:', error)
+    }
+
+    // Group main orders by store and time window (nested structure)
+    console.log(`[NESTED-GROUPING] Processing ${mainOrders.length} main orders for nested store+time grouping`)
     const storeTimeGroups: Record<string, any> = {}
+    
     for (const order of mainOrders) {
       const storeName = getStoreName(order)
       const timeWindow = getTimeWindow(order)
       const storeId = order.storeId || order.store_id || 'unknown'
       
-      // Create unique key for store + time window combination
-      const containerKey = `${timeWindow} - ${storeName}`
+      // CRITICAL: Debug Baby's Breath before adding to container
+      if (order.title?.includes("Baby's Breath")) {
+        console.error('[GROUPING-BEFORE] Baby\'s Breath BEFORE adding to container:', {
+          shopifyOrderId: order.shopifyOrderId,
+          hasShopifyOrderData: !!order.shopifyOrderData,
+          shopifyOrderDataName: order.shopifyOrderData?.name,
+          shopifyOrderDataType: typeof order.shopifyOrderData
+        });
+      }
       
-      if (!storeTimeGroups[containerKey]) {
-        storeTimeGroups[containerKey] = {
-          containerKey,
-          storeName,
+      console.log(`[NESTED-GROUPING] Order ${order.shopifyOrderId || order.cardId} -> Store: "${storeName}", Time Window: "${timeWindow}"`)
+      
+      // Initialize store if it doesn't exist
+      if (!storeTimeGroups[storeName]) {
+        storeTimeGroups[storeName] = {
           storeId,
-          timeWindow,
-          orders: []
+          storeName,
+          timeWindows: {},
+          totalOrders: 0
         }
       }
-      storeTimeGroups[containerKey].orders.push(order)
-    }
-
-    // Sort orders within each time window group and sort containers by time window priority
-    const timeWindowPriority = { 'Morning': 1, 'Afternoon': 2, 'Night': 3, 'Unscheduled': 4 }
-    
-    const sortedTimeWindowContainers = Object.values(storeTimeGroups)
-      .map(group => ({
-        ...group,
-        orders: group.orders.sort(sortByOrder),
-        orderCount: group.orders.length
-      }))
-      .sort((a, b) => {
-        // First sort by store name (alphabetical)
-        if (a.storeName !== b.storeName) {
-          return a.storeName.localeCompare(b.storeName)
+      
+      // Initialize time window within store if it doesn't exist
+      if (!storeTimeGroups[storeName].timeWindows[timeWindow]) {
+        storeTimeGroups[storeName].timeWindows[timeWindow] = {
+          timeWindow,
+          orders: [],
+          orderCount: 0
         }
-        // Then sort by time window priority (Morning, Afternoon, Night, Unscheduled)
-        const aPriority = timeWindowPriority[a.timeWindow as keyof typeof timeWindowPriority] || 5
-        const bPriority = timeWindowPriority[b.timeWindow as keyof typeof timeWindowPriority] || 5
-        return aPriority - bPriority
+      }
+      
+      // Add order to the appropriate store + time window
+      storeTimeGroups[storeName].timeWindows[timeWindow].orders.push(order)
+      storeTimeGroups[storeName].timeWindows[timeWindow].orderCount++
+      storeTimeGroups[storeName].totalOrders++
+      
+      // CRITICAL: Debug Baby's Breath AFTER adding to container
+      if (order.title?.includes("Baby's Breath")) {
+        const addedOrder = storeTimeGroups[storeName].timeWindows[timeWindow].orders[
+          storeTimeGroups[storeName].timeWindows[timeWindow].orders.length - 1
+        ];
+        console.error('[GROUPING-AFTER] Baby\'s Breath AFTER adding to container:', {
+          shopifyOrderId: addedOrder.shopifyOrderId,
+          hasShopifyOrderData: !!addedOrder.shopifyOrderData,
+          shopifyOrderDataName: addedOrder.shopifyOrderData?.name,
+          shopifyOrderDataType: typeof addedOrder.shopifyOrderData,
+          orderIsExactlyTheSame: addedOrder === order
+        });
+      }
+    }
+    
+    // Convert nested structure to sorted arrays for frontend
+    const timeOrder = ['Morning', 'Sunday', 'Afternoon', 'Night', 'Unscheduled']
+    
+    const nestedStoreContainers = Object.values(storeTimeGroups)
+      .sort((a: any, b: any) => {
+        // Sort stores by creation date (as per existing logic)
+        const aDate = storeCreationDates[a.storeId] || storeCreationDates[a.storeName] || '1970-01-01'
+        const bDate = storeCreationDates[b.storeId] || storeCreationDates[b.storeName] || '1970-01-01'
+        return aDate.localeCompare(bDate)
       })
+      .map((store: any) => {
+        // Sort time windows within each store and prepare orders
+        const sortedTimeWindows = Object.values(store.timeWindows)
+          .map((tw: any) => ({
+            ...tw,
+            orders: tw.orders.sort(sortByOrder)
+          }))
+          .sort((a: any, b: any) => {
+            const aIndex = timeOrder.indexOf(a.timeWindow)
+            const bIndex = timeOrder.indexOf(b.timeWindow)
+            return (aIndex === -1 ? timeOrder.length : aIndex) - (bIndex === -1 ? timeOrder.length : bIndex)
+          })
+        
+        return {
+          ...store,
+          timeWindows: sortedTimeWindows
+        }
+      })
+    
+    console.log(`[NESTED-GROUPING] Created ${nestedStoreContainers.length} store containers with nested time windows`)
+    nestedStoreContainers.forEach(store => {
+      console.log(`[NESTED-GROUPING] Store "${store.storeName}": ${store.totalOrders} total orders, ${store.timeWindows.length} time windows`)
+      store.timeWindows.forEach((tw: any) => {
+        console.log(`[NESTED-GROUPING]   ${tw.timeWindow}: ${tw.orderCount} orders`)
+      })
+    })
+    
+    // Create flat containers for backward compatibility
+    const flatTimeWindowContainers: any[] = []
+    nestedStoreContainers.forEach(store => {
+      store.timeWindows.forEach((tw: any) => {
+        flatTimeWindowContainers.push({
+          containerKey: `${tw.timeWindow} - ${store.storeName}`,
+          storeName: store.storeName,
+          storeId: store.storeId,
+          timeWindow: tw.timeWindow,
+          orders: tw.orders,
+          orderCount: tw.orderCount
+        })
+      })
+    })
 
     // Sort add-on orders separately
     addOnOrders.sort(sortByOrder)
 
     console.log(`Processed ${processedOrders.length} cards from database for date ${date}`)
-    console.log(`Time window containers: ${sortedTimeWindowContainers.length}, Add-ons: ${addOnOrders.length}`)
-    console.log(`Time window breakdown:`, sortedTimeWindowContainers.map(sc => `${sc.containerKey}: ${sc.orderCount}`).join(', '))
+    console.log(`Nested store containers: ${nestedStoreContainers.length}, Flat containers: ${flatTimeWindowContainers.length}, Add-ons: ${addOnOrders.length}`)
+    console.log(`Store breakdown:`, nestedStoreContainers.map(sc => `${sc.storeName}: ${sc.totalOrders}`).join(', '))
     
     // Debug logging for first few orders
     if (processedOrders.length > 0) {
@@ -892,13 +1076,15 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       orders: processedOrders,
       mainOrders: mainOrders, // Keep for backward compatibility
       addOnOrders: addOnOrders,
-      storeContainers: sortedTimeWindowContainers, // Enhanced time window-based grouping
-      timeWindowContainers: sortedTimeWindowContainers, // New time window containers
+      storeContainers: flatTimeWindowContainers, // FIXED: Frontend expects flat structure with store+time combinations
+      timeWindowContainers: flatTimeWindowContainers, // Enhanced time window-based grouping (backward compatibility)
+      nestedStoreContainers: nestedStoreContainers, // NEW: Available for future frontend enhancements
       stats: {
         total: processedOrders.length,
         mainOrders: mainOrders.length,
         addOns: addOnOrders.length,
-        timeWindows: sortedTimeWindowContainers.length,
+        timeWindows: flatTimeWindowContainers.length,
+        stores: nestedStoreContainers.length,
         // Add status-based stats
         unassigned: processedOrders.filter(o => !o.status || o.status === 'unassigned').length,
         assigned: processedOrders.filter(o => o.status === 'assigned').length,
