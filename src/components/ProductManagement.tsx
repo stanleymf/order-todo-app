@@ -53,87 +53,41 @@ import { toast } from "sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table"
 import { Checkbox } from "./ui/checkbox"
 
-// Custom hook for drag-to-select functionality
-const useDragToSelect = (
+// Custom hook for shift+click multi-select functionality
+const useShiftClickSelect = (
   products: any[], 
   selectedItems: Set<string>, 
-  onToggleSelect: (id: string) => void
+  onToggleSelect: (id: string) => void,
+  onSetSelected: (ids: Set<string>) => void
 ) => {
-  const [isDragging, setIsDragging] = useState(false)
-  const [draggedItems, setDraggedItems] = useState<Set<string>>(new Set())
-  const dragStartRef = useRef<string | null>(null)
-  const tableRef = useRef<HTMLTableElement>(null)
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null)
 
-  // Reset drag state when products change
-  useEffect(() => {
-    setIsDragging(false)
-    setDraggedItems(new Set())
-    dragStartRef.current = null
-  }, [products])
-
-  const handleMouseDown = useCallback((productId: string) => {
-    setIsDragging(true)
-    dragStartRef.current = productId
-    setDraggedItems(new Set([productId]))
-  }, [])
-
-  const handleMouseEnter = useCallback((productId: string) => {
-    if (isDragging && dragStartRef.current) {
-      setDraggedItems(prev => new Set([...prev, productId]))
-    }
-  }, [isDragging])
-
-  const handleMouseUp = useCallback(() => {
-    if (isDragging && draggedItems.size > 0) {
-      // Apply selections
-      draggedItems.forEach(id => {
-        if (!selectedItems.has(id)) {
-          onToggleSelect(id)
+  const handleCheckboxClick = useCallback((productId: string, index: number, event: React.MouseEvent) => {
+    if (event.shiftKey && lastClickedIndex !== null) {
+      // Shift+click: Select range
+      event.preventDefault()
+      const startIndex = Math.min(lastClickedIndex, index)
+      const endIndex = Math.max(lastClickedIndex, index)
+      
+      const newSelected = new Set(selectedItems)
+      for (let i = startIndex; i <= endIndex; i++) {
+        if (products[i]) {
+          newSelected.add(products[i].id)
         }
-      })
-    }
-    setIsDragging(false)
-    setDraggedItems(new Set())
-    dragStartRef.current = null
-  }, [isDragging, draggedItems, selectedItems, onToggleSelect])
-
-  // Global mouse up listener to handle drag end even outside the table
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (isDragging) {
-        handleMouseUp()
       }
+      onSetSelected(newSelected)
+    } else if (event.ctrlKey || event.metaKey) {
+      // Ctrl/Cmd+click: Toggle individual item
+      onToggleSelect(productId)
+      setLastClickedIndex(index)
+    } else {
+      // Regular click: Toggle individual item
+      onToggleSelect(productId)
+      setLastClickedIndex(index)
     }
+  }, [lastClickedIndex, selectedItems, products, onToggleSelect, onSetSelected])
 
-    if (isDragging) {
-      document.addEventListener('mouseup', handleGlobalMouseUp)
-      return () => document.removeEventListener('mouseup', handleGlobalMouseUp)
-    }
-  }, [isDragging, handleMouseUp])
-
-  const getRowProps = useCallback((productId: string) => {
-    const isBeingDragged = draggedItems.has(productId)
-    return {
-      onMouseDown: () => handleMouseDown(productId),
-      onMouseEnter: () => handleMouseEnter(productId),
-      className: isBeingDragged 
-        ? 'bg-blue-50 cursor-pointer select-none border-blue-200 transition-colors' 
-        : 'cursor-pointer select-none hover:bg-gray-50 transition-colors',
-      style: { 
-        userSelect: 'none' as const,
-        WebkitUserSelect: 'none' as const,
-        MozUserSelect: 'none' as const,
-        msUserSelect: 'none' as const
-      }
-    }
-  }, [draggedItems, handleMouseDown, handleMouseEnter])
-
-  return {
-    tableRef,
-    getRowProps,
-    isDragging,
-    draggedItems
-  }
+  return { handleCheckboxClick }
 }
 
 export function ProductManagement() {
@@ -995,16 +949,18 @@ export function ProductManagement() {
   }
 
   // Initialize drag-to-select hooks for both tables
-  const allProductsDrag = useDragToSelect(
+  const allProductsDrag = useShiftClickSelect(
     finalFilteredProducts,
     selectedProducts,
-    handleToggleSelectProduct
+    handleToggleSelectProduct,
+    setSelectedProducts
   )
 
-  const savedProductsDrag = useDragToSelect(
+  const savedProductsDrag = useShiftClickSelect(
     paginatedSavedProducts,
     selectedSavedProducts,
-    handleToggleSelectSavedProduct
+    handleToggleSelectSavedProduct,
+    setSelectedSavedProducts
   )
 
   if (!tenant?.id) {
@@ -1531,11 +1487,11 @@ export function ProductManagement() {
             <>
               {!isMobileView && (
                 <div className="mb-3 text-xs text-gray-500 flex items-center gap-1">
-                  <span>💡 Tip: Click and drag across checkboxes to select multiple products at once</span>
+                  <span>💡 Tip: Hold Shift and click to select multiple products at once</span>
                 </div>
               )}
               <div className={`overflow-x-auto ${isMobileView ? "-mx-3" : ""}`}>
-                <Table ref={allProductsDrag.tableRef}>
+                <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className={`${isMobileView ? "w-[40px] px-2" : "w-[50px]"}`}>
@@ -1546,8 +1502,6 @@ export function ProductManagement() {
                               finalFilteredProducts.length > 0
                             }
                             onCheckedChange={handleToggleSelectAll}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
                           />
                           {!isMobileView && (
                             <span className="text-xs text-gray-400 ml-1" title="Drag to select multiple">
@@ -1563,14 +1517,13 @@ export function ProductManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {finalFilteredProducts.map((product) => (
-                      <TableRow key={product.id} {...allProductsDrag.getRowProps(product.id)}>
+                                          {finalFilteredProducts.map((product, index) => (
+                        <TableRow key={product.id}>
                         <TableCell className={isMobileView ? "px-2" : ""}>
                           <Checkbox
                             checked={selectedProducts.has(product.id)}
                             onCheckedChange={() => handleToggleSelectProduct(product.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => allProductsDrag.handleCheckboxClick(product.id, index, e)}
                           />
                         </TableCell>
                         <TableCell className={isMobileView ? "px-2" : ""}>
@@ -1826,11 +1779,11 @@ export function ProductManagement() {
             <>
               {!isMobileView && (
                 <div className="mb-3 text-xs text-gray-500 flex items-center gap-1">
-                  <span>💡 Tip: Click and drag across checkboxes to select multiple products at once</span>
+                  <span>💡 Tip: Hold Shift and click to select multiple products at once</span>
                 </div>
               )}
               <div className={`overflow-x-auto ${isMobileView ? "-mx-3" : ""}`}>
-                <Table ref={savedProductsDrag.tableRef}>
+                <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className={`${isMobileView ? "w-[40px] px-2" : "w-[50px]"}`}>
@@ -1841,8 +1794,6 @@ export function ProductManagement() {
                               paginatedSavedProducts.length > 0
                             }
                             onCheckedChange={handleToggleSelectAllSavedProducts}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
                           />
                           {!isMobileView && (
                             <span className="text-xs text-gray-400 ml-1" title="Drag to select multiple">
@@ -1859,14 +1810,13 @@ export function ProductManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedSavedProducts.map((product) => (
-                      <TableRow key={product.id} {...savedProductsDrag.getRowProps(product.id)}>
+                                          {paginatedSavedProducts.map((product, index) => (
+                        <TableRow key={product.id}>
                         <TableCell className={isMobileView ? "px-2" : ""}>
                           <Checkbox
                             checked={selectedSavedProducts.has(product.id)}
                             onCheckedChange={() => handleToggleSelectSavedProduct(product.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => savedProductsDrag.handleCheckboxClick(product.id, index, e)}
                           />
                         </TableCell>
                         <TableCell className={isMobileView ? "px-2" : ""}>
