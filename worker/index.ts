@@ -1472,9 +1472,10 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       requestParams: JSON.stringify({ status, notes, assignedTo, deliveryDate })
     })
     
-    // Create consistent timestamp for SQLite format
+    // Create consistent timestamp for SQLite format with microsecond precision for uniqueness
     const now = new Date()
-    const sqliteTimestamp = now.toISOString().slice(0, 19).replace('T', ' ')
+    const microseconds = (performance.now() % 1000).toFixed(3)
+    const sqliteTimestamp = now.toISOString().slice(0, 19).replace('T', ' ') + '.' + microseconds
     
     console.log(`[ORDER-CARD-STATE-FORTIFIED] Updating card ${cardId} for tenant ${tenantId}`)
     console.log(`[ORDER-CARD-STATE-FORTIFIED] Update params:`, { 

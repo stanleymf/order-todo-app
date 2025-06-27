@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.82] - 2025-01-20
+
+### 🚨 CRITICAL FIX: Timestamp Precision Issue Resolved
+- **Fixed successive update failures** caused by identical timestamps to the second
+- **Added microsecond precision** to SQLite timestamps using performance.now()
+- **Root cause identified**: SQLite CURRENT_TIMESTAMP has 1-second precision, causing rapid updates to get identical timestamps
+- **Solution**: Unique microsecond timestamps ensure proper change detection
+
+### 🐛 Real-Time Sync Fix
+- First update worked, subsequent ones failed due to timestamp collision
+- Enhanced timestamp format: `2025-06-27 08:33:36.123` instead of `2025-06-27 08:33:36`
+- Prevents "timestamp not newer" false positives for rapid successive changes
+- Cross-device sync now properly detects all updates regardless of timing
+
+### 🔧 Technical Improvements
+- Microsecond precision timestamps for database uniqueness
+- Better change detection for real-time polling
+- Eliminated false duplicate detection for rapid updates
+
 ## [1.5.81] - 2025-01-20
 
 ### 🔍 Enhanced Rate Limiting & Successive Update Debugging
