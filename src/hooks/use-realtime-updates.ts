@@ -143,12 +143,33 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             
             // Check if this is a new order (not seen before) or an updated order
             const isNewOrder = !knownOrderIds.current.has(change.cardId)
-            const hasNewerTimestamp = !lastProcessedTimestamp || new Date(change.updatedAt) > new Date(lastProcessedTimestamp)
+            const hasNewerTimestamp = !lastProcessedTimestamp || comparisonResult
             
-            // ENHANCED: Detailed timestamp comparison debugging
-            const changeTimeMs = new Date(change.updatedAt).getTime()
-            const lastProcessedMs = lastProcessedTimestamp ? new Date(lastProcessedTimestamp).getTime() : 0
-            const timeDiffMs = changeTimeMs - lastProcessedMs
+            // ENHANCED: Detailed timestamp comparison debugging with error handling
+            let changeTimeMs = 0
+            let lastProcessedMs = 0
+            let timeDiffMs = 0
+            let changeTimeDate = 'invalid'
+            let lastProcessedDate = 'none'
+            let comparisonResult = false
+            
+            try {
+              changeTimeMs = new Date(change.updatedAt).getTime()
+              lastProcessedMs = lastProcessedTimestamp ? new Date(lastProcessedTimestamp).getTime() : 0
+              timeDiffMs = changeTimeMs - lastProcessedMs
+              changeTimeDate = new Date(change.updatedAt).toISOString()
+              lastProcessedDate = lastProcessedTimestamp ? new Date(lastProcessedTimestamp).toISOString() : 'none'
+              comparisonResult = lastProcessedTimestamp ? (new Date(change.updatedAt) > new Date(lastProcessedTimestamp)) : true
+            } catch (dateError) {
+              console.error(`[${clientId}] POLLING Date parsing error:`, {
+                error: dateError,
+                changeUpdatedAt: change.updatedAt,
+                lastProcessedTimestamp,
+                changeUpdatedAtType: typeof change.updatedAt
+              })
+              // For invalid dates, treat as newer to prevent permanent skipping
+              comparisonResult = true
+            }
             
             console.log(`🔍 [${clientId}] POLLING Order ${change.cardId}:`, {
               isNewOrder,
@@ -156,14 +177,14 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               changeTime: change.updatedAt,
               lastProcessed: lastProcessedTimestamp,
               willUpdate: isNewOrder || hasNewerTimestamp,
-              timestampDebug: {
-                changeTimeMs,
-                lastProcessedMs,
-                timeDiffMs,
-                changeTimeDate: new Date(change.updatedAt).toISOString(),
-                lastProcessedDate: lastProcessedTimestamp ? new Date(lastProcessedTimestamp).toISOString() : 'none',
-                comparisonResult: lastProcessedTimestamp ? (new Date(change.updatedAt) > new Date(lastProcessedTimestamp)) : 'no previous timestamp'
-              }
+                              timestampDebug: {
+                  changeTimeMs,
+                  lastProcessedMs,
+                  timeDiffMs,
+                  changeTimeDate,
+                  lastProcessedDate,
+                  comparisonResult
+                }
             })
             
             // FIXED: Use timestamp comparison for cross-device detection
