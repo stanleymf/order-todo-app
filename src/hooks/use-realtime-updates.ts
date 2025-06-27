@@ -24,31 +24,28 @@ interface UseRealtimeUpdatesOptions {
 }
 
 export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
-  const { enabled = true, pollInterval = 3000, onUpdate } = options
+  const {
+    enabled = true,
+    pollInterval = 1500, // Reduced from 3000ms to 1.5s for faster bulk updates
+    onUpdate
+  } = options
   const { tenant } = useAuth()
 
-  // Create unique client identifier for debugging
-  const clientId = useRef(`${navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop'}-${Date.now()}`).current
+  // Create unique client ID for this session
+  const clientId = useRef(`${typeof window !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent) ? 'Mobile' : 'Desktop'}-${Date.now()}`)
+  
+  // CROSS-DEVICE FIX: Add session timestamp to make each session independent
+  const sessionStartTime = useRef(Date.now())
+  const lastProcessedTimestamps = useRef<Map<string, string>>(new Map())
+  const knownOrderIds = useRef<Set<string>>(new Set())
 
   console.log('🔄 [REALTIME-HOOK] Initializing/re-initializing hook', {
-    clientId,
+    clientId: clientId.current,
     tenantId: tenant?.id,
     tenantName: tenant?.name,
     enabled,
     hasCallback: !!onUpdate,
-    userAgent: navigator.userAgent.substring(0, 100),
-    timestamp: new Date().toISOString(),
-    // Mobile-specific environment debugging
-    environment: {
-      isMobile: navigator.userAgent.includes('Mobile'),
-      isTouch: 'ontouchstart' in window,
-      screenSize: `${window.screen.width}x${window.screen.height}`,
-      viewportSize: `${window.innerWidth}x${window.innerHeight}`,
-      connection: (navigator as any).connection ? {
-        effectiveType: (navigator as any).connection.effectiveType,
-        downlink: (navigator as any).connection.downlink
-      } : 'unknown'
-    }
+    pollInterval
   })
 
   const [isConnected, setIsConnected] = useState(false)
@@ -64,13 +61,11 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
   const pollIntervalRef = useRef<number | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const lastKnownStates = useRef<Map<string, string>>(new Map()) // Track last known states per order
-  const lastProcessedTimestamps = useRef<Map<string, string>>(new Map()) // Track when we last processed each order
-  const knownOrderIds = useRef<Set<string>>(new Set()) // Track last known states
 
   // Enhanced polling-based real-time updates (no SSE)
   const checkForUpdates = useCallback(async () => {
     if (!tenant?.id || !enabled) {
-      console.log(`❌ [${clientId}] POLLING Stopped - missing tenant or disabled:`, { 
+      console.log(`❌ [${clientId.current}] POLLING Stopped - missing tenant or disabled:`, { 
         tenantId: tenant?.id, 
         tenantName: tenant?.name,
         enabled 
@@ -78,7 +73,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       return
     }
 
-    console.log(`🔄 [${clientId}] POLLING Checking updates...`, new Date().toLocaleTimeString())
+    console.log(`🔄 [${clientId.current}] POLLING Checking updates...`, new Date().toLocaleTimeString())
 
     try {
       const url = `${API_BASE_URL}/api/tenants/${tenant.id}/order-card-states/realtime-check`
@@ -89,7 +84,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       // Debug auth token with detailed info
       const authToken = localStorage.getItem('auth_token')
       if (!authToken) {
-        console.error(`❌ [${clientId}] POLLING No auth token found!`, {
+        console.error(`❌ [${clientId.current}] POLLING No auth token found!`, {
           localStorage_keys: Object.keys(localStorage),
           tenantId: tenant?.id,
           tenantName: tenant?.name
@@ -99,7 +94,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       }
       
       // Log token info (first/last few chars for security)
-      console.log(`🔑 [${clientId}] POLLING Auth token:`, {
+      console.log(`🔑 [${clientId.current}] POLLING Auth token:`, {
         tokenStart: authToken.substring(0, 10),
         tokenEnd: authToken.substring(authToken.length - 10),
         tokenLength: authToken.length,
@@ -117,18 +112,18 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       const endTime = performance.now()
       const requestDuration = Math.round(endTime - startTime)
 
-      console.log(`📡 [${clientId}] POLLING Response:`, response.status, response.statusText, `(${requestDuration}ms)`)
+      console.log(`📡 [${clientId.current}] POLLING Response:`, response.status, response.statusText, `(${requestDuration}ms)`)
 
       if (response.ok) {
         const data = await response.json()
-        console.log(`📊 [${clientId}] POLLING Changes found:`, data.changes?.length || 0)
+        console.log(`📊 [${clientId.current}] POLLING Changes found:`, data.changes?.length || 0)
         
         // ENHANCED: Reset failure tracking on success
         consecutiveFailures.current = 0
         lastSuccessTime.current = Date.now()
         
         // ENHANCED: Log the actual server response for debugging
-        console.log(`🔍 [${clientId}] POLLING Server response:`, {
+        console.log(`🔍 [${clientId.current}] POLLING Server response:`, {
           changesCount: data.changes?.length || 0,
           timestamp: data.timestamp,
           debug: data.debug,
@@ -143,6 +138,11 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             
             // Check if this is a new order (not seen before) or an updated order
             const isNewOrder = !knownOrderIds.current.has(change.cardId)
+            
+            // CROSS-DEVICE FIX: Only process changes that happened after this session started
+            const changeTime = new Date(change.updatedAt).getTime()
+            const sessionStarted = sessionStartTime.current
+            const isAfterSessionStart = changeTime >= sessionStarted
             
             // ENHANCED: Detailed timestamp comparison debugging with error handling
             let changeTimeMs = 0
@@ -160,7 +160,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               lastProcessedDate = lastProcessedTimestamp ? new Date(lastProcessedTimestamp).toISOString() : 'none'
               comparisonResult = lastProcessedTimestamp ? (new Date(change.updatedAt) > new Date(lastProcessedTimestamp)) : true
             } catch (dateError) {
-              console.error(`[${clientId}] POLLING Date parsing error:`, {
+              console.error(`[${clientId.current}] POLLING Date parsing error:`, {
                 error: dateError,
                 changeUpdatedAt: change.updatedAt,
                 lastProcessedTimestamp,
@@ -170,30 +170,35 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               comparisonResult = true
             }
             
+            // CROSS-DEVICE FIX: Only process if it's after session start AND (new or newer timestamp)
             const hasNewerTimestamp = !lastProcessedTimestamp || comparisonResult
+            const shouldProcess = isAfterSessionStart && (isNewOrder || hasNewerTimestamp)
             
-            console.log(`🔍 [${clientId}] POLLING Order ${change.cardId}:`, {
+            console.log(`🔍 [${clientId.current}] POLLING Order ${change.cardId}:`, {
               isNewOrder,
               hasNewerTimestamp,
+              isAfterSessionStart,
+              shouldProcess,
               changeTime: change.updatedAt,
               lastProcessed: lastProcessedTimestamp,
-              willUpdate: isNewOrder || hasNewerTimestamp,
-                              timestampDebug: {
-                  changeTimeMs,
-                  lastProcessedMs,
-                  timeDiffMs,
-                  changeTimeDate,
-                  lastProcessedDate,
-                  comparisonResult
-                }
+              sessionStartTime: new Date(sessionStarted).toISOString(),
+              willUpdate: shouldProcess,
+              timestampDebug: {
+                changeTimeMs,
+                lastProcessedMs,
+                timeDiffMs,
+                changeTimeDate,
+                lastProcessedDate,
+                comparisonResult
+              }
             })
             
-            // FIXED: Use timestamp comparison for cross-device detection
-            if (isNewOrder || hasNewerTimestamp) {
-              console.log(`🔥 [${clientId}] POLLING DETECTED ${isNewOrder ? 'NEW ORDER' : 'CHANGE'} for ${change.cardId}`)
+            // CROSS-DEVICE FIX: Use shouldProcess instead of original logic
+            if (shouldProcess) {
+              console.log(`🔥 [${clientId.current}] POLLING DETECTED ${isNewOrder ? 'NEW ORDER' : 'CHANGE'} for ${change.cardId}`)
               
               // ENHANCED: Log before state update
-              console.log(`📝 [${clientId}] POLLING BEFORE STATE UPDATE:`, {
+              console.log(`📝 [${clientId.current}] POLLING BEFORE STATE UPDATE:`, {
                 orderId: change.cardId,
                 oldTimestamp: lastProcessedTimestamp,
                 newTimestamp: change.updatedAt,
@@ -201,17 +206,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
                 currentTimestamps: Object.fromEntries(lastProcessedTimestamps.current)
               })
               
-              // Update tracking
-              lastProcessedTimestamps.current.set(change.cardId, change.updatedAt)
-              knownOrderIds.current.add(change.cardId)
-              
-              // ENHANCED: Log after state update
-              console.log(`✅ [${clientId}] POLLING AFTER STATE UPDATE:`, {
-                orderId: change.cardId,
-                newStoredTimestamp: lastProcessedTimestamps.current.get(change.cardId),
-                totalKnownOrders: knownOrderIds.current.size,
-                allStoredTimestamps: Object.fromEntries(lastProcessedTimestamps.current)
-              })
+              // DON'T update tracking here - wait until after successful processing!
               
               const update: RealtimeUpdate = {
                 type: isNewOrder ? 'order_created' : 'order_updated',
@@ -228,7 +223,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               newUpdates.push(update)
             } else {
               // ENHANCED: Log why update was skipped
-              console.log(`⏭️ [${clientId}] POLLING SKIPPING ORDER ${change.cardId}:`, {
+              console.log(`⏭️ [${clientId.current}] POLLING SKIPPING ORDER ${change.cardId}:`, {
                 reason: isNewOrder ? 'not new' : 'timestamp not newer',
                 isNewOrder,
                 hasNewerTimestamp,
@@ -240,7 +235,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
           }
           
           if (newUpdates.length > 0) {
-            console.log(`🎯 [${clientId}] POLLING Triggering`, newUpdates.length, 'updates')
+            console.log(`🎯 [${clientId.current}] POLLING Triggering`, newUpdates.length, 'updates')
             setUpdates(prev => [...prev, ...newUpdates])
             setIsConnected(true)
             
@@ -250,7 +245,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             updateCount.current += newUpdates.length
             lastUpdateTime.current = now
             
-            console.log(`⏱️ [${clientId}] POLLING RATE ANALYSIS:`, {
+            console.log(`⏱️ [${clientId.current}] POLLING RATE ANALYSIS:`, {
               updatesInBatch: newUpdates.length,
               timeSinceLastBatch: timeSinceLastUpdate,
               totalUpdatesProcessed: updateCount.current,
@@ -259,8 +254,20 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             
             // Call the onUpdate callback for each update
             newUpdates.forEach(update => {
-              console.log(`🚀 [${clientId}] POLLING Callback for:`, update.orderId, 'by', update.updatedBy)
+              console.log(`🚀 [${clientId.current}] POLLING Callback for:`, update.orderId, 'by', update.updatedBy)
               onUpdate?.(update)
+            })
+
+            // NOW UPDATE TRACKING - only after successful processing!
+            newUpdates.forEach(update => {
+              lastProcessedTimestamps.current.set(update.orderId, update.timestamp)
+              knownOrderIds.current.add(update.orderId)
+              
+              console.log(`✅ [${clientId.current}] POLLING MARKED AS PROCESSED:`, {
+                orderId: update.orderId,
+                timestamp: update.timestamp,
+                totalTracked: lastProcessedTimestamps.current.size
+              })
             })
 
             // ENHANCED: Check for rapid changes
@@ -270,8 +277,34 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               return (now - changeTime) < 5000 // Changes within last 5 seconds
             })
             
+            // ENHANCED: Detect bulk operations (multiple orders updated rapidly)
+            const bulkChanges = newUpdates.filter(change => {
+              const changeTime = new Date(change.timestamp).getTime()
+              const now = Date.now()
+              return (now - changeTime) < 10000 // Changes within last 10 seconds
+            })
+            
+            if (bulkChanges.length >= 3) {
+              console.log(`📦 [${clientId.current}] POLLING DETECTED BULK OPERATION:`, {
+                totalChanges: newUpdates.length,
+                bulkChanges: bulkChanges.length,
+                timeSpan: '10 seconds',
+                affectedOrders: bulkChanges.map(c => c.orderId),
+                updatedBy: [...new Set(bulkChanges.map(c => c.updatedBy))],
+                statusChanges: bulkChanges.map(c => `${c.orderId}: ${c.status}`)
+              })
+              
+              // Trigger immediate notification for bulk operations
+              if (onUpdate) {
+                setTimeout(() => {
+                  console.log(`🚨 [${clientId.current}] BULK OPERATION: Triggering immediate UI refresh`)
+                  // Could trigger a special bulk update event here
+                }, 100)
+              }
+            }
+            
             if (rapidChanges.length > 1) {
-              console.log(`⚡ [${clientId}] POLLING DETECTED RAPID CHANGES:`, {
+              console.log(`⚡ [${clientId.current}] POLLING DETECTED RAPID CHANGES:`, {
                 totalChanges: newUpdates.length,
                 rapidChanges: rapidChanges.length,
                 rapidChangeDetails: rapidChanges.map(c => ({
@@ -282,43 +315,43 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               })
             }
           } else {
-            console.log(`⏸️ [${clientId}] POLLING No new updates to process`)
+            console.log(`⏸️ [${clientId.current}] POLLING No new updates to process`)
           }
         } else {
-          console.log(`✅ [${clientId}] POLLING No changes found`)
+          console.log(`✅ [${clientId.current}] POLLING No changes found`)
           setIsConnected(true) // Still connected, just no changes
         }
       } else {
         // ENHANCED: Track failures
         consecutiveFailures.current += 1
-        console.error(`🚨 [${clientId}] POLLING Failed:`, response.status, await response.text())
-        console.error(`📊 [${clientId}] POLLING Failure count:`, consecutiveFailures.current)
+        console.error(`🚨 [${clientId.current}] POLLING Failed:`, response.status, await response.text())
+        console.error(`📊 [${clientId.current}] POLLING Failure count:`, consecutiveFailures.current)
         setIsConnected(false)
         
         // ENHANCED: Check if it's an auth error specifically
         if (response.status === 401 || response.status === 403) {
-          console.error(`🔒 [${clientId}] POLLING Authentication failed - token may be expired`)
+          console.error(`🔒 [${clientId.current}] POLLING Authentication failed - token may be expired`)
         }
       }
     } catch (error) {
       // ENHANCED: Track failures
       consecutiveFailures.current += 1
-      console.error(`🚨 [${clientId}] POLLING Error:`, error)
-      console.error(`📊 [${clientId}] POLLING Failure count:`, consecutiveFailures.current)
+      console.error(`🚨 [${clientId.current}] POLLING Error:`, error)
+      console.error(`📊 [${clientId.current}] POLLING Failure count:`, consecutiveFailures.current)
       setIsConnected(false)
       
       // ENHANCED: Log network error details
       if (error instanceof TypeError && error.message.includes('fetch')) {
-        console.error(`🌐 [${clientId}] POLLING Network error - check connectivity`)
+        console.error(`🌐 [${clientId.current}] POLLING Network error - check connectivity`)
       }
     }
     
     // ENHANCED: Log health status
     const timeSinceLastSuccess = Date.now() - lastSuccessTime.current
     if (timeSinceLastSuccess > 30000) { // 30 seconds
-      console.warn(`⚠️ [${clientId}] POLLING Health warning: No successful poll in ${Math.round(timeSinceLastSuccess/1000)}s`)
+      console.warn(`⚠️ [${clientId.current}] POLLING Health warning: No successful poll in ${Math.round(timeSinceLastSuccess/1000)}s`)
     }
-  }, [tenant?.id, enabled, onUpdate, clientId])
+  }, [tenant?.id, enabled, onUpdate])
 
   // Function to disconnect
   const disconnect = useCallback(() => {
@@ -338,32 +371,48 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
   // Start/stop polling
   useEffect(() => {
     if (enabled && tenant?.id) {
-      console.log(`🎬 [${clientId}] POLLING Starting interval polling for tenant:`, tenant.id, tenant.name)
+      console.log(`🎬 [${clientId.current}] POLLING Starting interval polling for tenant:`, tenant.id, tenant.name)
+      
+      // CROSS-DEVICE FIX: Clear stale timestamps older than 30 minutes to prevent cross-device issues
+      const now = Date.now()
+      const thirtyMinutesAgo = now - (30 * 60 * 1000)
+      let clearedCount = 0
+      
+      for (const [orderId, timestamp] of lastProcessedTimestamps.current.entries()) {
+        const timestampMs = new Date(timestamp).getTime()
+        if (timestampMs < thirtyMinutesAgo) {
+          lastProcessedTimestamps.current.delete(orderId)
+          knownOrderIds.current.delete(orderId)
+          clearedCount++
+        }
+      }
+      
+      console.log(`🧹 [${clientId.current}] POLLING Cleared ${clearedCount} stale timestamps older than 30 minutes`)
       
       // CONNECTIVITY TEST: Test if we can reach the server immediately
       const testConnectivity = async () => {
         try {
           const authToken = localStorage.getItem('auth_token')
           if (!authToken) {
-            console.error(`❌ [${clientId}] CONNECTIVITY TEST: No auth token!`)
+            console.error(`❌ [${clientId.current}] CONNECTIVITY TEST: No auth token!`)
             return
           }
           
-          console.log(`🧪 [${clientId}] CONNECTIVITY TEST: Testing server connection...`)
+          console.log(`🧪 [${clientId.current}] CONNECTIVITY TEST: Testing server connection...`)
           const testResponse = await fetch(`${API_BASE_URL}/api/tenants/${tenant.id}/order-card-states/realtime-check`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
           })
           
-          console.log(`🧪 [${clientId}] CONNECTIVITY TEST: Response:`, testResponse.status, testResponse.statusText)
+          console.log(`🧪 [${clientId.current}] CONNECTIVITY TEST: Response:`, testResponse.status, testResponse.statusText)
           
           if (testResponse.ok) {
             const testData = await testResponse.json()
-            console.log(`✅ [${clientId}] CONNECTIVITY TEST: SUCCESS - Server reachable, got ${testData.changes?.length || 0} changes`)
+            console.log(`✅ [${clientId.current}] CONNECTIVITY TEST: SUCCESS - Server reachable, got ${testData.changes?.length || 0} changes`)
           } else {
-            console.error(`❌ [${clientId}] CONNECTIVITY TEST: FAILED -`, testResponse.status, await testResponse.text())
+            console.error(`❌ [${clientId.current}] CONNECTIVITY TEST: FAILED -`, testResponse.status, await testResponse.text())
           }
         } catch (error) {
-          console.error(`❌ [${clientId}] CONNECTIVITY TEST: ERROR -`, error)
+          console.error(`❌ [${clientId.current}] CONNECTIVITY TEST: ERROR -`, error)
         }
       }
       
@@ -375,25 +424,25 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       
       // Start interval
       const interval = setInterval(() => {
-        console.log(`⏰ [${clientId}] POLLING Interval tick at`, new Date().toLocaleTimeString())
+        console.log(`⏰ [${clientId.current}] POLLING Interval tick at`, new Date().toLocaleTimeString())
         checkForUpdates()
       }, pollInterval)
       
-      console.log(`✅ [${clientId}] POLLING Interval ID:`, interval, 'every', pollInterval, 'ms')
+      console.log(`✅ [${clientId.current}] POLLING Interval ID:`, interval, 'every', pollInterval, 'ms')
 
       return () => {
-        console.log(`🛑 [${clientId}] POLLING Clearing interval:`, interval)
+        console.log(`🛑 [${clientId.current}] POLLING Clearing interval:`, interval)
         clearInterval(interval)
       }
     } else {
-      console.log(`⭕ [${clientId}] POLLING Not starting - enabled:`, enabled, 'tenant:', tenant?.id)
+      console.log(`⭕ [${clientId.current}] POLLING Not starting - enabled:`, enabled, 'tenant:', tenant?.id)
     }
-  }, [enabled, tenant?.id, checkForUpdates, pollInterval, clientId])
+  }, [enabled, tenant?.id, checkForUpdates, pollInterval])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      console.log(`🧹 [${clientId}] REALTIME-HOOK Component unmounting - cleaning up`)
+      console.log(`🧹 [${clientId.current}] REALTIME-HOOK Component unmounting - cleaning up`)
     }
   }, [])
 

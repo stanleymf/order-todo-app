@@ -20,6 +20,7 @@ import {
   Circle,
   Gift,
   MessageSquare,
+  Users,
 } from "lucide-react"
 import { OrderCardField } from "../types/orderCardFields"
 import { useIsMobile } from "./hooks/use-mobile"
@@ -397,6 +398,31 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 
   const { tenant } = useAuth()
 
+  // Add conflict detection state
+  const [recentlyUpdated, setRecentlyUpdated] = useState(false)
+  const [lastUpdatedBy, setLastUpdatedBy] = useState<string | null>(null)
+  
+  // Check if order was recently updated by another user
+  useEffect(() => {
+    if (order.assignedBy && order.assignedBy !== 'unknown' && order.updatedAt) {
+      const updateTime = new Date(order.updatedAt).getTime()
+      const now = Date.now()
+      const ageInSeconds = (now - updateTime) / 1000
+      
+      // Consider "recent" if updated within last 30 seconds
+      if (ageInSeconds < 30) {
+        setRecentlyUpdated(true)
+        setLastUpdatedBy(order.assignedBy)
+        
+        // Clear the indicator after 30 seconds
+        setTimeout(() => {
+          setRecentlyUpdated(false)
+          setLastUpdatedBy(null)
+        }, 30000)
+      }
+    }
+  }, [order.updatedAt, order.assignedBy])
+
   const getFieldValue = useCallback((fieldId: string): any => {
     const field = fields.find((f) => f.id === fieldId)
     if (!field) return null
@@ -597,8 +623,20 @@ export const OrderCard: React.FC<OrderCardProps> = ({
 
   return (
     <Card 
-      className={`transition-all duration-200 hover:shadow-md ${getCardStyle()}`}
+      className={`transition-all duration-200 hover:shadow-md ${getCardStyle()} ${
+        recentlyUpdated ? 'ring-2 ring-yellow-400 ring-opacity-50 bg-yellow-50' : ''
+      }`}
     >
+      {recentlyUpdated && lastUpdatedBy && (
+        <div className="bg-yellow-100 border-b border-yellow-200 px-3 py-2">
+          <div className="flex items-center gap-2 text-xs text-yellow-800">
+            <Users className="h-3 w-3" />
+            <span>Recently updated by {lastUpdatedBy}</span>
+            <Clock className="h-3 w-3" />
+          </div>
+        </div>
+      )}
+      
       {isExpanded ? (
         <>
           <CardHeader className="pb-2">

@@ -1649,15 +1649,15 @@ app.get("/api/tenants/:tenantId/order-card-states/realtime-check", async (c) => 
     
     console.log(`[REALTIME-POLLING-FORTIFIED] Checking for recent order card state changes for tenant ${tenantId}`)
     
-    // FORTIFIED: Use 60 seconds window for better coverage and consistent timestamps
-    const sixtySecondsAgo = new Date(Date.now() - 60000)
+    // FORTIFIED: Use 5 minutes window for robust coverage (handles delays/interruptions)
+    const fiveMinutesAgo = new Date(Date.now() - 300000) // 5 minutes = 300,000ms
     const currentTime = new Date()
     
     // FORTIFIED: Use exact same timestamp format as the PUT endpoint
-    const sixtySecondsAgoStr = sixtySecondsAgo.toISOString().slice(0, 19).replace('T', ' ')
+    const fiveMinutesAgoStr = fiveMinutesAgo.toISOString().slice(0, 19).replace('T', ' ')
     const currentTimeStr = currentTime.toISOString().slice(0, 19).replace('T', ' ')
     
-    console.log(`[REALTIME-POLLING-FORTIFIED] Looking for changes after: ${sixtySecondsAgoStr}`)
+    console.log(`[REALTIME-POLLING-FORTIFIED] Looking for changes after: ${fiveMinutesAgoStr}`)
     console.log(`[REALTIME-POLLING-FORTIFIED] Current time: ${currentTimeStr}`)
     
     // FORTIFIED: More comprehensive query with better logging
@@ -1666,7 +1666,7 @@ app.get("/api/tenants/:tenantId/order-card-states/realtime-check", async (c) => 
       FROM order_card_states 
       WHERE tenant_id = ? AND updated_at > ?
       ORDER BY updated_at DESC
-    `).bind(tenantId, sixtySecondsAgoStr).all()
+    `).bind(tenantId, fiveMinutesAgoStr).all()
 
     console.log(`[REALTIME-POLLING-FORTIFIED] Raw database results (${results?.length || 0} rows):`, results)
 
@@ -1689,7 +1689,7 @@ app.get("/api/tenants/:tenantId/order-card-states/realtime-check", async (c) => 
       changes,
       timestamp: currentTimeStr,
       count: changes.length,
-      queryWindow: `${sixtySecondsAgoStr} to ${currentTimeStr}`,
+      queryWindow: `${fiveMinutesAgoStr} to ${currentTimeStr}`,
       debug: {
         tenantId,
         rawResultCount: results?.length || 0,
@@ -1717,6 +1717,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     
     // AI Florist public endpoints (for customer-facing AI)
@@ -1770,6 +1771,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',

@@ -2,7 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.5.82] - 2025-01-20
+## [1.5.91] - 2025-06-27
+### 🔧 **Critical Bug Fix - Mobile Real-Time Connection**
+- **Fixed:** Mobile devices stuck at "trying to connect" for real-time updates
+- **Root Cause:** The `realtime-check` endpoint required JWT authentication but was not in the public endpoints list
+- **Solution:** Added `/api/tenants/:tenantId/order-card-states/realtime-check` to both public endpoint lists in worker middleware
+- **Impact:** Mobile devices can now connect to real-time updates without authentication issues
+- **Testing:** Verified endpoint returns proper JSON response without authentication
+
+### 📱 **Mobile Experience Improvements**
+- Real-time connection status now properly shows "Live" instead of being stuck on "Connecting"
+- Mobile polling works seamlessly with desktop without cross-device interference [[memory:825510876720215913]]
+- Session-based timestamp tracking prevents mobile-desktop state conflicts
+
+## [1.5.90] - 2025-06-27 
+### 🚨 CRITICAL FIX: Cross-Device Session-Based Sync
+- **Session-based timestamp tracking**: Each browser session now tracks updates independently
+- **Solves "first works, subsequent fail"**: Updates from other devices no longer pollute local timestamp cache
+- **Session start filtering**: Only processes updates that happened after this session started
+- **Cross-device isolation**: Device A changes don't interfere with Device B's subsequent updates
+- **Root cause fixed**: Eliminated timestamp pollution that caused subsequent updates to be skipped
+- **Expected result**: All successive cross-device updates should now work consistently
+
+## [1.5.89] - 2025-06-27
+
+### Added - Bulk Update Detection & Conflict Prevention
+- **Bulk operation detection**: Automatically detects when 3+ orders are updated within 10 seconds
+- **Visual conflict indicators**: Orders show yellow highlight when recently updated by another user
+- **Faster polling**: Reduced interval from 3s to 1.5s for faster bulk update detection
+- **Enhanced logging**: Detailed bulk operation analytics with affected orders and users
+- **Conflict prevention UI**: Clear visual indicators showing who recently updated an order
+- **Real-time user awareness**: Prevents two florists from working on the same order simultaneously
+
+## [1.5.88] - 2025-06-27
+
+### Fixed - Query Window Too Narrow
+- **Expanded real-time polling window**: Increased from 60 seconds to 5 minutes (300 seconds)
+- **Root cause**: Desktop polling was using narrow rolling windows that missed recent webhook orders
+- **Impact**: Cross-device updates failing when changes happened outside the 1-minute window
+- **Solution**: Wider query window ensures no changes are missed during polling delays/interruptions
+- **Database check**: New webhook orders at 09:12:58 and 09:12:44 were being missed by desktop queries
+
+### Fixed - CRITICAL Real-Time Sync Bug
+- **Fixed timestamp tracking logic**: Moved timestamp storage to AFTER successful processing instead of before
+- **Root cause**: Frontend was marking updates as "processed" before actually processing them
+- **Impact**: First update worked but subsequent updates were incorrectly skipped
+- **Solution**: Only mark updates as processed after `onUpdate()` callbacks complete successfully
+- **Expected result**: Successive real-time updates should now work correctly across all devices
 
 ### 🚨 CRITICAL FIX: Timestamp Precision Issue Resolved
 - **Fixed successive update failures** caused by identical timestamps to the second

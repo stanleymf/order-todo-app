@@ -170,7 +170,7 @@ export const Orders: React.FC = () => {
     }
   }, [updateIndividualOrder])
 
-  const { isConnected, lastUpdate } = useRealtimeUpdates({
+  const { isConnected, lastUpdate, checkForUpdates } = useRealtimeUpdates({
     enabled: realtimeEnabled,
     onUpdate: handleRealtimeUpdate
   })
@@ -180,6 +180,20 @@ export const Orders: React.FC = () => {
     setRealtimeEnabled(!realtimeEnabled)
     toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
   }
+  
+  // TESTING: Manual polling trigger for verification
+  const triggerManualPoll = () => {
+    console.log('🔬 [MANUAL-POLL] Triggering immediate polling check')
+    checkForUpdates?.()
+  }
+  
+  // Expose manual poll function globally for testing
+  useEffect(() => {
+    (window as any).triggerManualPoll = triggerManualPoll
+    return () => {
+      delete (window as any).triggerManualPoll
+    }
+  }, [triggerManualPoll])
   
   console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}`)
   

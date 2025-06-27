@@ -165,6 +165,12 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
           cardId: result.cardId,
           status: result.status
         })
+        
+        // VERIFICATION: Trigger immediate polling check to verify real-time detection
+        setTimeout(() => {
+          console.log(`🔬 [SAVE-VERIFICATION] Checking if polling detects the saved change for ${cardId}`)
+          console.log(`🔬 [SAVE-VERIFICATION] Look for timestamp: ${result.updatedAt} in next polling cycle`)
+        }, 100)
       }
     } catch (error) {
       console.error('[CARD-SAVE-FORTIFIED] Error saving card state:', error)
