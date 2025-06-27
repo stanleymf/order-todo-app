@@ -317,7 +317,7 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
       onStatusChange(order.cardId || order.id, finalStatus)
     }
     
-    // Auto-save the status change
+    // CRITICAL FIX: Save to database for real-time sync
     saveCardState(finalStatus)
   }
 

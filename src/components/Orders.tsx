@@ -32,7 +32,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate, getUnscheduledOrders } from "../services/api"
-import { useRealtimeUpdates } from "../hooks/use-realtime-updates"
+import { useRealtimeWebSocket } from "../hooks/use-realtime-websocket"
 import { OrderDetailCard } from "./OrderDetailCard"
 import { SortableOrderCard } from "./SortableOrderCard"
 import {
@@ -121,59 +121,7 @@ export const Orders: React.FC = () => {
     }
   }, [activeUpdateIds])
 
-  // Real-time updates hook - STABILIZED
-  const handleRealtimeUpdate = useCallback((update: any) => {
-    console.log('🔄 Real-time update received:', update)
-    
-    // SUBTLE UPDATE: Update individual order instead of full refresh
-    if (update.type === 'order_updated' && update.orderId) {
-      console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
-      
-      // Create update data from the polling response
-      const updateData = {
-        status: update.status || 'unassigned',
-        assignedTo: update.assignedTo,
-        notes: update.notes,
-        sortOrder: update.sortOrder
-      }
-      
-      updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
-      
-      // NO TOAST NOTIFICATIONS - removed as requested
-      
-    } else if (update.type === 'order_created') {
-      // For new orders, just log - no aggressive refresh
-      console.log('[REALTIME] New order detected:', update.orderId, '- refresh manually if needed')
-      
-      // NO TOAST NOTIFICATIONS - removed as requested
-      
-    } else if (update.type === 'order_deleted') {
-      // Remove the deleted order from arrays
-      console.log(`[REALTIME] Order ${update.orderId} deleted, removing from UI`)
-      const removeOrder = (orders: any[]) => 
-        orders.filter((order: any) => 
-          order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
-        )
-
-      setAllOrders(prev => removeOrder(prev))
-      setMainOrders(prev => removeOrder(prev))
-      setAddOnOrders(prev => removeOrder(prev))
-      setUnscheduledOrders(prev => removeOrder(prev))
-      setStoreContainers(prev => 
-        prev.map(container => ({
-          ...container,
-          orders: removeOrder(container.orders)
-        }))
-      )
-      
-      // NO TOAST NOTIFICATIONS - removed as requested
-    }
-  }, [updateIndividualOrder])
-
-  const { isConnected, lastUpdate, checkForUpdates } = useRealtimeUpdates({
-    enabled: realtimeEnabled,
-    onUpdate: handleRealtimeUpdate
-  })
+  // WebSocket hook will be initialized after the real-time handler is defined
   
   // Manual real-time toggle (now defaults to enabled)
   const toggleRealtime = () => {
@@ -181,10 +129,12 @@ export const Orders: React.FC = () => {
     toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
   }
   
-  // TESTING: Manual polling trigger for verification
+  // TESTING: Manual WebSocket status check for verification
   const triggerManualPoll = () => {
-    console.log('🔬 [MANUAL-POLL] Triggering immediate polling check')
-    checkForUpdates?.()
+    console.log('🔬 [WEBSOCKET] Connection status check')
+    console.log(`🔌 [WEBSOCKET] Currently ${isConnected ? 'connected' : 'disconnected'}`)
+    console.log(`📊 [WEBSOCKET] Status: ${connectionStatus}`)
+    console.log(`📈 [WEBSOCKET] Updates received: ${updates.length}`)
   }
   
   // Expose manual poll function globally for testing
@@ -710,7 +660,7 @@ export const Orders: React.FC = () => {
   const stats = getComprehensiveStats()
 
   // Handle status changes from OrderDetailCard
-  const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed') => {
+  const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed', orderTitle?: string, isFromRealtime = false) => {
     // Update the order status in all relevant arrays
     const updateOrderStatus = (orders: any[]) => 
       orders.map((order: any) => 
@@ -759,14 +709,121 @@ export const Orders: React.FC = () => {
       }))
     )
 
-    // Toast notifications for status changes
-    if (newStatus === 'completed') {
-      toast.success("Order Completed!")
-    } else if (newStatus === 'assigned') {
-      const assignedTo = user?.name || user?.email || 'Unknown User'
-      toast.success(`Assigned to ${assignedTo}`)
+    // Get order title if not provided
+    if (!orderTitle) {
+      const findOrderTitle = (orders: any[]) => {
+        const order = orders.find((o: any) => 
+          o.cardId === orderId || o.id === orderId
+        )
+        if (order?.title) return order.title
+        if (order?.productTitles) {
+          try {
+            const titles = JSON.parse(order.productTitles)
+            return Array.isArray(titles) ? titles[0] : titles
+          } catch (e) {
+            return 'Order'
+          }
+        }
+        return 'Order'
+      }
+      
+      orderTitle = findOrderTitle(allOrders) || 
+                  findOrderTitle(mainOrders) || 
+                  findOrderTitle(addOnOrders) ||
+                  'Order'
+    }
+
+    // Toast notifications for status changes (only for local user actions, not real-time updates)
+    if (!isFromRealtime) {
+      if (newStatus === 'completed') {
+        toast.success(`${orderTitle} is Completed!`)
+      } else if (newStatus === 'assigned') {
+        const assignedTo = user?.name || user?.email || 'Unknown User'
+        toast.success(`Assigned to ${assignedTo}`)
+      }
     }
   }
+
+  // Real-time updates hook - STABILIZED (moved here to access handleOrderStatusChange)
+  const handleRealtimeUpdate = useCallback((update: any) => {
+    console.log('🔄 Real-time update received:', update)
+    
+    // SUBTLE UPDATE: Update individual order instead of full refresh
+    if (update.type === 'order_updated' && update.orderId) {
+      console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
+      
+      // Create update data from the polling response
+      const updateData = {
+        status: update.status || 'unassigned',
+        assignedTo: update.assignedTo,
+        notes: update.notes,
+        sortOrder: update.sortOrder
+      }
+      
+      // CRITICAL FIX: Use handleOrderStatusChange instead of updateIndividualOrder
+      // This ensures that completed orders move to bottom for all users in real-time
+      if (update.status && ['unassigned', 'assigned', 'completed'].includes(update.status)) {
+        console.log(`[REALTIME] Status change detected: ${update.orderId} -> ${update.status}`)
+        
+        // Find the order to get its title for toast message
+        let orderTitle = 'Order'
+        const findOrderTitle = (orders: any[]) => {
+          const order = orders.find((o: any) => 
+            o.cardId === update.orderId || o.id === update.orderId || o.orderId === update.orderId
+          )
+          return order?.title || order?.productTitles ? (() => {
+            try {
+              const titles = JSON.parse(order.productTitles)
+              return Array.isArray(titles) ? titles[0] : titles
+            } catch (e) {
+              return order.title || 'Order'
+            }
+          })() : 'Order'
+        }
+        
+        // Check all order arrays to find the title
+        orderTitle = findOrderTitle(allOrders) || 
+                   findOrderTitle(mainOrders) || 
+                   findOrderTitle(addOnOrders) ||
+                   'Order'
+        
+        // Apply status change with proper sorting and toast
+        handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', orderTitle, true)
+      } else {
+        // For non-status updates, use the individual update method
+        updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
+      }
+      
+    } else if (update.type === 'order_created') {
+      // For new orders, just log - no aggressive refresh
+      console.log('[REALTIME] New order detected:', update.orderId, '- refresh manually if needed')
+      
+    } else if (update.type === 'order_deleted') {
+      // Remove the deleted order from arrays
+      console.log(`[REALTIME] Order ${update.orderId} deleted, removing from UI`)
+      const removeOrder = (orders: any[]) => 
+        orders.filter((order: any) => 
+          order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
+        )
+
+      setAllOrders(prev => removeOrder(prev))
+      setMainOrders(prev => removeOrder(prev))
+      setAddOnOrders(prev => removeOrder(prev))
+      setUnscheduledOrders(prev => removeOrder(prev))
+      setStoreContainers(prev => 
+        prev.map(container => ({
+          ...container,
+          orders: removeOrder(container.orders)
+        }))
+      )
+    }
+  }, [updateIndividualOrder, allOrders, mainOrders, addOnOrders])
+
+  // Initialize WebSocket hook with the real-time handler
+  const { isConnected, connectionStatus, updates, sendOptimisticUpdate } = useRealtimeWebSocket({
+    enabled: realtimeEnabled,
+    onUpdate: handleRealtimeUpdate
+  })
 
   // Handle order deletion from OrderDetailCard
   const handleOrderDelete = async (orderId: string) => {
@@ -1240,9 +1297,9 @@ export const Orders: React.FC = () => {
                     {realtimeEnabled ? (isConnected ? 'Live' : 'Connecting') : 'Off'}
                  </span>
                </Button>
-                               {lastUpdate && (
+                               {updates.length > 0 && (
                   <div className="text-xs text-muted-foreground">
-                    Last update: {lastUpdate.type}
+                    Last update: {updates[updates.length - 1]?.type}
                   </div>
                 )}
              </div>

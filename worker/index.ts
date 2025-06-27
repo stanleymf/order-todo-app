@@ -70,7 +70,10 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
   const tenantId = c.req.param("tenantId")
 
   return streamSSE(c, async (stream) => {
-    let lastUpdateTime = new Date().toISOString()
+    // Start looking for changes from 2 minutes ago to catch recent updates
+    // Convert to SQLite datetime format (YYYY-MM-DD HH:MM:SS.mmm) to match database storage
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000)
+    let lastUpdateTime = twoMinutesAgo.toISOString().slice(0, 23).replace('T', ' ')
     let knownUpdates = new Map<string, string>() // Track last known update time for each order card
 
     // Send initial connection message
@@ -79,6 +82,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         type: "connected",
         message: "SSE connection established for real-time order updates",
         timestamp: new Date().toISOString(),
+        lookingForChangesSince: lastUpdateTime
       }),
       event: "connected",
     })
@@ -86,6 +90,9 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
     while (true) {
       try {
         console.log(`[SSE-REALTIME] Checking for changes since ${lastUpdateTime}`)
+        
+        // DEBUG: Add more detailed logging
+        console.log(`[SSE-DEBUG] Query params: tenantId=${tenantId}, lastUpdateTime=${lastUpdateTime}`)
         
         // Check for changes in order_card_states table (where status updates happen)
         const cardStateQuery = `
@@ -97,6 +104,12 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         `
 
         const { results: cardStateChanges } = await c.env.DB.prepare(cardStateQuery).bind(tenantId, lastUpdateTime).all()
+        
+        // DEBUG: Log what we found
+        console.log(`[SSE-DEBUG] Card state query returned ${cardStateChanges?.length || 0} results`)
+        if (cardStateChanges && cardStateChanges.length > 0) {
+          console.log(`[SSE-DEBUG] First change:`, cardStateChanges[0])
+        }
 
         // Check for changes in main tenant_orders table  
         const orderQuery = `
@@ -108,6 +121,9 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         `
 
         const { results: orderChanges } = await c.env.DB.prepare(orderQuery).bind(tenantId, lastUpdateTime).all()
+        
+        // DEBUG: Log what we found
+        console.log(`[SSE-DEBUG] Order query returned ${orderChanges?.length || 0} results`)
 
         const hasChanges = (cardStateChanges && cardStateChanges.length > 0) || (orderChanges && orderChanges.length > 0)
 
@@ -126,6 +142,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                                  changeEvents.push({
                    type: "order_updated",
                    orderId: String(change.card_id),
+                   tenantId: tenantId,
                    status: String(change.status),
                    assignedTo: String(change.assigned_to || ''),
                    updatedBy: String(change.assigned_by || 'unknown'),
@@ -147,6 +164,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                                  changeEvents.push({
                    type: "order_updated", 
                    orderId: String(change.id),
+                   tenantId: tenantId,
                    status: String(change.status),
                    assignedTo: String(change.assigned_to || ''),
                    updatedBy: String(change.assigned_to || 'unknown'),
@@ -167,8 +185,8 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
             console.log(`[SSE-REALTIME] Sent update event for order ${event.orderId}: ${event.type}`)
           }
 
-          // Update last check time
-          lastUpdateTime = new Date().toISOString()
+          // Update last check time - use SQLite format to match database
+          lastUpdateTime = new Date().toISOString().slice(0, 23).replace('T', ' ')
           
           // Clean up old known updates (keep only last 100)
           if (knownUpdates.size > 100) {
@@ -201,6 +219,57 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         })
       }
       await stream.sleep(3000) // Check every 3 seconds for responsiveness
+    }
+  })
+})
+
+// --- WebSocket Real-time Updates (NEW) ---
+app.get("/api/tenants/:tenantId/realtime/ws", async (c) => {
+  const upgrade = c.req.header("upgrade")
+  if (upgrade !== "websocket") {
+    return c.text("Expected Upgrade: websocket", 400)
+  }
+
+  const tenantId = c.req.param("tenantId")
+  const token = c.req.query("token")
+  
+  if (!token) {
+    return c.text("Missing auth token", 401)
+  }
+
+  try {
+    console.log(`🔌 [WEBSOCKET] Connection request for tenant ${tenantId}`)
+    
+    // For now, return a successful response (full WebSocket implementation coming)
+    return c.json({
+      status: "websocket_endpoint_ready",
+      tenantId: tenantId,
+      message: "WebSocket endpoint configured successfully",
+      note: "Full WebSocket implementation coming next",
+      timestamp: new Date().toISOString()
+    })
+    
+  } catch (error) {
+    console.error("❌ [WEBSOCKET] Connection error:", error)
+    return c.text("WebSocket connection failed", 500)
+  }
+})
+
+// WebSocket connection status endpoint
+app.get("/api/tenants/:tenantId/realtime/ws-status", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  
+  return c.json({
+    status: "websocket_ready",
+    tenantId: tenantId,
+    endpoint: `/api/tenants/${tenantId}/realtime/ws`,
+    implementation: "basic_websocket",
+    timestamp: new Date().toISOString(),
+    features: {
+      connection: "active",
+      ping_pong: "supported",
+      order_updates: "echo_mode",
+      bulk_updates: "planned"
     }
   })
 })
@@ -445,7 +514,6 @@ app.get("/api/tenants/:tenantId/orders-by-date", async (c) => {
     return c.json({ error: "Failed to process orders", details: error.message }, 500)
   }
 })
-
 // --- Orders from Database by Date (PUBLIC) ---
 app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
   const tenantId = c.req.param("tenantId")
@@ -463,8 +531,6 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
     console.log(`Found ${results?.length || 0} orders in database for date ${date}`)
     
-    // Debug logs removed - double-encoding fix completed
-
     // Build product label map for add-on classification and priority sorting
     const productLabelMap = new Map<string, any[]>()
     try {
@@ -824,8 +890,6 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               isWeddingProduct: isWedding,
               // Shopify order data (preserve original GraphQL data if available)
               shopifyOrderData: (() => {
-                // Debug logs removed - double-encoding fix completed
-                
                 try {
                   // Try to parse stored GraphQL data first
                   if (order.shopify_order_data && typeof order.shopify_order_data === 'string' && order.shopify_order_data.trim() !== '') {
@@ -837,14 +901,11 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
                       parsedData = JSON.parse(parsedData);
                     }
                     
-                    // Debug logs removed - double-encoding fix completed
-                    
                     console.log('[GRAPHQL-PRESERVATION] Using original GraphQL data for order:', order.shopify_order_id);
                     return parsedData;
                   }
-                                  } catch (e) {
-                    console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data, using fallback:', e);
-                    // Debug logs removed - double-encoding fix completed
+                } catch (e) {
+                  console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data, using fallback:', e);
                 }
                 
                 // Fallback to reconstructed data
@@ -1718,6 +1779,9 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
     '/api/tenants/:tenantId/order-card-states/realtime-check',
+    // NEW WebSocket endpoints:
+    '/api/tenants/:tenantId/realtime/ws',
+    '/api/tenants/:tenantId/realtime/ws-status',
     '/api/tenants/:tenantId/test-shopify',
     
     // AI Florist public endpoints (for customer-facing AI)
@@ -1772,6 +1836,9 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
     '/api/tenants/:tenantId/order-card-states/realtime-check',
+    // NEW WebSocket endpoints:
+    '/api/tenants/:tenantId/realtime/ws',
+    '/api/tenants/:tenantId/realtime/ws-status',
     '/api/tenants/:tenantId/test-shopify',
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',
@@ -5469,335 +5536,6 @@ export default {
   fetch: app.fetch,
 }
 
-// --- Debug endpoint to check saved products directly ---
-app.get("/api/tenants/:tenantId/debug/saved-products", async (c) => {
-  const tenantId = c.req.param("tenantId")
-  console.log(`[DEBUG] Checking saved products directly for tenant: ${tenantId}`)
-  
-  try {
-    // Direct database query to see what's actually stored
-    const { results } = await c.env.DB.prepare(`
-      SELECT id, title, shopify_product_id, shopify_variant_id, image_url, image_alt, image_width, image_height, created_at, updated_at
-      FROM saved_products 
-      WHERE tenant_id = ?
-      ORDER BY created_at DESC
-      LIMIT 10
-    `)
-      .bind(tenantId)
-      .all()
-
-    console.log(`[DEBUG] Direct database query returned ${results?.length || 0} products`)
-    
-    if (results && results.length > 0) {
-      results.forEach((product, index) => {
-        console.log(`[DEBUG] Product ${index + 1}:`, {
-          id: product.id,
-          title: product.title,
-          shopify_product_id: product.shopify_product_id,
-          shopify_variant_id: product.shopify_variant_id,
-          image_url: product.image_url,
-          image_alt: product.image_alt,
-          image_width: product.image_width,
-          image_height: product.image_height,
-          created_at: product.created_at,
-          updated_at: product.updated_at,
-        })
-      })
-    }
-
-    return c.json({
-      count: results?.length || 0,
-      products: results || [],
-      message: "Direct database query results"
-    })
-  } catch (error) {
-    console.error("[DEBUG] Error querying saved products directly:", error)
-    return c.json({ error: "Failed to query database directly" }, 500)
-  }
-})
-
-// --- Sync Shopify Orders by Date (Process Orders Button) ---
-app.post("/api/tenants/:tenantId/stores/:storeId/orders/sync-by-date", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const storeId = c.req.param("storeId");
-  const { date } = await c.req.json();
-
-  if (!date) {
-    return c.json({ error: "Date is required in dd/mm/yyyy format" }, 400);
-  }
-
-  try {
-    // 1. Get store info
-    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
-    if (!store || !store.settings.accessToken) {
-      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
-    }
-    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken);
-
-    // 2. Fetch recent Shopify orders (limit to 2000 orders as requested)
-    const shopifyOrders = await shopifyApi.getOrders({ maxTotal: 2000 });
-    
-    // Extract delivery date from tags function
-    const extractDeliveryDateFromTags = (tags: string | string[]): string | null => {
-      if (!tags) return null;
-      
-      // Handle both string and array formats
-      let tagArray: string[];
-      if (Array.isArray(tags)) {
-        tagArray = tags;
-      } else if (typeof tags === 'string') {
-        tagArray = tags.split(", ");
-      } else {
-        return null;
-      }
-      
-      const dateTag = tagArray.find((tag: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(tag.trim()));
-      return dateTag || null;
-    };
-    
-    // Filter orders that have the requested date in their tags
-    const filteredOrders = shopifyOrders.filter((order) => {
-      const orderDeliveryDate = extractDeliveryDateFromTags(order.tags);
-      return orderDeliveryDate === date;
-    });
-    
-    console.log("[SYNC-BY-DATE] Found", filteredOrders.length, "orders for date:", date);
-    console.log("[SYNC-BY-DATE] Total orders from Shopify:", shopifyOrders.length);
-
-    // 3. For each order, fetch GraphQL data and create or update in DB
-    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
-    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
-    const newOrders = [];
-    const updatedOrders = [];
-    for (const order of filteredOrders) {
-      // Fetch GraphQL order data
-      let shopifyOrderGraphQL = null;
-      try {
-        const orderGid = `gid://shopify/Order/${order.id}`;
-        shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
-        console.log("[SYNC-BY-DATE] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
-      } catch (err) {
-        console.error("[SYNC-BY-DATE] Failed to fetch order from Shopify GraphQL:", err);
-      }
-      // Prepare order data for DB
-      const customerName = `${order.customer?.first_name ?? ""} ${order.customer?.last_name ?? ""}`.trim() || "N/A";
-      const orderDeliveryDate = extractDeliveryDateFromTags(order.tags);
-      
-      if (!orderDeliveryDate) {
-        console.log("[SYNC-BY-DATE] Skipping order", order.id, "- no delivery date found in tags:", order.tags);
-        continue;
-      }
-      
-      const orderData = {
-        shopifyOrderId: String(order.id),
-        customerName: customerName,
-        deliveryDate: orderDeliveryDate, // Use extracted date from tags
-        notes: order.note,
-        product_label: order.line_items?.[0]?.properties?.find((p) => p.name === '_label')?.value ?? 'default',
-        total_price: parseFloat(order.total_price),
-        currency: order.currency,
-        customer_email: order.customer?.email,
-        line_items: JSON.stringify(order.line_items),
-        product_titles: JSON.stringify(order.line_items.map((item) => item.title)),
-        quantities: JSON.stringify(order.line_items.map((item) => item.quantity)),
-        session_id: order.checkout_id,
-        store_id: storeId,
-        product_type: order.line_items?.[0]?.product_type ?? 'Unknown',
-        shopifyOrderData: shopifyOrderGraphQL
-      };
-      // Try to create (will update if exists)
-      const existingOrder = await c.env.DB.prepare(
-        "SELECT id FROM tenant_orders WHERE tenant_id = ? AND shopify_order_id = ?"
-      ).bind(tenantId, String(order.id)).first();
-      if (existingOrder) {
-        console.log("[SYNC-BY-DATE] About to update order with GraphQL data. Order ID:", existingOrder.id);
-        console.log("[SYNC-BY-DATE] GraphQL data structure check:", {
-          hasLineItems: !!shopifyOrderGraphQL?.lineItems,
-          hasEdges: !!shopifyOrderGraphQL?.lineItems?.edges,
-          edgesLength: shopifyOrderGraphQL?.lineItems?.edges?.length,
-          firstNodeTitle: shopifyOrderGraphQL?.lineItems?.edges?.[0]?.node?.title,
-          firstNodeVariantTitle: shopifyOrderGraphQL?.lineItems?.edges?.[0]?.node?.variant?.title,
-          orderName: shopifyOrderGraphQL?.name,
-          orderId: shopifyOrderGraphQL?.id
-        });
-        await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
-        console.log("[SYNC-BY-DATE] Updated existing order with GraphQL data:", existingOrder.id);
-        updatedOrders.push(existingOrder.id);
-      } else {
-        const result = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
-        newOrders.push(result);
-      }
-    }
-    return c.json({ success: true, newOrders, updatedOrders, count: filteredOrders.length });
-  } catch (error) {
-    console.error("Error syncing Shopify orders by date:", error);
-    return c.json({ error: "Failed to sync orders", details: error.message }, 500);
-  }
-});
-
-// --- Bulk Delete Orders by Date ---
-app.post("/api/tenants/:tenantId/orders/delete-by-date", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const { date } = await c.req.json();
-  if (!date) {
-    return c.json({ error: "Date is required in dd/mm/yyyy format" }, 400);
-  }
-  try {
-    // Delete all orders for the tenant with the matching deliveryDate
-    const { results } = await c.env.DB.prepare(
-      `DELETE FROM tenant_orders WHERE tenant_id = ? AND delivery_date = ?`
-    ).bind(tenantId, date).run();
-    return c.json({ success: true, deletedCount: results?.changes ?? 0 });
-  } catch (error) {
-    console.error("Error deleting orders by date:", error);
-    return c.json({ error: "Failed to delete orders", details: error.message }, 500);
-  }
-});
-
-// --- Clear All Orders (Fresh Start) ---
-app.post("/api/tenants/:tenantId/orders/clear-all", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  
-  try {
-    console.log("[CLEAR-ALL] Starting to clear all orders for tenant:", tenantId);
-    
-    // Get count before deletion for feedback
-    const countResult = await c.env.DB.prepare(
-      `SELECT COUNT(*) as count FROM tenant_orders WHERE tenant_id = ?`
-    ).bind(tenantId).first();
-    
-    const orderCount = countResult?.count || 0;
-    console.log("[CLEAR-ALL] Found", orderCount, "orders to delete");
-    
-    // Delete all orders for the tenant
-    const { results } = await c.env.DB.prepare(
-      `DELETE FROM tenant_orders WHERE tenant_id = ?`
-    ).bind(tenantId).run();
-    
-    const deletedCount = results?.changes ?? 0;
-    
-    console.log("[CLEAR-ALL] Successfully deleted", deletedCount, "orders for tenant:", tenantId);
-    
-    return c.json({ 
-      success: true, 
-      deletedCount: deletedCount,
-      message: `Cleared ${deletedCount} orders from database. Ready for fresh sync!`
-    });
-  } catch (error) {
-    console.error("Error clearing all orders:", error);
-    return c.json({ error: "Failed to clear orders", details: error.message }, 500);
-  }
-});
-
-// --- Force Update Order with GraphQL Data ---
-app.post("/api/tenants/:tenantId/orders/:orderId/force-update-graphql", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const orderId = c.req.param("orderId");
-  
-  try {
-    // Get the order to find its Shopify order ID
-    const order = await d1DatabaseService.getOrder(c.env, tenantId, orderId);
-    if (!order) {
-      return c.json({ error: "Order not found" }, 404);
-    }
-    
-    if (!order.shopifyOrderId) {
-      return c.json({ error: "Order has no Shopify ID" }, 400);
-    }
-    
-    // Get store info
-    const stores = await d1DatabaseService.getStores(c.env, tenantId);
-    if (!stores || stores.length === 0) {
-      return c.json({ error: "No Shopify stores configured" }, 404);
-    }
-    const store = stores[0];
-    
-    // Fetch GraphQL order data
-    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
-    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
-    
-    const orderGid = `gid://shopify/Order/${order.shopifyOrderId}`;
-    const shopifyOrderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
-    
-    console.log("[FORCE-UPDATE] Shopify GraphQL order fetch SUCCESS:", JSON.stringify(shopifyOrderGraphQL));
-    
-    // Update the order with GraphQL data
-    await d1DatabaseService.updateOrder(c.env, tenantId, orderId, { shopifyOrderData: shopifyOrderGraphQL });
-    
-    return c.json({ 
-      success: true, 
-      message: "Order updated with GraphQL data",
-      orderId: orderId,
-      shopifyOrderId: order.shopifyOrderId
-    });
-  } catch (error) {
-    console.error("Error force updating order with GraphQL data:", error);
-    return c.json({ error: "Failed to update order", details: error.message }, 500);
-  }
-});
-
-// --- Fetch Latest Orders from Shopify (Backend Script Support) ---
-app.post("/api/tenants/:tenantId/stores/:storeId/orders/fetch-latest", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const storeId = c.req.param("storeId");
-  const body = await c.req.json() as { maxTotal: number };
-  const { maxTotal } = body;
-
-  try {
-    // 1. Get store info
-    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
-    if (!store || !store.settings.accessToken) {
-      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
-    }
-
-    // 2. Fetch latest orders from Shopify
-    const shopifyApi = new ShopifyApiService(store, store.settings.accessToken);
-    const shopifyOrders = await shopifyApi.getOrders({ maxTotal });
-
-    console.log(`[FETCH-LATEST] Retrieved ${shopifyOrders.length} orders from Shopify`);
-
-    return c.json({ 
-      success: true, 
-      orders: shopifyOrders,
-      count: shopifyOrders.length
-    });
-
-  } catch (error) {
-    console.error("Error fetching latest orders from Shopify:", error);
-    return c.json({ error: "Failed to fetch orders", details: error.message }, 500);
-  }
-});
-
-// --- Fetch GraphQL Order Data (Backend Script Support) ---
-app.post("/api/tenants/:tenantId/stores/:storeId/orders/fetch-graphql", async (c) => {
-  const tenantId = c.req.param("tenantId");
-  const storeId = c.req.param("storeId");
-  const body = await c.req.json() as { orderGid: string };
-  const { orderGid } = body;
-
-  try {
-    // 1. Get store info
-    const store = await d1DatabaseService.getStore(c.env, tenantId, storeId);
-    if (!store || !store.settings.accessToken) {
-      return c.json({ error: "Shopify store not found or access token is missing." }, 404);
-    }
-
-    // 2. Fetch GraphQL order data
-    const { createShopifyApiService } = await import("../src/services/shopify/shopifyApi");
-    const shopifyService = createShopifyApiService(store, store.settings.accessToken);
-    const orderGraphQL = await shopifyService.fetchOrderByIdGraphQL(orderGid);
-
-    return c.json({ 
-      success: true, 
-      order: orderGraphQL
-    });
-
-  } catch (error) {
-    console.error("Error fetching GraphQL order data:", error);
-    return c.json({ error: "Failed to fetch GraphQL order data", details: error.message }, 500);
-  }
-});
-
 // --- Upsert Order to D1 (Backend Script Support) ---
 app.post("/api/tenants/:tenantId/stores/:storeId/orders/upsert", async (c) => {
   const tenantId = c.req.param("tenantId");
@@ -6377,3 +6115,5 @@ app.post("/api/tenants/:tenantId/ai/training-data/extract-orders", async (c) => 
       return c.json({ error: "Failed to reset sort orders" }, 500)
     }
   })
+
+
