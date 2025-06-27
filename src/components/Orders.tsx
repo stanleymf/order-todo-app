@@ -748,6 +748,12 @@ export const Orders: React.FC = () => {
   const handleRealtimeUpdate = useCallback((update: any) => {
     console.log('🔄 Real-time update received:', update)
     
+    // ANTI-LOOP: Skip updates from current user to prevent drag conflicts
+    if (update.updatedBy === user?.id || update.updatedBy === user?.email || update.updatedBy === user?.name) {
+      console.log(`⏭️ [REALTIME] Skipping own update from ${update.updatedBy}`)
+      return
+    }
+    
     // SUBTLE UPDATE: Update individual order instead of full refresh
     if (update.type === 'order_updated' && update.orderId) {
       console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
@@ -780,7 +786,7 @@ export const Orders: React.FC = () => {
           setStoreContainers(prev => 
             prev.map(container => ({
               ...container,
-              orders: container.orders.slice().sort((a, b) => {
+              orders: container.orders.slice().sort((a: any, b: any) => {
                 const aSortOrder = a.sortOrder || 9999
                 const bSortOrder = b.sortOrder || 9999
                 return aSortOrder - bSortOrder
@@ -790,7 +796,7 @@ export const Orders: React.FC = () => {
           
           // Re-sort main arrays by sortOrder
           const sortByOrder = (orders: any[]) => 
-            orders.slice().sort((a, b) => {
+            orders.slice().sort((a: any, b: any) => {
               const aSortOrder = a.sortOrder || 9999
               const bSortOrder = b.sortOrder || 9999
               return aSortOrder - bSortOrder
@@ -830,7 +836,7 @@ export const Orders: React.FC = () => {
         }))
       )
     }
-  }, [updateIndividualOrder])
+  }, [updateIndividualOrder, handleOrderStatusChange, user])
 
   // Initialize WebSocket hook with the real-time handler
   const { isConnected, connectionStatus, updates, sendOptimisticUpdate } = useRealtimeWebSocket({
@@ -1031,6 +1037,17 @@ export const Orders: React.FC = () => {
             
             // Auto-save the new order
             await reorderOrders(tenant.id, orderIds, deliveryDate)
+            
+            // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
+            if (sendOptimisticUpdate) {
+              console.log(`[DRAG-DROP] Sending optimistic updates for reordered orders`)
+              orderIds.forEach((orderId, index) => {
+                sendOptimisticUpdate(orderId, {
+                  sortOrder: (index + 1) * 10 // Same logic as backend
+                })
+              })
+            }
+            
             toast.success("Order sequence updated")
             foundInStoreContainer = true
             break
@@ -1061,6 +1078,17 @@ export const Orders: React.FC = () => {
             
             // Auto-save the new order
             await reorderOrders(tenant.id, orderIds, deliveryDate)
+            
+            // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
+            if (sendOptimisticUpdate) {
+              console.log(`[DRAG-DROP] Sending optimistic updates for reordered add-on orders`)
+              orderIds.forEach((orderId, index) => {
+                sendOptimisticUpdate(orderId, {
+                  sortOrder: (index + 1) * 10 // Same logic as backend
+                })
+              })
+            }
+            
             toast.success("Order sequence updated")
           }
         }
