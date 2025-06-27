@@ -143,7 +143,6 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             
             // Check if this is a new order (not seen before) or an updated order
             const isNewOrder = !knownOrderIds.current.has(change.cardId)
-            const hasNewerTimestamp = !lastProcessedTimestamp || comparisonResult
             
             // ENHANCED: Detailed timestamp comparison debugging with error handling
             let changeTimeMs = 0
@@ -170,6 +169,8 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               // For invalid dates, treat as newer to prevent permanent skipping
               comparisonResult = true
             }
+            
+            const hasNewerTimestamp = !lastProcessedTimestamp || comparisonResult
             
             console.log(`🔍 [${clientId}] POLLING Order ${change.cardId}:`, {
               isNewOrder,
