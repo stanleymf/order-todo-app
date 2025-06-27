@@ -11,6 +11,10 @@ interface RealtimeUpdate {
   tenantId: string
   timestamp: string
   updatedBy?: string
+  status?: string
+  assignedTo?: string
+  notes?: string
+  sortOrder?: number // Add sort order support for drag-and-drop
 }
 
 interface UseRealtimeUpdatesOptions {
@@ -20,54 +24,101 @@ interface UseRealtimeUpdatesOptions {
 }
 
 export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
-  const { enabled = true, pollInterval = 5000, onUpdate } = options
+  const { enabled = true, pollInterval = 1000, onUpdate } = options // Even faster polling for debugging
   const { tenant } = useAuth()
   const [isConnected, setIsConnected] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<string>(getCurrentSingaporeTime())
   const [updates, setUpdates] = useState<RealtimeUpdate[]>([])
   const pollIntervalRef = useRef<number | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const lastKnownStates = useRef<Map<string, string>>(new Map()) // Track last known states
 
-  // Function to check for updates
+  // Enhanced polling-based real-time updates (no SSE)
   const checkForUpdates = useCallback(async () => {
-    if (!tenant?.id || !enabled) return
+    if (!tenant?.id || !enabled) {
+      console.log('❌ [POLLING] Skipped - tenantId:', tenant?.id, 'enabled:', enabled)
+      return
+    }
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/tenants/${tenant.id}/orders/realtime-status?lastUpdate=${lastUpdate}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          },
-        }
-      )
+      const url = `${API_BASE_URL}/api/tenants/${tenant.id}/order-card-states/realtime-check`
+      console.log('🔄 [POLLING] Checking for order card state changes...', url)
+      
+      // Check for changes in order_card_states table directly
+      const response = await fetch(url)
+
+      console.log('🔄 [POLLING] Response status:', response.status, response.statusText)
 
       if (response.ok) {
         const data = await response.json()
+        console.log('🔄 [POLLING] Response received:', data)
+        console.log('🔄 [POLLING] Number of changes:', data.changes?.length || 0)
         
-        if (data.hasUpdates && data.updates.length > 0) {
-          // Process updates
-          const newUpdates: RealtimeUpdate[] = data.updates.map((order: any) => ({
-            type: 'order_updated',
-            orderId: order.id,
-            tenantId: order.tenantId,
-            timestamp: order.updatedAt,
-            updatedBy: order.assignedTo || 'unknown'
-          }))
-
-          setUpdates(prev => [...prev, ...newUpdates])
-          setLastUpdate(data.timestamp)
-
-          // Call the onUpdate callback for each update
-          newUpdates.forEach(update => {
-            onUpdate?.(update)
-          })
+        if (data.changes && data.changes.length > 0) {
+          const newUpdates: RealtimeUpdate[] = []
+          
+          console.log('🔍 [POLLING] Processing changes:', data.changes)
+          
+          for (const change of data.changes) {
+            const stateKey = `${change.cardId}-${change.status}-${change.assignedTo || 'none'}-${change.notes || 'none'}-${change.sortOrder || 0}`
+            const lastKnownState = lastKnownStates.current.get(change.cardId)
+            
+            console.log(`🔍 [POLLING] Checking change for ${change.cardId}:`, {
+              stateKey,
+              lastKnownState,
+              isNew: lastKnownState !== stateKey,
+              notes: change.notes,
+              sortOrder: change.sortOrder
+            })
+            
+            if (lastKnownState !== stateKey) {
+              console.log(`🔥 [POLLING] DETECTED CHANGE for ${change.cardId}:`, {
+                old: lastKnownState,
+                new: stateKey
+              })
+              
+              lastKnownStates.current.set(change.cardId, stateKey)
+              
+              const update: RealtimeUpdate = {
+                type: 'order_updated',
+                orderId: change.cardId,
+                tenantId: tenant.id,
+                timestamp: change.updatedAt,
+                updatedBy: change.assignedBy || 'unknown',
+                status: change.status,
+                assignedTo: change.assignedTo,
+                notes: change.notes,
+                sortOrder: change.sortOrder
+              }
+              
+              newUpdates.push(update)
+            } else {
+              console.log(`⏸️ [POLLING] No change detected for ${change.cardId} (same state)`)
+            }
+          }
+          
+          if (newUpdates.length > 0) {
+            setUpdates(prev => [...prev, ...newUpdates])
+            setIsConnected(true) // Mark as connected when we get successful responses
+            
+            // Call the onUpdate callback for each update
+            newUpdates.forEach(update => {
+              console.log('🎯 [POLLING] Triggering update callback for:', update.orderId)
+              onUpdate?.(update)
+            })
+          }
+        } else {
+          setIsConnected(true) // Still connected, just no changes
         }
+      } else {
+        console.error('🚨 [POLLING] Failed to check for updates:', response.status)
+        setIsConnected(false)
       }
     } catch (error) {
-      console.error('Error checking for updates:', error)
+      console.error('🚨 [POLLING] Error checking for updates:', error)
+      setIsConnected(false)
     }
-  }, [tenant?.id, lastUpdate, enabled, onUpdate])
+  }, [tenant?.id, enabled, onUpdate])
 
   // Function to establish SSE connection
   const connectSSE = useCallback(() => {
@@ -78,7 +129,7 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
       
       eventSource.onopen = () => {
         setIsConnected(true)
-        console.log('Real-time connection established')
+        console.log('🚀 REAL-TIME SSE CONNECTION ESTABLISHED!')
       }
 
       const handleEvent = (event: MessageEvent) => {
@@ -100,18 +151,20 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
 
       eventSource.addEventListener('order_update', (event) => {
         const data = handleEvent(event);
-        if (data && data.data) {
-           data.data.forEach((updateData: any) => {
-            const update: RealtimeUpdate = {
-              type: 'order_updated',
-              orderId: updateData.id,
-              tenantId: tenant?.id || '',
-              timestamp: updateData.updatedAt,
-              updatedBy: updateData.assignedTo || 'unknown',
-            };
-            setUpdates(prev => [...prev, update]);
-            onUpdate?.(update);
-          });
+        if (data) {
+          console.log('[SSE-FRONTEND] 🔥 RECEIVED ORDER UPDATE EVENT:', data);
+          
+          const update: RealtimeUpdate = {
+            type: data.type || 'order_updated',
+            orderId: data.orderId,
+            tenantId: tenant?.id || '',
+            timestamp: data.updatedAt || data.timestamp,
+            updatedBy: data.updatedBy || 'unknown',
+          };
+          
+          console.log('[SSE-FRONTEND] 🎯 PROCESSED UPDATE FOR ORDER:', update.orderId, 'BY:', update.updatedBy);
+          setUpdates(prev => [...prev, update]);
+          onUpdate?.(update);
         }
       });
 
@@ -149,21 +202,36 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
     setIsConnected(false)
   }, [])
 
-  // Effect to start polling and SSE
+  // Effect to start polling (SSE disabled due to HTTP/2 issues)
   useEffect(() => {
-    if (!enabled || !tenant?.id) return
+    if (!enabled || !tenant?.id) {
+      console.log('❌ [POLLING] Not starting - enabled:', enabled, 'tenantId:', tenant?.id)
+      return
+    }
 
-    // Start polling as fallback
+    console.log('🚀 [POLLING] Starting polling-based real-time updates...', {
+      tenantId: tenant.id,
+      pollInterval,
+      enabled
+    })
+    
+    // Start polling for real-time updates
     pollIntervalRef.current = setInterval(checkForUpdates, pollInterval) as unknown as number
+    console.log('⏰ [POLLING] Interval set with ID:', pollIntervalRef.current)
 
-    // Try to establish SSE connection
-    connectSSE()
+    // Initial check
+    console.log('🎯 [POLLING] Running initial check...')
+    checkForUpdates()
 
     // Cleanup on unmount
     return () => {
-      disconnect()
+      console.log('🧹 [POLLING] Cleaning up polling interval:', pollIntervalRef.current)
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
     }
-  }, [enabled, tenant?.id, pollInterval, checkForUpdates, connectSSE, disconnect])
+  }, [enabled, tenant?.id, pollInterval, checkForUpdates])
 
   // Effect to handle tenant changes
   useEffect(() => {

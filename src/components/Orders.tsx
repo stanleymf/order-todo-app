@@ -27,10 +27,12 @@ import {
   Sun,
   Moon,
   Clock,
-  Calendar
+  Calendar,
+  SortAsc
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
 import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate, getUnscheduledOrders } from "../services/api"
+import { useRealtimeUpdates } from "../hooks/use-realtime-updates"
 import { OrderDetailCard } from "./OrderDetailCard"
 import { SortableOrderCard } from "./SortableOrderCard"
 import {
@@ -56,10 +58,217 @@ import { OrderCardField } from "../types/orderCardFields"
 import { toast } from "sonner"
 
 export const Orders: React.FC = () => {
-  const { tenant } = useAuth()
+  const { tenant, user } = useAuth()
   
+  // Google Sheets-style real-time updates with individual order updates
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(0)
+  const [realtimeEnabled, setRealtimeEnabled] = useState(true) // Default enabled like Google Sheets
+  const [activeUpdateIds, setActiveUpdateIds] = useState<Set<string>>(new Set()) // Track ongoing updates
+  const refreshCooldown = 2000 // Shorter cooldown for individual updates
+
+  // Google Sheets-style individual order update function
+  const updateIndividualOrder = useCallback((orderId: string, updateData: any, updateSource: string) => {
+    if (activeUpdateIds.has(orderId)) {
+      return // Skip if already updating this order
+    }
+
+    // Mark this order as being updated
+    setActiveUpdateIds(prev => new Set(prev).add(orderId))
+
+    try {
+      console.log(`[REALTIME-INDIVIDUAL] Updating single order ${orderId} from ${updateSource}`, updateData)
+
+      // Update this specific order in all relevant arrays (Google Sheets style)
+      const updateOrderInArray = (orders: any[]) => 
+        orders.map((order: any) => 
+          (order.cardId === orderId || order.id === orderId || order.orderId === orderId)
+            ? { 
+                ...order, 
+                status: updateData.status || order.status,
+                assignedTo: updateData.assignedTo || order.assignedTo,
+                notes: updateData.notes !== undefined ? updateData.notes : order.notes,
+                sortOrder: updateData.sortOrder || order.sortOrder
+              }
+            : order
+        )
+
+      // Apply individual updates to each array
+      setAllOrders(prev => updateOrderInArray(prev))
+      setMainOrders(prev => updateOrderInArray(prev))
+      setAddOnOrders(prev => updateOrderInArray(prev))
+      setUnscheduledOrders(prev => updateOrderInArray(prev))
+      
+      // Update store containers
+      setStoreContainers(prev => 
+        prev.map(container => ({
+          ...container,
+          orders: updateOrderInArray(container.orders)
+        }))
+      )
+
+      console.log(`[REALTIME-INDIVIDUAL] Successfully updated order ${orderId} in UI`)
+    } catch (error) {
+      console.error(`[REALTIME-INDIVIDUAL] Failed to update order ${orderId}:`, error)
+    } finally {
+      // Remove from active updates after a short delay
+      setTimeout(() => {
+        setActiveUpdateIds(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(orderId)
+          return newSet
+        })
+      }, 100)
+    }
+  }, [activeUpdateIds])
+
+  const { isConnected, updates } = useRealtimeUpdates({
+    enabled: realtimeEnabled,
+    pollInterval: 3000, // Back to 3 seconds for responsiveness
+    onUpdate: (update) => {
+      console.log('[REALTIME] Received update:', update)
+      
+      // Google Sheets-style filtering and updates
+      const now = Date.now()
+      const currentUserId = user?.id || 'unknown'
+      const currentUserName = user?.name || user?.email || 'unknown'
+      const isOwnUpdate = update.updatedBy === currentUserId
+      const withinCooldown = (now - lastRefreshTime) < refreshCooldown
+
+      console.log('🔍 [REALTIME] UPDATE CHECK:', {
+        updateType: update.type,
+        orderId: update.orderId,
+        isOwnUpdate,
+        withinCooldown,
+        timeSinceLastUpdate: now - lastRefreshTime,
+        updatedBy: update.updatedBy,
+        currentUserId: currentUserId,
+        currentUserName: currentUserName
+      })
+
+      // Handle different update types like Google Sheets
+      if (!withinCooldown && (update.type === 'order_updated' || update.type === 'order_created' || update.type === 'order_deleted')) {
+        setLastRefreshTime(now)
+
+        if (update.type === 'order_updated' && update.orderId) {
+          // GOOGLE SHEETS APPROACH: Update individual order, even if it's our own
+          // The key is we don't refresh the page, just update the specific data
+          console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
+          
+          // Create update data from the polling response
+          const updateData = {
+            status: update.status || 'unassigned',
+            assignedTo: update.assignedTo,
+            notes: update.notes,
+            sortOrder: update.sortOrder // Add sort order support for drag-and-drop
+          }
+          
+          updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
+          
+          // If sort order changed, trigger re-sorting of the arrays
+          if (update.sortOrder !== undefined) {
+            console.log(`[REALTIME] Sort order changed for ${update.orderId}, triggering re-sort`)
+            
+            // Re-sort all order arrays based on the new sort orders
+            const sortByUpdatedOrder = (a: any, b: any) => {
+              // Primary sort by sortOrder (if available)
+              if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+                return a.sortOrder - b.sortOrder
+              }
+              
+              // Fallback to existing sorting logic
+              if (a.sortOrder !== undefined && b.sortOrder === undefined) return -1
+              if (a.sortOrder === undefined && b.sortOrder !== undefined) return 1
+              
+              // Default difficulty/wedding priority sort
+              const aIsWedding = a.difficultyLabel?.toLowerCase().includes('wedding') || a.productTypeLabel?.toLowerCase().includes('wedding')
+              const bIsWedding = b.difficultyLabel?.toLowerCase().includes('wedding') || b.productTypeLabel?.toLowerCase().includes('wedding')
+              
+              if (aIsWedding && !bIsWedding) return -1
+              if (!aIsWedding && bIsWedding) return 1
+              
+              return 0
+            }
+            
+            setAllOrders(prev => [...prev].sort(sortByUpdatedOrder))
+            setMainOrders(prev => [...prev].sort(sortByUpdatedOrder))
+            setAddOnOrders(prev => [...prev].sort(sortByUpdatedOrder))
+            setUnscheduledOrders(prev => [...prev].sort(sortByUpdatedOrder))
+            setStoreContainers(prev => 
+              prev.map(container => ({
+                ...container,
+                orders: [...container.orders].sort(sortByUpdatedOrder)
+              }))
+            )
+          }
+          
+          // Show notification for others' changes only
+          if (!isOwnUpdate) {
+            // For now, show a generic message since updatedBy contains user ID, not name
+            // TODO: Implement user lookup to show actual user names
+            toast.info(`Order updated by another user`, {
+              duration: 3000
+            })
+          }
+        } else if (update.type === 'order_created') {
+          // For new orders, we might need a partial refresh or fetch the new order
+          console.log('[REALTIME] New order created, showing notification')
+          toast.info(`New order created by another user`, {
+            duration: 3000,
+            action: {
+              label: 'Refresh',
+              onClick: () => handleFetchOrders()
+            }
+          })
+        } else if (update.type === 'order_deleted') {
+          // Remove the deleted order from arrays
+          console.log(`[REALTIME] Order ${update.orderId} deleted, removing from UI`)
+          const removeOrder = (orders: any[]) => 
+            orders.filter((order: any) => 
+              order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
+            )
+
+          setAllOrders(prev => removeOrder(prev))
+          setMainOrders(prev => removeOrder(prev))
+          setAddOnOrders(prev => removeOrder(prev))
+          setUnscheduledOrders(prev => removeOrder(prev))
+          setStoreContainers(prev => 
+            prev.map(container => ({
+              ...container,
+              orders: removeOrder(container.orders)
+            }))
+          )
+
+          if (!isOwnUpdate) {
+            toast.info(`Order deleted by another user`, {
+              duration: 3000
+            })
+          }
+        }
+      } else {
+        console.log('[REALTIME] Skipping update - within cooldown or unsupported type')
+      }
+    }
+  })
+  
+  // Manual real-time toggle (now defaults to enabled)
+  const toggleRealtime = () => {
+    setRealtimeEnabled(!realtimeEnabled)
+    toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
+  }
+  
+  console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}, Updates received: ${updates.length}`)
+  
+  // Helper function to get today's date in YYYY-MM-DD format (local timezone)
+  const getTodayDate = () => {
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = String(today.getMonth() + 1).padStart(2, '0')
+    const day = String(today.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
   // State for controls
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayDate())
   const [selectedStore, setSelectedStore] = useState<string>("all")
   const [searchTerm, setSearchTerm] = useState<string>("")
   const [stores, setStores] = useState<any[]>([])
@@ -81,6 +290,9 @@ export const Orders: React.FC = () => {
   const [collapsedContainers, setCollapsedContainers] = useState<Record<string, boolean>>({
     'unscheduled-all': true // Default collapsed state for unscheduled container
   })
+  
+  // Quick Actions collapsible state (default collapsed)
+  const [isQuickActionsCollapsed, setIsQuickActionsCollapsed] = useState(true)
   
   // Filter state management
   const [activeFilters, setActiveFilters] = useState<{
@@ -368,10 +580,6 @@ export const Orders: React.FC = () => {
     }
   }
 
-
-
-
-
   // Filter orders based on search term and store
   const filterOrders = (orders: any[]) => {
     return orders.filter(order => {
@@ -580,18 +788,50 @@ export const Orders: React.FC = () => {
           : order
       )
 
-    setAllOrders(prev => updateOrderStatus(prev))
-    setMainOrders(prev => updateOrderStatus(prev))
-    setAddOnOrders(prev => updateOrderStatus(prev))
-    setUnscheduledOrders(prev => updateOrderStatus(prev))
+    // Sort orders with completed orders at the bottom and wedding orders at the top
+    const sortOrdersWithStatusPriority = (orders: any[]) => {
+      return orders.sort((a, b) => {
+        // 1. Status priority - completed orders go to bottom
+        const aCompleted = a.status === 'completed'
+        const bCompleted = b.status === 'completed'
+        
+        if (aCompleted && !bCompleted) return 1  // a goes after b
+        if (!aCompleted && bCompleted) return -1  // a goes before b
+        
+        // 2. Wedding priority - wedding orders go to top (within same status)
+        const aIsWedding = a.isWeddingProduct
+        const bIsWedding = b.isWeddingProduct
+        
+        if (aIsWedding && !bIsWedding) return -1  // a goes before b
+        if (!aIsWedding && bIsWedding) return 1   // a goes after b
+        
+        // 3. Existing sort logic for same status and wedding group
+        if (a.sortOrder !== undefined && b.sortOrder !== undefined && a.sortOrder !== b.sortOrder) {
+          return a.sortOrder - b.sortOrder
+        }
+        
+        // 4. Fallback to original order
+        return 0
+      })
+    }
+
+    setAllOrders(prev => sortOrdersWithStatusPriority(updateOrderStatus(prev)))
+    setMainOrders(prev => sortOrdersWithStatusPriority(updateOrderStatus(prev)))
+    setAddOnOrders(prev => sortOrdersWithStatusPriority(updateOrderStatus(prev)))
+    setUnscheduledOrders(prev => sortOrdersWithStatusPriority(updateOrderStatus(prev)))
     
-    // Also update store containers
+    // Also update store containers with sorting
     setStoreContainers(prev => 
       prev.map(container => ({
         ...container,
-        orders: updateOrderStatus(container.orders)
+        orders: sortOrdersWithStatusPriority(updateOrderStatus(container.orders))
       }))
     )
+
+    // Toast notification for completed orders
+    if (newStatus === 'completed') {
+      toast.success("Order Completed!")
+    }
   }
 
   // Handle order deletion from OrderDetailCard
@@ -636,7 +876,57 @@ export const Orders: React.FC = () => {
     }
   }
 
-  // Handle drag end for reordering
+  // Auto-sort orders by resetting manual sort order and applying label-based sorting
+  const handleSortOrders = async () => {
+    if (!tenant?.id || !selectedDate || !stores.length) {
+      toast.error("No store or date selected")
+      return
+    }
+
+    setLoading(true)
+    try {
+      const storeId = selectedStore === "all" ? stores[0]?.id : selectedStore
+      if (!storeId) {
+        toast.error("No store selected")
+        return
+      }
+
+      // Get all orders for the date
+      const dateStr = selectedDate.split("-").reverse().join("/")
+      console.log("Auto-sorting orders for date:", dateStr, "store:", storeId)
+      
+      // Reset all manual sort orders for this date by deleting them from order_card_states
+      // This will cause the backend to fall back to the label-based priority sorting
+      const response = await fetch(`/api/tenants/${tenant.id}/reset-manual-sort`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        },
+        body: JSON.stringify({
+          deliveryDate: dateStr,
+          storeId: storeId
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to reset sort order')
+      }
+
+      toast.success("Manual sort order reset - orders now sorted by label priority")
+      
+      // Refresh the orders to show the new label-based sorting
+      await handleRefreshFromDatabase()
+      
+    } catch (error) {
+      console.error("Failed to auto-sort orders:", error)
+      toast.error("Failed to auto-sort orders: " + (error as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Handle drag end for reordering and status changes
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
 
@@ -647,6 +937,51 @@ export const Orders: React.FC = () => {
     if (!tenant?.id) {
       toast.error("No tenant ID available")
       return
+    }
+
+    // Check if dropping into a status column (Unassigned, Prep, Complete)
+    const statusColumnMap: Record<string, 'unassigned' | 'assigned' | 'completed'> = {
+      'unassigned-column': 'unassigned',
+      'assigned-column': 'assigned', 
+      'completed-column': 'completed'
+    }
+
+    const newStatus = statusColumnMap[over.id as string]
+    if (newStatus) {
+      // Dropped into a status column - update status
+      console.log(`[DRAG-DROP] Dropped ${active.id} into ${newStatus} column`)
+      
+      // Update the status and save to database
+      handleOrderStatusChange(active.id as string, newStatus)
+      
+      // Also call the API directly to ensure it's saved
+      const cardId = active.id as string
+      const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+      
+      try {
+        const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${cardId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({
+            status: newStatus,
+            assignedTo: newStatus === 'assigned' ? (user?.name || user?.email) : null,
+            deliveryDate
+          })
+        })
+
+        if (response.ok) {
+          console.log(`[DRAG-DROP] Status saved to database: ${cardId} -> ${newStatus}`)
+        } else {
+          console.error('[DRAG-DROP] Failed to save status:', await response.text())
+        }
+      } catch (error) {
+        console.error('[DRAG-DROP] Error saving status:', error)
+      }
+      
+      return // Don't continue with reordering logic
     }
 
     try {
@@ -947,9 +1282,36 @@ export const Orders: React.FC = () => {
       {/* Controls Section */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5" />
-            Order Controls
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Order Controls
+            </div>
+                         {/* Real-time Status Indicator with Manual Toggle */}
+             <div className="flex items-center gap-2 text-sm">
+               <Button
+                 variant="outline"
+                 size="sm"
+                 onClick={toggleRealtime}
+                 className={`h-8 px-3 ${
+                   realtimeEnabled 
+                     ? 'border-green-500 text-green-700' 
+                     : 'border-gray-300 text-gray-600'
+                 }`}
+               >
+                 <div className={`w-2 h-2 rounded-full mr-2 ${
+                   realtimeEnabled && isConnected ? 'bg-green-500' : 'bg-gray-400'
+                 }`} />
+                 <span className="text-xs font-medium">
+                   {realtimeEnabled ? (isConnected ? 'Live' : 'Connecting') : 'Off'}
+                 </span>
+               </Button>
+               {updates.length > 0 && (
+                 <div className="text-xs text-muted-foreground">
+                   {updates.length} updates
+                 </div>
+               )}
+             </div>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -957,16 +1319,46 @@ export const Orders: React.FC = () => {
           <div className="flex flex-wrap items-end gap-4">
             <div className="grid gap-2">
               <Label htmlFor="date">Date</Label>
-              <Input
-                id="date"
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  console.log("Date changed to:", e.target.value)
-                  setSelectedDate(e.target.value)
-                }}
-                className="w-[180px]"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => {
+                    console.log("Date changed to:", e.target.value)
+                    setSelectedDate(e.target.value)
+                  }}
+                  className="w-[180px]"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const today = getTodayDate()
+                    setSelectedDate(today)
+                    console.log("Date set to today:", today)
+                  }}
+                  className="px-3 whitespace-nowrap"
+                  title="Set to today's date"
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const currentDate = new Date(selectedDate)
+                    currentDate.setDate(currentDate.getDate() + 1)
+                    const nextDay = currentDate.toISOString().split('T')[0]
+                    setSelectedDate(nextDay)
+                    console.log("Date set to next day:", nextDay)
+                  }}
+                  className="px-3 whitespace-nowrap"
+                  title="Go to next day"
+                >
+                  Next Day
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-2">
@@ -1003,10 +1395,16 @@ export const Orders: React.FC = () => {
 
           <Separator />
 
-          {/* Quick Actions */}
-          <div>
-            <h3 className="text-sm font-medium mb-3">Quick Actions</h3>
-            <div className="flex flex-wrap gap-2">
+          {/* Quick Actions - Collapsible */}
+          <Collapsible open={!isQuickActionsCollapsed} onOpenChange={(open) => setIsQuickActionsCollapsed(!open)}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="flex items-center justify-between w-full p-0 h-auto hover:bg-transparent">
+                <h3 className="text-sm font-medium">Quick Actions</h3>
+                <ChevronDown className={`h-4 w-4 transition-transform ${isQuickActionsCollapsed ? '' : 'rotate-180'}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3">
+              <div className="flex flex-wrap gap-2">
               <Button 
                 onClick={handleFetchOrders}
                 disabled={loading || !stores.length}
@@ -1062,9 +1460,22 @@ export const Orders: React.FC = () => {
                 Load Unscheduled ({unscheduledOrders.length})
               </Button>
               
-
-            </div>
-          </div>
+              <Button 
+                variant="outline" 
+                onClick={handleSortOrders} 
+                disabled={loading}
+                className="gap-2"
+              >
+                {loading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <SortAsc className="h-4 w-4" />
+                )}
+                Auto-Sort Orders
+              </Button>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </CardContent>
       </Card>
 

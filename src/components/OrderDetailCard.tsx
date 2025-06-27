@@ -98,6 +98,7 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
     setIsSaving(true)
     try {
+      // Save to order_card_states table (for UI state)
       const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${cardId}`, {
         method: 'PUT',
         headers: {
@@ -111,6 +112,8 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
           deliveryDate
         })
       })
+
+      // Real-time sync now handled by polling system - no extra API call needed
 
       if (!response.ok) {
         console.error('Failed to save card state:', await response.text())
@@ -504,6 +507,19 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
 
   // Get card background color based on status and express
   const getCardStatusColor = () => {
+    // Wedding orders have light pink background - HIGHEST PRIORITY
+    const isWeddingOrder = order.isWeddingProduct
+    if (isWeddingOrder) {
+      switch (status) {
+        case "assigned":
+          return "bg-pink-200 border-l-blue-500"
+        case "completed":
+          return "bg-pink-300 border-l-green-500"
+        default:
+          return `bg-pink-50 ${getBorderColor(difficultyValue)}`
+      }
+    }
+    
     // Express orders have yellow background regardless of status
     if (isExpressOrder) {
       switch (status) {
@@ -630,6 +646,18 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
                   </Badge>
                 )}
               </div>
+              
+              {/* Consolidated Items (Top-Up, Corsage, Boutonniere) - Show below variant title */}
+              {order.topUpItems && order.topUpItems.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {order.topUpItems.map((topUpItem: any, index: number) => (
+                    <div key={index} className="flex items-center gap-1 text-xs text-gray-600">
+                      <span className="text-gray-400">•</span>
+                      <span>{topUpItem.title} x {topUpItem.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           

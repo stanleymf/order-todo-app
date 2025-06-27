@@ -65,16 +65,19 @@ app.get("/api/tenants/:tenantId/orders/realtime-status", async (c) => {
   }
 })
 
-// --- Realtime Orders SSE (PUBLIC) ---
+// --- Realtime Orders SSE (PUBLIC) with Change Detection ---
 app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
   const tenantId = c.req.param("tenantId")
 
   return streamSSE(c, async (stream) => {
+    let lastUpdateTime = new Date().toISOString()
+    let knownUpdates = new Map<string, string>() // Track last known update time for each order card
+
     // Send initial connection message
     await stream.writeSSE({
       data: JSON.stringify({
         type: "connected",
-        message: "SSE connection established",
+        message: "SSE connection established for real-time order updates",
         timestamp: new Date().toISOString(),
       }),
       event: "connected",
@@ -82,36 +85,98 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
 
     while (true) {
       try {
-        // Fetch recent order updates
-        const query = `
-            SELECT id, status, updated_at, customer_name, delivery_date, priority, assigned_to
-            FROM tenant_orders 
-            WHERE tenant_id = ?
-            ORDER BY updated_at DESC 
-            LIMIT 10
-          `
+        console.log(`[SSE-REALTIME] Checking for changes since ${lastUpdateTime}`)
+        
+        // Check for changes in order_card_states table (where status updates happen)
+        const cardStateQuery = `
+          SELECT card_id, status, assigned_to, assigned_by, updated_at, delivery_date
+          FROM order_card_states 
+          WHERE tenant_id = ? AND updated_at > ?
+          ORDER BY updated_at DESC 
+          LIMIT 20
+        `
 
-        const { results } = await c.env.DB.prepare(query).bind(tenantId).all()
+        const { results: cardStateChanges } = await c.env.DB.prepare(cardStateQuery).bind(tenantId, lastUpdateTime).all()
 
-        if (results && results.length > 0) {
-          const updates = results.map((order: any) => ({
-            id: order.id,
-            status: order.status,
-            updatedAt: order.updated_at,
-            customerName: order.customer_name,
-            deliveryDate: order.delivery_date,
-            priority: order.priority,
-            assignedTo: order.assigned_to,
-          }))
+        // Check for changes in main tenant_orders table  
+        const orderQuery = `
+          SELECT id, status, updated_at, customer_name, delivery_date, priority, assigned_to
+          FROM tenant_orders 
+          WHERE tenant_id = ? AND updated_at > ?
+          ORDER BY updated_at DESC 
+          LIMIT 20
+        `
 
-          await stream.writeSSE({
-            data: JSON.stringify({
-              type: "order_updates",
-              data: updates,
-              timestamp: new Date().toISOString(),
-            }),
-            event: "order_update",
-          })
+        const { results: orderChanges } = await c.env.DB.prepare(orderQuery).bind(tenantId, lastUpdateTime).all()
+
+        const hasChanges = (cardStateChanges && cardStateChanges.length > 0) || (orderChanges && orderChanges.length > 0)
+
+        if (hasChanges) {
+          console.log(`[SSE-REALTIME] Found ${cardStateChanges?.length || 0} card state changes and ${orderChanges?.length || 0} order changes`)
+          
+          const changeEvents = []
+
+          // Process card state changes (these are the main status updates)
+          if (cardStateChanges && cardStateChanges.length > 0) {
+            for (const change of cardStateChanges) {
+              const changeKey = `${change.card_id}-${change.updated_at}`
+              if (!knownUpdates.has(changeKey)) {
+                knownUpdates.set(changeKey, change.updated_at)
+                
+                                 changeEvents.push({
+                   type: "order_updated",
+                   orderId: String(change.card_id),
+                   status: String(change.status),
+                   assignedTo: String(change.assigned_to || ''),
+                   updatedBy: String(change.assigned_by || 'unknown'),
+                   updatedAt: String(change.updated_at),
+                   deliveryDate: String(change.delivery_date),
+                   timestamp: new Date().toISOString()
+                 })
+              }
+            }
+          }
+
+          // Process main order changes
+          if (orderChanges && orderChanges.length > 0) {
+            for (const change of orderChanges) {
+              const changeKey = `main-${change.id}-${change.updated_at}`
+              if (!knownUpdates.has(changeKey)) {
+                knownUpdates.set(changeKey, change.updated_at)
+                
+                                 changeEvents.push({
+                   type: "order_updated", 
+                   orderId: String(change.id),
+                   status: String(change.status),
+                   assignedTo: String(change.assigned_to || ''),
+                   updatedBy: String(change.assigned_to || 'unknown'),
+                   updatedAt: String(change.updated_at),
+                   deliveryDate: String(change.delivery_date),
+                   timestamp: new Date().toISOString()
+                 })
+              }
+            }
+          }
+
+          // Send all change events
+          for (const event of changeEvents) {
+            await stream.writeSSE({
+              data: JSON.stringify(event),
+              event: "order_update",
+            })
+            console.log(`[SSE-REALTIME] Sent update event for order ${event.orderId}: ${event.type}`)
+          }
+
+          // Update last check time
+          lastUpdateTime = new Date().toISOString()
+          
+          // Clean up old known updates (keep only last 100)
+          if (knownUpdates.size > 100) {
+            const entries = Array.from(knownUpdates.entries())
+            knownUpdates.clear()
+            entries.slice(-50).forEach(([key, value]) => knownUpdates.set(key, value))
+          }
+
         } else {
           // Send heartbeat to keep connection alive
           await stream.writeSSE({
@@ -121,19 +186,21 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
             }),
             event: "heartbeat",
           })
+          console.log(`[SSE-REALTIME] Sent heartbeat - no changes detected`)
         }
+        
       } catch (error) {
-        console.error("Error in SSE polling:", error)
+        console.error("Error in SSE real-time polling:", error)
         await stream.writeSSE({
           data: JSON.stringify({
             type: "error",
-            message: "Failed to fetch order updates",
+            message: "Failed to check for order updates",
             timestamp: new Date().toISOString(),
           }),
           event: "error",
         })
       }
-      await stream.sleep(5000) // Poll every 5 seconds
+      await stream.sleep(3000) // Check every 3 seconds for responsiveness
     }
   })
 })
@@ -474,13 +541,91 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       return productTypeLabel?.priority || 999 // Default to low priority if no product type label
     }
 
+    // Check if product is a wedding order (has "Weddings" product type label)
+    const isWeddingProduct = (productId: string, variantId: string): boolean => {
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      return labels.some((label: any) => 
+        label.category?.toLowerCase() === "producttype" && 
+        label.name?.toLowerCase() === "weddings"
+      )
+    }
+
+    // Check if line item should be consolidated (Top-Up, Corsage, or Boutonniere)
+    const isConsolidatedProduct = (productId: string, variantId: string, lineItemTitle: string, variantTitle: string): boolean => {
+      // Method 1: Check if saved_products has "Top-Up" label
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const hasTopUpLabel = labels.some((label: any) => 
+        label.name?.toLowerCase().includes("top-up") ||
+        label.name?.toLowerCase().includes("topup")
+      )
+      
+      // Method 2: Check if title contains "Top-Up"
+      const titleContainsTopUp = (lineItemTitle || '').toLowerCase().includes('top-up')
+      
+      // Method 3: Check if product title or variant title contains "Corsage" (case-insensitive)
+      const titleContainsCorsage = (lineItemTitle || '').toLowerCase().includes('corsage')
+      const variantContainsCorsage = (variantTitle || '').toLowerCase().includes('corsage')
+      
+      // Method 4: Check if product title or variant title contains "Boutonniere" (case-insensitive)
+      const titleContainsBoutonniere = (lineItemTitle || '').toLowerCase().includes('boutonniere')
+      const variantContainsBoutonniere = (variantTitle || '').toLowerCase().includes('boutonniere')
+      
+      return hasTopUpLabel || titleContainsTopUp || titleContainsCorsage || variantContainsCorsage || titleContainsBoutonniere || variantContainsBoutonniere
+    }
+
+    // Determine which title to display for consolidated items (the one containing the keyword)
+    const getConsolidatedDisplayTitle = (productId: string, variantId: string, lineItemTitle: string, variantTitle: string): string => {
+      // Method 1: Check if saved_products has "Top-Up" label
+      const key = `${productId}-${variantId}`
+      const labels = productLabelMap.get(key) || []
+      const hasTopUpLabel = labels.some((label: any) => 
+        label.name?.toLowerCase().includes("top-up") ||
+        label.name?.toLowerCase().includes("topup")
+      )
+      
+      // Method 2: Check if title contains "Top-Up"
+      const titleContainsTopUp = (lineItemTitle || '').toLowerCase().includes('top-up')
+      
+      // Method 3: Check if product title or variant title contains "Corsage" (case-insensitive)
+      const titleContainsCorsage = (lineItemTitle || '').toLowerCase().includes('corsage')
+      const variantContainsCorsage = (variantTitle || '').toLowerCase().includes('corsage')
+      
+      // Method 4: Check if product title or variant title contains "Boutonniere" (case-insensitive)
+      const titleContainsBoutonniere = (lineItemTitle || '').toLowerCase().includes('boutonniere')
+      const variantContainsBoutonniere = (variantTitle || '').toLowerCase().includes('boutonniere')
+      
+      // Determine which title to display based on which contains the keyword
+      // Priority: Product title takes precedence if both contain the keyword
+      
+      if (hasTopUpLabel || titleContainsTopUp) {
+        return lineItemTitle // For Top-Up, use product title
+      }
+      
+      if (titleContainsCorsage || titleContainsBoutonniere) {
+        return lineItemTitle // Product title contains keyword, use it
+      }
+      
+      if (variantContainsCorsage || variantContainsBoutonniere) {
+        return variantTitle // Only variant title contains keyword, use it
+      }
+      
+      // Fallback (should not reach here if isConsolidatedProduct returned true)
+      return lineItemTitle
+    }
+
     // Process each order into line items
     const processedOrders: any[] = []
+    const orderConsolidatedItems = new Map<string, any[]>() // Map shopifyOrderId -> consolidatedItems[]
     
     for (const order of results || []) {
       try {
         // Parse line items from JSON string
         const lineItems = order.line_items ? JSON.parse(order.line_items as string) : []
+        
+        // Collect consolidated items (Top-Up, Corsage, Boutonniere) for this order
+        const consolidatedItems: any[] = []
         
         // Check if any line item in this order contains "express" (case-insensitive)
         const hasExpressItem = lineItems.some((item: any) => 
@@ -568,7 +713,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           }
         }
         
-        // Process each line item (excluding express items)
+        // Process each line item (excluding express items and collecting Top-Up items)
         for (const lineItem of lineItems) {
           // Skip line items that contain "express" - they won't become individual cards
           if ((lineItem.title || lineItem.name || '').toLowerCase().includes('express')) {
@@ -587,6 +732,20 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             variantId = variantId.split('/').pop() || ''
           }
           
+          // Check if this is a consolidated item (Top-Up, Corsage, Boutonniere)
+          const lineItemTitle = lineItem.title || lineItem.name || ''
+          const variantTitle = lineItem.variant_title || lineItem.variant?.title || ''
+          if (isConsolidatedProduct(productId, variantId, lineItemTitle, variantTitle)) {
+            // Add to consolidated items collection instead of creating individual cards
+            consolidatedItems.push({
+              title: getConsolidatedDisplayTitle(productId, variantId, lineItemTitle, variantTitle),
+              variantTitle: variantTitle,
+              quantity: lineItem.quantity || 1,
+              price: parseFloat(lineItem.price || '0')
+            })
+            continue // Skip creating individual cards for consolidated items
+          }
+          
           // Debug line item structure
           console.log('[LINE-ITEM-DEBUG] Processing line item:', {
             title: lineItem.title,
@@ -601,6 +760,9 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
           
           // Classify as add-on
           const isAddOn = isAddOnProduct(productId, variantId)
+          
+          // Check if this is a wedding product
+          const isWedding = isWeddingProduct(productId, variantId)
 
           // Get labels and priorities for sorting
           const difficultyLabel = getDifficultyLabel(productId, variantId)
@@ -658,6 +820,8 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
               // Add-on classification
               isAddOn: isAddOn,
               productCategory: isAddOn ? "add-on" : "main-order",
+              // Wedding product flag
+              isWeddingProduct: isWedding,
               // Shopify order data (preserve original GraphQL data if available)
               shopifyOrderData: (() => {
                 // Debug logs removed - double-encoding fix completed
@@ -704,6 +868,145 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
             })
           }
         }
+        
+        // CRITICAL: Check for edge case - if no main cards were created but consolidated items exist
+        const orderMainCards = processedOrders.filter(card => card.shopifyOrderId === order.shopify_order_id)
+        
+        if (orderMainCards.length === 0 && consolidatedItems.length > 0) {
+          // FALLBACK SOLUTION 1: Create main card using first consolidated item
+          const firstItem = consolidatedItems[0]
+          const cardId = `${order.shopify_order_id}-fallback-0`
+          
+          console.log(`[FALLBACK-CARD] Creating fallback card for order ${order.shopify_order_id} with first item: ${firstItem.title}`)
+          
+          // Get product and variant IDs for the first item (for classification)
+          let fallbackProductId = ''
+          let fallbackVariantId = ''
+          
+          // Find the original line item that corresponds to this consolidated item
+          const originalLineItem = lineItems.find((item: any) => {
+            const lineItemTitle = item.title || item.name || ''
+            const variantTitle = item.variant_title || item.variant?.title || ''
+            const displayTitle = getConsolidatedDisplayTitle(
+              item.product_id?.toString() || item.product?.id?.toString() || '',
+              item.variant_id?.toString() || item.variant?.id?.toString() || '',
+              lineItemTitle,
+              variantTitle
+            )
+            return displayTitle === firstItem.title
+          })
+          
+          if (originalLineItem) {
+            fallbackProductId = originalLineItem.product_id?.toString() || originalLineItem.product?.id?.toString() || ''
+            fallbackVariantId = originalLineItem.variant_id?.toString() || originalLineItem.variant?.id?.toString() || ''
+            
+            // Clean GraphQL IDs if they exist
+            if (fallbackProductId.includes('gid://shopify/Product/')) {
+              fallbackProductId = fallbackProductId.split('/').pop() || ''
+            }
+            if (fallbackVariantId.includes('gid://shopify/ProductVariant/')) {
+              fallbackVariantId = fallbackVariantId.split('/').pop() || ''
+            }
+          }
+          
+          // Get classification for the fallback card
+          const isAddOn = isAddOnProduct(fallbackProductId, fallbackVariantId)
+          const isWedding = isWeddingProduct(fallbackProductId, fallbackVariantId)
+          const difficultyLabel = getDifficultyLabel(fallbackProductId, fallbackVariantId)
+          const productTypeLabel = getProductTypeLabel(fallbackProductId, fallbackVariantId)
+          const difficultyPriority = getDifficultyPriority(fallbackProductId, fallbackVariantId)
+          const productTypePriority = getProductTypePriority(fallbackProductId, fallbackVariantId)
+          
+          // Create the fallback card using first item's details
+          processedOrders.push({
+            cardId: cardId,
+            orderId: order.id,
+            shopifyOrderId: order.shopify_order_id,
+            customerName: order.customer_name,
+            deliveryDate: order.delivery_date,
+            status: order.status,
+            priority: order.priority,
+            assignedTo: order.assigned_to,
+            notes: order.notes,
+            productLabel: order.product_label,
+            productType: order.product_type,
+            totalPrice: order.total_price,
+            currency: order.currency,
+            customerEmail: order.customer_email,
+            storeId: order.store_id,
+            sessionId: order.session_id,
+            // Line item specific data from first consolidated item
+            lineItemId: originalLineItem?.id || `fallback-${order.shopify_order_id}`,
+            productTitleId: fallbackProductId,
+            variantId: fallbackVariantId,
+            title: firstItem.title, // Display title from the first consolidated item
+            quantity: firstItem.quantity,
+            price: firstItem.price,
+            variantTitle: firstItem.variantTitle,
+            // Labels from product_labels database
+            difficultyLabel: difficultyLabel,
+            productTypeLabel: productTypeLabel,
+            // Priority values for sorting
+            difficultyPriority: difficultyPriority,
+            productTypePriority: productTypePriority,
+            // Express order detection
+            isExpressOrder: hasExpressItem,
+            expressTimeSlot: expressTimeSlot,
+            // Pickup order detection
+            isPickupOrder: isPickupOrder,
+            // Add-on classification
+            isAddOn: isAddOn,
+            productCategory: isAddOn ? "add-on" : "main-order",
+            // Wedding product flag
+            isWeddingProduct: isWedding,
+            // Shopify order data (preserve original GraphQL data if available)
+            shopifyOrderData: (() => {
+              try {
+                // Try to parse stored GraphQL data first
+                if (order.shopify_order_data && typeof order.shopify_order_data === 'string' && order.shopify_order_data.trim() !== '') {
+                  let parsedData = JSON.parse(order.shopify_order_data);
+                  
+                  // CRITICAL FIX: Handle double-encoded JSON strings
+                  if (typeof parsedData === 'string') {
+                    console.log('[DOUBLE-ENCODING-FIX] Detected double-encoded JSON for order:', order.shopify_order_id);
+                    parsedData = JSON.parse(parsedData);
+                  }
+                  
+                  console.log('[GRAPHQL-PRESERVATION] Using original GraphQL data for fallback card:', order.shopify_order_id);
+                  return parsedData;
+                }
+              } catch (e) {
+                console.error('[GRAPHQL-PRESERVATION] Failed to parse shopify_order_data for fallback card, using fallback:', e);
+              }
+              
+              // Fallback to reconstructed data
+              console.log('[GRAPHQL-PRESERVATION] Using reconstructed data for fallback card:', order.shopify_order_id);
+              return {
+                id: order.shopify_order_id,
+                name: order.shopify_order_id,
+                customer: {
+                  first_name: (order.customer_name as string)?.split(' ')[0] || '',
+                  last_name: (order.customer_name as string)?.split(' ').slice(1).join(' ') || '',
+                  email: order.customer_email
+                },
+                line_items: lineItems,
+                total_price: order.total_price,
+                currency: order.currency,
+                note: order.notes,
+                status: order.status,
+                tags: "" // Empty for fallback
+              };
+            })()
+          })
+        }
+        
+        // Store consolidated items for this order if any exist
+        if (consolidatedItems.length > 0) {
+          orderConsolidatedItems.set(order.shopify_order_id, consolidatedItems)
+          console.log(`[CONSOLIDATED-DEBUG] Found ${consolidatedItems.length} consolidated items for order ${order.shopify_order_id}:`, 
+            consolidatedItems.map(item => `${item.title} x ${item.quantity}`).join(', '))
+        }
+        
       } catch (error) {
         console.error(`Error processing order ${order.id}:`, error)
         // Continue with other orders
@@ -748,6 +1051,14 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
       } else {
         // Default sort order for cards without explicit ordering
         order.sortOrder = 0
+      }
+      
+      // Attach consolidated items to each order card
+      const consolidatedItems = orderConsolidatedItems.get(order.shopifyOrderId) || []
+      order.topUpItems = consolidatedItems
+      
+      if (consolidatedItems.length > 0) {
+        console.log(`[CONSOLIDATED-ATTACH] Attached ${consolidatedItems.length} consolidated items to order card ${order.cardId}`)
       }
     }
 
@@ -920,27 +1231,41 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
     // Enhanced sort function with label priority hierarchy
     const sortByOrder = (a: any, b: any) => {
-      // 1. HIGHEST PRIORITY: Manual drag-and-drop ordering
+      // 1. STATUS PRIORITY: Completed orders go to bottom
+      const aCompleted = a.status === 'completed'
+      const bCompleted = b.status === 'completed'
+      
+      if (aCompleted && !bCompleted) return 1  // a goes after b
+      if (!aCompleted && bCompleted) return -1  // a goes before b
+      
+      // 2. WEDDING PRIORITY: Wedding orders always go to the top (within same status)
+      const aIsWedding = a.isWeddingProduct
+      const bIsWedding = b.isWeddingProduct
+      
+      if (aIsWedding && !bIsWedding) return -1  // a goes before b
+      if (!aIsWedding && bIsWedding) return 1   // a goes after b
+      
+      // 3. MANUAL DRAG-AND-DROP: Only within same status and wedding group
       if (a.sortOrder !== b.sortOrder) {
         return a.sortOrder - b.sortOrder
       }
       
-      // 2. DIFFICULTY LABELS: Easy → Medium → Hard (lower priority number = higher priority)
+      // 4. DIFFICULTY LABELS: Easy → Medium → Hard (lower priority number = higher priority)
       if (a.difficultyPriority !== b.difficultyPriority) {
         return a.difficultyPriority - b.difficultyPriority
       }
       
-      // 3. PRODUCT TYPE LABELS: Bouquet → Arrangement → etc. (lower priority number = higher priority)
+      // 5. PRODUCT TYPE LABELS: Bouquet → Arrangement → etc. (lower priority number = higher priority)
       if (a.productTypePriority !== b.productTypePriority) {
         return a.productTypePriority - b.productTypePriority
       }
       
-      // 4. SAME PRODUCT NAMES: Alphabetical sorting for identical products
+      // 6. SAME PRODUCT NAMES: Alphabetical sorting for identical products
       if (a.title && b.title && a.title !== b.title) {
         return a.title.localeCompare(b.title)
       }
       
-      // 5. FINAL FALLBACK: Creation time
+      // 7. FINAL FALLBACK: Creation time
       return 0
     }
 
@@ -1138,6 +1463,15 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
     const currentUserId = jwtPayload?.sub || 'unknown'
     
     console.log(`[ORDER-CARD-STATE] Updating card ${cardId} for tenant ${tenantId}`)
+    console.log(`[ORDER-CARD-STATE] Update params:`, { 
+      tenantId, 
+      cardId, 
+      deliveryDate, 
+      status: status || 'unassigned', 
+      assignedTo: assignedTo || null, 
+      currentUserId,
+      notes: notes || null 
+    })
     
     // Use INSERT OR REPLACE to handle both new and existing records
     const result = await c.env.DB.prepare(`
@@ -1155,6 +1489,7 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
     ).run()
 
     console.log(`[ORDER-CARD-STATE] Updated successfully: ${JSON.stringify(result)}`)
+    console.log(`[ORDER-CARD-STATE] Current timestamp: ${new Date().toISOString()}`)
     
     return c.json({ 
       success: true, 
@@ -1259,6 +1594,56 @@ app.post("/api/tenants/:tenantId/order-card-states/bulk", async (c) => {
   }
 })
 
+// Real-time polling endpoint for order card states (replaces problematic SSE)
+app.get("/api/tenants/:tenantId/order-card-states/realtime-check", async (c) => {
+  const tenantId = c.req.param("tenantId")
+
+  try {
+    console.log(`[REALTIME-POLLING] Checking for recent order card state changes for tenant ${tenantId}`)
+    
+    // Get all recent order card state changes (last 30 seconds)
+    const thirtySecondsAgo = new Date(Date.now() - 30000)
+    const currentTime = new Date()
+    
+          // Format for SQLite datetime comparison (YYYY-MM-DD HH:MM:SS)
+      const thirtySecondsAgoStr = thirtySecondsAgo.toISOString().slice(0, 19).replace('T', ' ')
+      const currentTimeStr = currentTime.toISOString().slice(0, 19).replace('T', ' ')
+      
+      console.log(`[REALTIME-POLLING] Looking for changes after: ${thirtySecondsAgoStr}`)
+      console.log(`[REALTIME-POLLING] Current time: ${currentTimeStr}`)
+      
+      const { results } = await c.env.DB.prepare(`
+        SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at
+        FROM order_card_states 
+        WHERE tenant_id = ? AND updated_at > ?
+        ORDER BY updated_at DESC
+      `).bind(tenantId, thirtySecondsAgoStr).all()
+
+    console.log(`[REALTIME-POLLING] Raw database results:`, results)
+
+    const changes = (results || []).map((state: any) => ({
+      cardId: state.card_id,
+      status: state.status,
+      assignedTo: state.assigned_to,
+      assignedBy: state.assigned_by,
+      notes: state.notes,
+      sortOrder: state.sort_order,
+      updatedAt: state.updated_at
+    }))
+
+    console.log(`[REALTIME-POLLING] Found ${changes.length} recent changes:`, changes)
+    
+    return c.json({ 
+      changes,
+      timestamp: new Date().toISOString(),
+      count: changes.length
+    })
+  } catch (error: any) {
+    console.error("Error checking real-time order card states:", error)
+    return c.json({ error: "Failed to check for updates", details: error.message }, 500)
+  }
+})
+
 // --- Products (PUBLIC) ---
 // Let the SPA catch-all handle /products.
 
@@ -1274,6 +1659,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     
     // AI Florist public endpoints (for customer-facing AI)
@@ -1327,6 +1713,7 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
+    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',
@@ -2977,10 +3364,56 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
     if (existingOrder) {
       await d1DatabaseService.updateOrder(c.env, tenantId, existingOrder.id, { shopifyOrderData: shopifyOrderGraphQL });
       console.log("[WEBHOOK] Updated existing order with GraphQL data:", existingOrder.id);
+      
+      // REAL-TIME FIX: Update order_card_states for existing orders to trigger real-time updates
+      try {
+        await c.env.DB.prepare(`
+          INSERT OR REPLACE INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          existingOrder.id,
+          tenantId,
+          'unassigned', // Keep existing status or default
+          null, // Keep existing assignment or null
+          'webhook', // System user for webhook updates
+          orderData.notes || null,
+          0, // Default sort order
+          new Date().toISOString().slice(0, 19).replace('T', ' ') // SQLite datetime format
+        ).run();
+        
+        console.log("[WEBHOOK-REALTIME] Updated order_card_states entry for real-time detection:", existingOrder.id);
+      } catch (error) {
+        console.error("[WEBHOOK-REALTIME] Failed to update order_card_states entry:", error);
+        // Don't fail the webhook if this fails, just log it
+      }
+      
       return c.json({ success: true, orderId: existingOrder.id, updated: true });
     }
 
     const newOrder = await d1DatabaseService.createOrder(c.env, tenantId, orderData);
+    
+    // REAL-TIME FIX: Create order_card_states entry so new webhook orders appear in real-time
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        newOrder.id,
+        tenantId,
+        'unassigned', // Default status for new webhook orders
+        null, // Not assigned initially
+        'webhook', // System user for webhook-created orders
+        newOrder.notes || null,
+        0, // Default sort order
+        new Date().toISOString().slice(0, 19).replace('T', ' ') // SQLite datetime format
+      ).run();
+      
+      console.log("[WEBHOOK-REALTIME] Created order_card_states entry for real-time detection:", newOrder.id);
+    } catch (error) {
+      console.error("[WEBHOOK-REALTIME] Failed to create order_card_states entry:", error);
+      // Don't fail the webhook if this fails, just log it
+    }
+    
     return c.json({ success: true, orderId: newOrder.id });
   } catch (error: any) {
     console.error("Error processing Shopify order webhook:", error);
@@ -5839,3 +6272,42 @@ app.post("/api/tenants/:tenantId/ai/training-data/extract-orders", async (c) => 
     }, 500);
   }
 });
+
+  // Reset manual sort orders for auto-sort functionality
+  app.post("/api/tenants/:tenantId/reset-manual-sort", async (c) => {
+    const tenantId = c.req.param("tenantId")
+    const body = await c.req.json() as { deliveryDate: string, storeId?: string }
+    const { deliveryDate, storeId } = body
+
+    if (!tenantId || !deliveryDate) {
+      return c.json({ error: "Missing tenant ID or delivery date" }, 400)
+    }
+
+    try {
+      console.log(`[RESET-SORT] Resetting manual sort orders for tenant ${tenantId}, date ${deliveryDate}, store ${storeId}`)
+
+      // Delete all sort order entries for this date (and optionally store)
+      // This will make the system fall back to the default label-based priority sorting
+      let deleteQuery = `
+        DELETE FROM order_card_states 
+        WHERE tenant_id = ? AND delivery_date = ?
+      `
+      const params = [tenantId, deliveryDate]
+
+      // If a specific store is selected, we might want to be more selective
+      // For now, we'll reset all orders for the date to ensure consistent sorting
+      
+      const result = await c.env.DB.prepare(deleteQuery).bind(...params).run()
+      
+      console.log(`[RESET-SORT] Deleted ${result.meta?.changes || 0} manual sort entries for date ${deliveryDate}`)
+
+      return c.json({ 
+        success: true, 
+        message: `Reset manual sort order for ${result.meta?.changes || 0} orders`,
+        deletedCount: result.meta?.changes || 0
+      })
+    } catch (error: any) {
+      console.error("[RESET-SORT] Error resetting manual sort orders:", error)
+      return c.json({ error: "Failed to reset sort orders" }, 500)
+    }
+  })

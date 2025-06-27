@@ -2,6 +2,658 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.58] - 2025-01-27
+
+### Fixed
+- **CRITICAL: Webhook Orders Real-Time Integration**: Fixed webhook orders not appearing in real-time on Orders page
+  - **Root Cause**: Webhook orders were only created in `tenant_orders` table, not `order_card_states` table
+  - **Solution**: Modified webhook endpoint to create/update `order_card_states` entries for real-time detection
+  - **Result**: New orders from Shopify webhooks now appear instantly on all connected devices
+- **Real-Time Webhook Support**: Enhanced webhook processing for both new and existing orders
+  - **New Orders**: Automatically create `order_card_states` entry with 'unassigned' status
+  - **Updated Orders**: Update existing `order_card_states` entry to trigger real-time updates
+  - **System Attribution**: Webhook orders attributed to 'webhook' system user for tracking
+
+### Technical
+- Added `order_card_states` table integration to Shopify webhook endpoint
+- Implemented `INSERT OR REPLACE` logic for both new and existing webhook orders
+- Enhanced webhook logging for real-time system debugging
+- Webhook failures in real-time integration don't break order processing (graceful degradation)
+
+## [1.5.57] - 2025-01-27
+
+### Enhanced
+- **Date Navigation Improvements**: Added "Next Day" button for easy date navigation
+  - **Next Day Button**: Added convenient "Next Day" button next to "Today" button
+  - **Smart Date Logic**: Properly handles date arithmetic including month/year boundaries
+  - **Improved Workflow**: Users can now easily navigate between dates without manual input
+- **Collapsible Quick Actions**: Made Quick Actions section collapsible to reduce UI clutter
+  - **Default Collapsed**: Quick Actions section starts collapsed to save screen space
+  - **Toggle Interface**: Click to expand/collapse with smooth animation and chevron indicator
+  - **Clean UI**: Reduces visual noise while keeping functionality accessible
+
+### Technical
+- Added Next Day button with proper date arithmetic using `Date.setDate()`
+- Implemented collapsible Quick Actions using Collapsible component with state management
+- Enhanced date picker controls with better UX flow for daily order management
+
+## [1.5.56] - 2025-01-27
+
+### Enhanced
+- **Date Picker UX Improvements**: Enhanced date picker to always default to today's date
+  - **Auto-Today**: Date picker now properly initializes to today's date on every login/page load
+  - **Today Button**: Added convenient "Today" button next to date picker for quick navigation
+  - **Timezone Handling**: Improved date handling to use local timezone instead of UTC
+  - **Better UX**: Users no longer need to manually change date each time they login
+
+### Technical
+- Added `getTodayDate()` helper function for consistent local timezone date formatting
+- Enhanced date picker UI with inline Today button
+- Improved date initialization logic for better cross-timezone compatibility
+
+## [1.5.55] - 2025-01-27
+
+### Fixed
+- **User Attribution in Toast Notifications**: Fixed "Updated by Unknown" issue in real-time notifications
+  - **Root Cause**: Frontend was comparing user ID (from JWT) with user name/email for ownership detection
+  - **Solution**: Fixed comparison to use `user.id` instead of `user.name` for detecting own updates
+  - **Result**: Toast notifications now correctly identify when updates are from current user vs others
+- **Enhanced User Logging**: Added detailed user ID and name logging for better debugging of real-time attribution
+- **Toast Message Improvements**: Updated toast messages to show "another user" instead of user IDs
+
+### Technical
+- Fixed user comparison logic: `update.updatedBy === user.id` instead of `update.updatedBy === user.name`
+- Enhanced console logging to show both `currentUserId` and `currentUserName` for debugging
+- Improved toast notification UX by showing generic "another user" messages
+- Added TODO for future user lookup system to display actual user names in notifications
+
+## [1.5.54] - 2025-01-27
+
+### Fixed
+- **CRITICAL: Notes Field Real-Time Sync**: Fixed notes field not syncing after first edit
+  - **Root Cause**: State tracking only included `status` and `assignedTo`, not `notes` or `sortOrder`
+  - **Solution**: Enhanced state key to include all relevant fields: `cardId-status-assignedTo-notes-sortOrder`
+  - **Result**: Notes changes now properly trigger real-time updates on subsequent edits
+- **Enhanced Debugging**: Added detailed logging for notes and sortOrder changes in polling system
+- **State Management**: Improved change detection to track all order card state modifications
+
+### Technical
+- Updated `stateKey` generation to include `notes` and `sortOrder` fields
+- Enhanced console logging to show notes and sortOrder values during change detection
+- Fixed issue where only first notes edit would sync in real-time across devices
+
+## [1.5.53] - 2025-01-26
+
+### Fixed
+- **Real-Time Drag-and-Drop**: Fixed drag-and-drop reordering not appearing across devices in real-time
+  - Added `sort_order` field to polling endpoint and real-time update interface
+  - Implemented automatic re-sorting when sort order changes are detected
+  - Drag-and-drop changes now trigger visual updates on all connected devices
+- **Real-Time Notes Updates**: Enhanced notes field real-time synchronization
+  - Improved handling of notes changes across devices
+  - Notes updates now properly sync without conflicts during typing
+- **Polling System Improvements**: Reduced polling window back to 30 seconds for better performance
+- **Enhanced Real-Time Logging**: Added detailed console logging for easier debugging of real-time features
+
+### Technical
+- Extended `RealtimeUpdate` interface with `sortOrder` support
+- Enhanced polling SQL query to include `sort_order` field
+- Added comprehensive re-sorting logic for all order arrays when sort order changes
+- Improved conflict resolution for concurrent notes editing
+
+## [1.5.52] - 2025-01-26
+
+### Fixed
+- **Complete Real-Time Fix**: Resolved all remaining real-time update issues that prevented proper cross-device synchronization
+  - Fixed HTTP/2 protocol errors by replacing Server-Sent Events with robust polling system
+  - Fixed authentication issues by adding polling endpoint to public endpoints list
+  - Fixed database monitoring by switching from `tenant_orders` to `order_card_states` table
+  - Fixed timestamp format mismatch between SQLite storage and polling queries
+  - Fixed UI update issues by removing failed API calls and updating state directly from polling data
+- **Enhanced Status Updates**: Order status changes (Unassigned/Prep/Complete) now sync perfectly across devices
+  - Real-time color changes, assigned fields, and status buttons update properly
+  - Toast notifications show when orders are updated by other users
+  - Complete status information flows through polling system
+- **Improved Error Handling**: Eliminated HTTP/2 connection errors and 401 authentication failures
+- **Better Performance**: Reduced polling interval to 1 second for near-instant updates
+
+### Technical
+- Replaced failing SSE system with polling-based real-time updates (`/api/tenants/:tenantId/order-card-states/realtime-check`)
+- Fixed timestamp formatting: SQLite `YYYY-MM-DD HH:MM:SS` vs ISO `YYYY-MM-DD HH:MM:SS.000Z`
+- Enhanced `RealtimeUpdate` interface with `status`, `assignedTo`, `notes` fields
+- Removed problematic `updateIndividualOrder` API call, updated state directly from polling response
+- Added comprehensive logging with emoji indicators for easier debugging
+
+## [1.5.48] - 2025-01-26
+
+### 🌟 **Google Sheets-Style Real-Time Updates - Revolutionary Implementation**
+
+**Game-Changing Enhancement**: Implemented Google Sheets-style real-time collaboration that updates individual orders in place without page refreshes, eliminating infinite loops and providing seamless multi-user experience.
+
+### ✨ **Real-Time Collaboration Features**
+
+**Individual Order Updates**: Orders now update in real-time without full page refreshes, exactly like Google Sheets cells updating instantly when other users make changes.
+
+#### **🎯 Google Sheets-Style Implementation**
+- **Individual Order Updates**: Only the changed order updates, not the entire page
+- **Optimistic Updates**: Changes appear immediately, sync in background
+- **Smart Deduplication**: Prevents infinite loops with proper event handling
+- **Default Live Mode**: Real-time updates enabled by default for seamless collaboration
+- **Manual Override**: Toggle button allows users to disable if needed
+- **Update Tracking**: Visual indicators show when orders are being updated
+
+#### **🚀 Technical Implementation**
+- **Individual Fetch Logic**: `updateIndividualOrder()` function fetches only changed orders
+- **State Management**: In-place updates to React state arrays without refreshes
+- **Cooldown System**: 2-second cooldown prevents rapid-fire updates
+- **Active Update Tracking**: Prevents duplicate updates to same order
+- **Multi-Array Updates**: Updates all relevant order arrays (main, add-on, unscheduled, containers)
+
+#### **💡 Collaborative Experience**
+```
+👩‍💼 User A: Changes order status → Appears instantly
+👨‍💼 User B: Sees update in real-time → No refresh needed
+🎯 Result: Seamless Google Sheets-style collaboration
+```
+
+## [1.5.46] - 2025-01-26
+
+### 🌟 **Real-Time Updates System - Full Implementation**
+
+**Major Enhancement**: Enabled complete real-time updates across all devices so users see instant changes when orders are updated by other team members without page refresh.
+
+### ✨ **Real-Time Features Activated**
+
+**Seamless Multi-User Experience**: Orders Page now provides live updates when any user modifies order status, assignments, or notes from any device.
+
+#### **🎯 Real-Time Implementation**
+- **Live Connection Indicator**: Green "Live" status shows real-time connection with update counter
+- **Auto-Refresh on Updates**: Orders automatically refresh when changes detected from other users  
+- **Instant Notifications**: Toast messages show "Order updated by [username]" for collaborative awareness
+- **Dual Backend Updates**: Order changes update both UI state table and main orders table for real-time sync
+- **SSE + Polling Hybrid**: Primary Server-Sent Events with 3-second polling fallback
+
+#### **📡 Connection Status Display**
+```
+┌─────────────────────────────────────┐
+│ Order Controls              🟢 Live │ ← Real-time status indicator
+│                           2 updates │ ← Update counter
+└─────────────────────────────────────┘
+```
+
+#### **🔄 Multi-User Workflow**
+**Scenario**: Multiple florists working simultaneously
+1. **Florist A**: Assigns order to themselves → Status changes to "Assigned"
+2. **Florist B**: Sees real-time update → Toast: "Order updated by Florist A"
+3. **Florist C**: Sees same update → Order list automatically refreshes
+4. **Manager**: Monitors progress → Real-time visibility of all changes
+
+#### **⚡ Technical Implementation**
+
+**Frontend Real-Time Integration**:
+```typescript
+const { isConnected, updates } = useRealtimeUpdates({
+  enabled: true,
+  pollInterval: 3000, // 3-second polling
+  onUpdate: (update) => {
+    // Auto-refresh orders when changes detected
+    handleRefreshFromDatabase()
+    toast.info(`Order ${update.type.replace('order_', '')} by ${update.updatedBy}`)
+  }
+})
+```
+
+**Backend Update Flow**:
+- **Order Card State**: Updates `order_card_states` table for UI persistence
+- **Main Order Update**: Updates `tenant_orders` table for real-time detection
+- **Dual Write Strategy**: Ensures both UI state and real-time sync work together
+
+#### **🎨 User Experience Features**
+- **Connection Indicator**: Always visible green/gray status in Orders header
+- **Live Update Counter**: Shows number of real-time updates received
+- **Automatic Refresh**: No manual refresh needed when other users make changes
+- **Collaborative Awareness**: Know who made what changes and when
+- **Seamless Performance**: Updates happen instantly without interrupting workflow
+
+#### **🛠️ Enhanced Backend Sync**
+- **Real-Time Order Updates**: Status, assignment, and notes changes trigger live notifications
+- **User Attribution**: Track who made each change for accountability
+- **Efficient Polling**: Only fetches changed orders since last update
+- **Connection Resilience**: Automatic failover between SSE and polling
+
+## [1.5.45] - 2025-01-26
+
+### 🌟 **Critical Bug Fix - Consolidated Items Only Orders**
+
+**Critical Enhancement**: Implemented fallback card system to handle orders containing ONLY consolidated items (Top-Up, Corsage, Boutonniere) to prevent invisible orders in the UI.
+
+### ✨ **Fallback Card System**
+
+**Smart Fallback Detection**: When an order contains only consolidated items with no main order cards, the system automatically creates a fallback card using the first consolidated item to ensure order visibility.
+
+#### **🎯 Edge Case Resolution**
+- **Problem Solved**: Orders with only Top-Up/Corsage/Boutonniere items would become invisible
+- **Detection Logic**: System checks if zero main cards were created but consolidated items exist
+- **Automatic Fallback**: Creates main card using first consolidated item's details
+- **Solution Type**: Implemented **Solution 1** - Create Fallback Card Using First Item
+
+#### **📦 Fallback Card Implementation**
+- **First Item as Main**: First consolidated item becomes the main card title
+- **Full Item Display**: First item appears BOTH as main card title AND in consolidated list
+- **Complete Data**: Fallback card includes all necessary order data (classification, sorting, wedding flags)
+- **Preserved Consolidation**: All consolidated items (including first) still show in consolidated list
+
+#### **🎨 Fallback Card Behavior**
+
+**Example Transformation**:
+```
+ORDER: Contains only Top-Up items
+Before: No order cards visible ❌
+After: 
+┌─────────────────────────────────────┐
+│ Flower Care Top-Up Kit              │ ← Main card (first item)
+│ Large                               │
+│ • Flower Care Top-Up Kit x 1        │ ← Consolidated list (includes first)
+│ • Vase Cleaning Top-Up x 1          │ ← Remaining consolidated items
+│ • Plant Food Top-Up x 1             │
+└─────────────────────────────────────┘
+```
+
+#### **🔧 Technical Implementation**
+
+**Backend Fallback Logic**:
+```typescript
+// Check for edge case - no main cards but consolidated items exist
+const orderMainCards = processedOrders.filter(card => card.shopifyOrderId === order.shopify_order_id)
+
+if (orderMainCards.length === 0 && consolidatedItems.length > 0) {
+  // Create fallback card using first consolidated item
+  const firstItem = consolidatedItems[0]
+  const cardId = `${order.shopify_order_id}-fallback-0`
+  
+  // Find original line item for proper classification
+  const originalLineItem = lineItems.find(item => /* match logic */)
+  
+  // Create fallback card with full data structure
+  processedOrders.push({
+    title: firstItem.title, // Main card shows first item title
+    // ... all other order card properties
+  })
+}
+```
+
+#### **🎯 Fallback Card Features**
+
+**Complete Integration**:
+- **Proper Classification**: Fallback card includes difficulty/product type labels from first item
+- **Wedding Detection**: Maintains wedding priority if first item is wedding-related
+- **Sorting Integration**: Participates in full sorting hierarchy (status, wedding, difficulty, etc.)
+- **State Management**: Full order card state (assignment, completion, notes) support
+- **GraphQL Preservation**: Maintains proper Shopify order data structure
+
+**Consolidated Display**:
+- **All Items Shown**: Complete consolidated list attached to fallback card
+- **First Item Duplication**: First item appears both as main title and in list (expected behavior)
+- **Quantity Accuracy**: All original quantities and pricing preserved
+- **Visual Consistency**: Styled identically to regular consolidated items
+
+## [1.5.44] - 2025-01-26
+
+### 🌟 **Enhanced Features - Smart Display Logic for Consolidated Items**
+
+**Major Enhancement**: Added intelligent title display logic for consolidated items (Top-Up, Corsage, Boutonniere) that shows the specific title containing the detection keyword.
+
+### ✨ **Smart Display Features**
+
+**Keyword-Based Display**: The system now displays the exact title that contains the detection keyword rather than defaulting to product title, providing more accurate and relevant information.
+
+#### **🎯 Enhanced Display Logic**
+- **Keyword Detection**: System identifies which title (product or variant) contains the detection keyword
+- **Smart Selection**: Displays the title that actually triggered the consolidation
+- **Priority Handling**: Product title takes precedence when both titles contain the keyword
+- **Universal Application**: Applies to all three consolidated product types (Top-Up, Corsage, Boutonniere)
+
+#### **📦 Display Priority Rules**
+1. **Top-Up Products**: 
+   - Label-based: Show product title
+   - Title-based: Show product title (keyword detected in product title)
+2. **Corsage Products**:
+   - Product title contains "Corsage": Show product title
+   - Only variant title contains "Corsage": Show variant title
+   - Both contain "Corsage": Show product title (priority)
+3. **Boutonniere Products**:
+   - Product title contains "Boutonniere": Show product title
+   - Only variant title contains "Boutonniere": Show variant title
+   - Both contain "Boutonniere": Show product title (priority)
+
+#### **🎨 Enhanced Implementation**
+- **`getConsolidatedDisplayTitle()` Function**: New backend function to determine display title
+- **Smart Detection**: Analyzes which title triggered the consolidation
+- **Consistent Logic**: Same display rules apply across all consolidated product types
+
+#### **📋 Enhanced Example Results**
+
+**Case 1 - Variant Contains Keyword**:
+- Product: "Wedding Accessories"
+- Variant: "White Rose Corsage - Medium" ← Contains "Corsage"
+- **Display**: `• White Rose Corsage - Medium x 1`
+
+**Case 2 - Product Contains Keyword**:
+- Product: "Groom's Boutonniere - Classic" ← Contains "Boutonniere"
+- Variant: "Default Title"
+- **Display**: `• Groom's Boutonniere - Classic x 1`
+
+**Case 3 - Both Contain Keyword (Priority)**:
+- Product: "Corsage Collection" ← Contains "Corsage"
+- Variant: "White Rose Corsage - Large" ← Also contains "Corsage"
+- **Display**: `• Corsage Collection x 1` (Product title priority)
+
+## [1.5.43] - 2025-01-26
+
+### 🌟 **New Features - Top-Up Consolidation System**
+
+**Major Enhancement**: Added intelligent Top-Up product consolidation to reduce order card clutter by embedding Top-Up items within main order cards instead of creating separate cards.
+
+### ✨ **Top-Up Consolidation Features**
+
+**Smart Top-Up Detection**: Top-Up products are automatically detected and consolidated into main order cards for cleaner order management.
+
+#### **🎯 Top-Up Detection Logic**
+- **Saved Products Match**: Products/variants labeled with "Top-Up" in saved_products database
+- **Title Contains**: Line items with titles containing "Top-Up" anywhere in the text
+- **Dual Detection**: Uses both label-based and text-based detection for comprehensive coverage
+
+#### **📦 Consolidation Behavior**
+- **No Separate Cards**: Top-Up items no longer create individual order cards
+- **Embedded Display**: Top-Up items appear within main order cards below variant title
+- **Clean Format**: Display format: `• Flower Care Top-Up Kit x 1`
+- **Quantity Preserved**: Original Top-Up quantities maintained and displayed correctly
+
+#### **🎨 Visual Implementation**
+- **Card Reduction**: Significantly reduces visual clutter in order lists
+- **Inline Display**: Top-Up items show as small gray bullet points
+- **Below Variant**: Positioned strategically below product variant information
+- **Compact Styling**: `text-xs text-gray-600` for subtle, non-intrusive appearance
+
+#### **📋 Example Transformation**
+**Before (4 separate cards)**:
+1. Luxury Rose Bouquet - Red
+2. Premium Gift Box
+3. Flower Care Top-Up Kit
+4. Vase Cleaning Top-Up
+
+**After (2 consolidated cards)**:
+1. Luxury Rose Bouquet - Red
+   - Large Size
+   - • Flower Care Top-Up Kit x 1
+   - • Vase Cleaning Top-Up x 1
+2. Premium Gift Box
+
+## [1.5.42] - 2025-01-26
+
+### 🌟 **New Features - Wedding Priority System**
+
+**Major Enhancement**: Added intelligent wedding order detection and priority system with visual highlighting and top-priority sorting.
+
+### ✨ **Wedding Order Features**
+
+**Smart Wedding Detection**: Orders containing products labeled with "Weddings" product type are automatically detected and given highest priority.
+
+#### **🎯 Wedding Priority Features**
+- **Auto-Detection**: Automatically identifies wedding orders by scanning product type labels
+- **Visual Highlighting**: Wedding orders display with light pink background for instant recognition
+- **Top Priority Sorting**: Wedding orders always sort to the very top, overriding all other sorting rules
+- **Status Awareness**: Wedding priority maintained across all status groups (unassigned, assigned, completed)
+- **Universal Application**: Works across all container types (Store, Add-ons, Unscheduled)
+
+#### **🎨 Wedding Visual Styling**
+- **Unassigned Wedding Orders**: Light pink background (`bg-pink-50`)
+- **Assigned Wedding Orders**: Medium pink background (`bg-pink-200`)
+- **Completed Wedding Orders**: Darker pink background (`bg-pink-300`)
+- **Border Consistency**: Maintains difficulty-based left border colors
+
+#### **📋 Wedding Sorting Priority Hierarchy**
+1. **Status Priority**: Completed orders remain at bottom
+2. **🎯 WEDDING PRIORITY**: Wedding orders at absolute top (within status group)
+3. **Manual Drag-Drop**: User manual ordering (within wedding/non-wedding groups)
+4. **Difficulty Labels**: Easy → Medium → Hard priority
+5. **Product Type Labels**: Bouquet → Arrangement priority  
+6. **Alphabetical**: Product name sorting
+
+## [1.5.41] - 2025-01-26
+
+### 🌟 **New Features - Enhanced Completed Order Workflow**
+
+**Major Enhancement**: Added intelligent completed order management with automatic positioning and user feedback notifications.
+
+### ✨ **Completed Order Features**
+
+**Smart Order Organization**: When orders are marked as completed, they automatically move to the bottom of their container and display a success notification.
+
+#### **🎯 Completed Order Features**
+- **Auto-Move to Bottom**: Completed orders automatically shift to bottom of all containers
+- **Toast Notification**: "Order Completed!" success message when status changes to completed
+- **Universal Application**: Works across all container types (Store, Add-ons, Unscheduled)
+- **Maintains Sorting**: Completed orders maintain their relative order within the completed section
+- **Visual Separation**: Clear separation between active and completed work
+
+#### **🔧 Technical Implementation**
+- **Frontend Sorting**: Enhanced `handleOrderStatusChange` with status-based priority sorting
+- **Backend Sorting**: Updated worker `sortByOrder` function to prioritize status
+- **State Management**: Automatic re-sorting of all order arrays when status changes
+- **Container Updates**: All store containers automatically re-sort completed orders
+
+#### **📊 New Sorting Hierarchy**
+
+**Enhanced Priority System**:
+1. **Status Priority**: Active orders (unassigned/assigned) → Completed orders (bottom)
+2. **Manual Drag-and-Drop**: Within same status group (10, 20, 30...)
+3. **Difficulty Labels**: Easy → Medium → Hard (by priority)
+4. **Product Type Labels**: Bouquet → Arrangement → etc. (by priority)
+5. **Alphabetical**: Identical products sorted alphabetically
+6. **Creation Time**: Final fallback for consistent ordering
+
+#### **🎨 User Experience Flow**
+
+**Completion Workflow**:
+1. **User clicks completed button** on any order card
+2. **Toast notification appears**: "Order Completed!" ✅
+3. **Order animates to bottom** of its container automatically
+4. **Visual confirmation**: Clear separation from active orders
+5. **Maintains functionality**: Can still search, filter, and manage completed orders
+
+#### **🔄 Implementation Details**
+
+**Frontend Status Handling**:
+```typescript
+const handleOrderStatusChange = (orderId: string, newStatus: string) => {
+  // Sort orders with completed orders at the bottom
+  const sortOrdersWithStatusPriority = (orders: any[]) => {
+    return orders.sort((a, b) => {
+      // Status priority - completed orders go to bottom
+      const aCompleted = a.status === 'completed'
+      const bCompleted = b.status === 'completed'
+      
+      if (aCompleted && !bCompleted) return 1
+      if (!aCompleted && bCompleted) return -1
+      
+      // Existing sort logic for same status
+      return a.sortOrder - b.sortOrder
+    })
+  }
+  
+  // Apply sorting to all order arrays and containers
+  setAllOrders(prev => sortOrdersWithStatusPriority(updateOrderStatus(prev)))
+  
+  // Toast notification for completed orders
+  if (newStatus === 'completed') {
+    toast.success("Order Completed!")
+  }
+}
+```
+
+**Backend Worker Sorting**:
+```typescript
+const sortByOrder = (a: any, b: any) => {
+  // 1. STATUS PRIORITY: Completed orders go to bottom
+  const aCompleted = a.status === 'completed'
+  const bCompleted = b.status === 'completed'
+  
+  if (aCompleted && !bCompleted) return 1
+  if (!aCompleted && bCompleted) return -1
+  
+  // 2-6. Existing priority hierarchy for same status
+  return a.sortOrder - b.sortOrder // ... rest of logic
+}
+```
+
+#### **🎯 Container Compatibility**
+
+**Works Across All Containers**:
+- **Store/Time Window Containers**: Completed orders sink to bottom within each store/time combination
+- **Add-ons Container**: Completed add-on orders move to bottom of add-ons section  
+- **Unscheduled Container**: Completed unscheduled orders organize at bottom
+- **Legacy Main Orders**: Fallback container also handles completed order positioning
+
+#### **🔗 Integration with Existing Features**
+
+**Enhanced Compatibility**:
+- ✅ **Auto-Sort Button**: Completed orders stay at bottom after auto-sort
+- ✅ **Drag-and-Drop**: Can still manually reorder within completed section
+- ✅ **Filtering**: Status filters work with new positioning
+- ✅ **Search**: Completed orders remain fully searchable
+- ✅ **Store Selection**: Works within store-specific filtering
+
+#### **📱 Visual Design**
+
+**Toast Notification**:
+- **Success Theme**: Green success styling with checkmark
+- **Brief Duration**: 3-second display, non-intrusive
+- **Clear Message**: "Order Completed!" for immediate feedback
+
+**Order Positioning**:
+- **Smooth Transition**: Orders smoothly move to bottom section
+- **Visual Separation**: Clear distinction between active and completed work
+- **Maintains Styling**: Completed orders keep their green styling and checkmark icons
+
+### 🚀 **Deployment Status**
+
+**Version ID**: e15beae6-52b8-4db2-88d2-9b19f49d4d92  
+**Bundle Size**: 787.77 kB (224.63 kB gzipped)  
+**Build Status**: ✅ 1430 modules transformed successfully  
+**Deployment**: ✅ Live at https://order-to-do.stanleytan92.workers.dev
+
+---
+
+## [1.5.39] - 2025-01-26
+
+### 🌟 **New Features - Auto-Sort Button**
+
+**Major Enhancement**: Added Auto-Sort button in Orders Page controls container that resets manual drag-and-drop ordering and applies intelligent label-based sorting.
+
+### ✨ **Auto-Sort Functionality**
+
+**Smart Order Organization**: New Auto-Sort button instantly organizes orders based on the established label priority system, removing manual drag-and-drop chaos.
+
+#### **🎯 Auto-Sort Features**
+- **Quick Reset**: One-click solution to reset all manual drag-and-drop customizations
+- **Label-Based Priority**: Automatically sorts by difficulty and product type label priorities
+- **Store/Time Window Aware**: Sorting works within each store and time window container
+- **Intelligent Hierarchy**: Uses the same priority system as the Product Management labels
+- **Non-Destructive**: Preserves all order data, only resets sort order
+
+#### **🔧 Technical Implementation**
+- **Frontend Button**: Added to Quick Actions section in Order Controls
+- **Backend API**: New `/api/tenants/:tenantId/reset-manual-sort` endpoint
+- **Database Reset**: Removes `sort_order` entries from `order_card_states` table
+- **Automatic Refresh**: Orders immediately re-display in new label-based order
+
+#### **🎨 UI/UX Design**
+- **SortAsc Icon**: Clear visual indicator using Lucide React icon
+- **Loading States**: Proper loading indicator during reset operation
+- **User Feedback**: Toast notifications confirm successful auto-sorting
+- **Consistent Styling**: Matches existing Quick Actions button design
+
+#### **📊 Sorting Logic Hierarchy**
+
+**Auto-Sort Priority System**:
+1. **Difficulty Labels**: Easy (priority 1) → Medium (priority 2) → Hard (priority 3)
+2. **Product Type Labels**: Bouquet (priority 1) → Arrangement (priority 2) → etc.
+3. **Alphabetical**: Identical products sorted alphabetically
+4. **Creation Time**: Final fallback for consistent ordering
+
+**Previous Manual Sorting** (removed by Auto-Sort):
+- Manual drag-and-drop positions (`sort_order` field values: 10, 20, 30...)
+
+#### **🔄 Backend Implementation**
+
+**Reset API Endpoint**:
+```typescript
+app.post("/api/tenants/:tenantId/reset-manual-sort", async (c) => {
+  const { deliveryDate, storeId } = await c.req.json();
+  
+  // Delete all manual sort orders for the selected date
+  const result = await c.env.DB.prepare(`
+    DELETE FROM order_card_states 
+    WHERE tenant_id = ? AND delivery_date = ?
+  `).bind(tenantId, deliveryDate).run();
+  
+  return c.json({ 
+    success: true, 
+    deletedCount: result.meta?.changes || 0 
+  });
+});
+```
+
+**Frontend Handler**:
+```typescript
+const handleSortOrders = async () => {
+  // Reset manual sort orders
+  await fetch(`/api/tenants/${tenant.id}/reset-manual-sort`, {
+    method: 'POST',
+    body: JSON.stringify({ deliveryDate: dateStr, storeId })
+  });
+  
+  // Refresh orders to show new label-based sorting
+  await handleRefreshFromDatabase();
+};
+```
+
+#### **🎯 Use Cases & Benefits**
+
+**Operational Benefits**:
+- **Quick Organization**: Instantly organize hundreds of orders without manual dragging
+- **Consistent Priority**: Ensures orders follow established business logic
+- **Time Saving**: No need to manually reorder every single order card
+- **Error Prevention**: Removes human error from priority ordering
+
+**User Experience**:
+- **One-Click Solution**: Simple button press organizes entire day's orders
+- **Predictable Results**: Always follows the same established priority rules
+- **Maintains Flexibility**: Can still manually reorder after auto-sorting if needed
+- **Visual Feedback**: Clear confirmation of what happened
+
+#### **🔗 Integration with Existing Features**
+
+**Works With**:
+- **Store/Time Window Containers**: Sorting happens within each container
+- **Product Label System**: Uses priority values from Product Management
+- **Filtering & Search**: Auto-sort works with all existing filters
+- **Status Management**: Preserves all order statuses and assignments
+- **Drag-and-Drop**: Can still manually reorder after auto-sorting
+
+**Button Location**: Order Controls → Quick Actions section
+- Positioned alongside: Fetch Orders, Refresh from Database, Update Orders, Load Unscheduled
+
+### 🚀 **Deployment Status**
+
+**Version ID**: 59aa979f-5c77-4221-b7a2-cdf7e2bac090  
+**Bundle Size**: 787.49 kB (224.54 kB gzipped)  
+**Build Status**: ✅ 1430 modules transformed successfully  
+**Deployment**: ✅ Live at https://order-to-do.stanleytan92.workers.dev
+
+---
+
 ## [1.5.38] - 2025-01-26
 
 ### 🌟 **New Features - Unscheduled Orders Container**
