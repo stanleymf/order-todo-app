@@ -157,6 +157,14 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
         const saveEndTime = Date.now()
         const saveDuration = saveEndTime - saveStartTime
         console.log(`[CARD-SAVE-FORTIFIED] Saved successfully in ${saveDuration}ms:`, result)
+        
+        // ENHANCED: Log the exact timestamp that was saved for debugging
+        console.log(`[CARD-SAVE-FORTIFIED] Timestamp details:`, {
+          savedTimestamp: result.updatedAt,
+          verification: result.verification,
+          cardId: result.cardId,
+          status: result.status
+        })
       }
     } catch (error) {
       console.error('[CARD-SAVE-FORTIFIED] Error saving card state:', error)

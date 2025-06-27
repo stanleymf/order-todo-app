@@ -143,7 +143,12 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
             
             // Check if this is a new order (not seen before) or an updated order
             const isNewOrder = !knownOrderIds.current.has(change.cardId)
-            const hasNewerTimestamp = !lastProcessedTimestamp || change.updatedAt > lastProcessedTimestamp
+            const hasNewerTimestamp = !lastProcessedTimestamp || new Date(change.updatedAt) > new Date(lastProcessedTimestamp)
+            
+            // ENHANCED: Detailed timestamp comparison debugging
+            const changeTimeMs = new Date(change.updatedAt).getTime()
+            const lastProcessedMs = lastProcessedTimestamp ? new Date(lastProcessedTimestamp).getTime() : 0
+            const timeDiffMs = changeTimeMs - lastProcessedMs
             
             console.log(`🔍 [${clientId}] POLLING Order ${change.cardId}:`, {
               isNewOrder,
@@ -151,7 +156,14 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               changeTime: change.updatedAt,
               lastProcessed: lastProcessedTimestamp,
               willUpdate: isNewOrder || hasNewerTimestamp,
-              assignedBy: change.assignedBy
+              timestampDebug: {
+                changeTimeMs,
+                lastProcessedMs,
+                timeDiffMs,
+                changeTimeDate: new Date(change.updatedAt).toISOString(),
+                lastProcessedDate: lastProcessedTimestamp ? new Date(lastProcessedTimestamp).toISOString() : 'none',
+                comparisonResult: lastProcessedTimestamp ? (new Date(change.updatedAt) > new Date(lastProcessedTimestamp)) : 'no previous timestamp'
+              }
             })
             
             // FIXED: Use timestamp comparison for cross-device detection
