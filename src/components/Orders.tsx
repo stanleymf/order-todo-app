@@ -1601,7 +1601,7 @@ export const Orders: React.FC = () => {
             const displayTitle = container.containerKey || `${container.storeName} - ${container.orders.length}`
             const TimeIcon = timeInfo.icon
             const containerKey = container.containerKey || container.storeName
-            const isCollapsed = collapsedContainers[containerKey] === true // Default to expanded (false)
+            const isCollapsed = collapsedContainers[containerKey] === undefined ? true : collapsedContainers[containerKey] // Default to collapsed, but toggle properly
             
             return (
               <Collapsible 
