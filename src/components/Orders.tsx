@@ -145,7 +145,7 @@ export const Orders: React.FC = () => {
     }
   }, [triggerManualPoll])
   
-  console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}`)
+  // Console log for connection status will be moved after hook initialization
   
   // Helper function to get today's date in YYYY-MM-DD format (local timezone)
   const getTodayDate = () => {
@@ -765,30 +765,8 @@ export const Orders: React.FC = () => {
       if (update.status && ['unassigned', 'assigned', 'completed'].includes(update.status)) {
         console.log(`[REALTIME] Status change detected: ${update.orderId} -> ${update.status}`)
         
-        // Find the order to get its title for toast message
-        let orderTitle = 'Order'
-        const findOrderTitle = (orders: any[]) => {
-          const order = orders.find((o: any) => 
-            o.cardId === update.orderId || o.id === update.orderId || o.orderId === update.orderId
-          )
-          return order?.title || order?.productTitles ? (() => {
-            try {
-              const titles = JSON.parse(order.productTitles)
-              return Array.isArray(titles) ? titles[0] : titles
-            } catch (e) {
-              return order.title || 'Order'
-            }
-          })() : 'Order'
-        }
-        
-        // Check all order arrays to find the title
-        orderTitle = findOrderTitle(allOrders) || 
-                   findOrderTitle(mainOrders) || 
-                   findOrderTitle(addOnOrders) ||
-                   'Order'
-        
-        // Apply status change with proper sorting and toast
-        handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', orderTitle, true)
+        // Apply status change with proper sorting (title will be found in handleOrderStatusChange)
+        handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
       } else {
         // For non-status updates, use the individual update method
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
@@ -817,13 +795,16 @@ export const Orders: React.FC = () => {
         }))
       )
     }
-  }, [updateIndividualOrder, allOrders, mainOrders, addOnOrders])
+  }, [updateIndividualOrder])
 
   // Initialize WebSocket hook with the real-time handler
   const { isConnected, connectionStatus, updates, sendOptimisticUpdate } = useRealtimeWebSocket({
     enabled: realtimeEnabled,
     onUpdate: handleRealtimeUpdate
   })
+
+  // Connection status logging
+  console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}`)
 
   // Handle order deletion from OrderDetailCard
   const handleOrderDelete = async (orderId: string) => {
