@@ -1341,11 +1341,7 @@ export const Orders: React.FC = () => {
                     {realtimeEnabled ? (isConnected ? 'Live' : 'Connecting') : 'Off'}
                  </span>
                </Button>
-                               {updates.length > 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    Last update: {updates[updates.length - 1]?.type}
-                  </div>
-                )}
+               {/* Last update text removed for cleaner UI */}
              </div>
           </CardTitle>
         </CardHeader>
