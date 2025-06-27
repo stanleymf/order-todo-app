@@ -767,11 +767,46 @@ export const Orders: React.FC = () => {
         
         // Apply status change with proper sorting (title will be found in handleOrderStatusChange)
         handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
+      } else if (update.sortOrder !== undefined) {
+        // CRITICAL FIX: Handle sort order changes from drag reordering
+        console.log(`[REALTIME] Sort order change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}`)
+        
+        // Apply individual update with sort order and then re-sort all containers
+        updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
+        
+        // Force re-sort all containers to reflect new order sequence
+        setTimeout(() => {
+          // Re-sort store containers by sortOrder
+          setStoreContainers(prev => 
+            prev.map(container => ({
+              ...container,
+              orders: container.orders.slice().sort((a, b) => {
+                const aSortOrder = a.sortOrder || 9999
+                const bSortOrder = b.sortOrder || 9999
+                return aSortOrder - bSortOrder
+              })
+            }))
+          )
+          
+          // Re-sort main arrays by sortOrder
+          const sortByOrder = (orders: any[]) => 
+            orders.slice().sort((a, b) => {
+              const aSortOrder = a.sortOrder || 9999
+              const bSortOrder = b.sortOrder || 9999
+              return aSortOrder - bSortOrder
+            })
+          
+          setMainOrders(prev => sortByOrder(prev))
+          setAddOnOrders(prev => sortByOrder(prev))
+          setAllOrders(prev => sortByOrder(prev))
+          
+          console.log(`[REALTIME] Re-sorted all containers for sortOrder change: ${update.orderId}`)
+        }, 50) // Small delay to ensure individual update is applied first
+        
       } else {
-        // For non-status updates, use the individual update method
+        // For other non-status updates, use the individual update method
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
       }
-      
     } else if (update.type === 'order_created') {
       // For new orders, just log - no aggressive refresh
       console.log('[REALTIME] New order detected:', update.orderId, '- refresh manually if needed')

@@ -94,9 +94,9 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         // DEBUG: Add more detailed logging
         console.log(`[SSE-DEBUG] Query params: tenantId=${tenantId}, lastUpdateTime=${lastUpdateTime}`)
         
-        // Check for changes in order_card_states table (where status updates happen)
+        // Check for changes in order_card_states table (where status updates AND sort_order changes happen)
         const cardStateQuery = `
-          SELECT card_id, status, assigned_to, assigned_by, updated_at, delivery_date
+          SELECT card_id, status, assigned_to, assigned_by, updated_at, delivery_date, sort_order, notes
           FROM order_card_states 
           WHERE tenant_id = ? AND updated_at > ?
           ORDER BY updated_at DESC 
@@ -148,6 +148,8 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    updatedBy: String(change.assigned_by || 'unknown'),
                    updatedAt: String(change.updated_at),
                    deliveryDate: String(change.delivery_date),
+                   sortOrder: change.sort_order ? Number(change.sort_order) : undefined,
+                   notes: change.notes ? String(change.notes) : '',
                    timestamp: new Date().toISOString()
                  })
               }
@@ -170,6 +172,8 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    updatedBy: String(change.assigned_to || 'unknown'),
                    updatedAt: String(change.updated_at),
                    deliveryDate: String(change.delivery_date),
+                   sortOrder: change.sort_order ? Number(change.sort_order) : undefined,
+                   notes: change.notes ? String(change.notes) : '',
                    timestamp: new Date().toISOString()
                  })
               }
