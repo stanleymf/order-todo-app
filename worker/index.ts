@@ -1448,7 +1448,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 
 // --- Order Card States API (PROTECTED) ---
 
-// Update order card status/notes
+// Update order card status/notes - FORTIFIED FOR REAL-TIME
 app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
   const tenantId = c.req.param("tenantId")
   const cardId = c.req.param("cardId")
@@ -1461,23 +1461,39 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
   try {
     const jwtPayload = c.get('jwtPayload')
     const currentUserId = jwtPayload?.sub || 'unknown'
+    const currentUserName = jwtPayload?.name || jwtPayload?.email || 'Unknown User'
     
-    console.log(`[ORDER-CARD-STATE] Updating card ${cardId} for tenant ${tenantId}`)
-    console.log(`[ORDER-CARD-STATE] Update params:`, { 
+    console.log(`[ORDER-CARD-STATE-FORTIFIED] JWT Payload Debug:`, {
+      sub: jwtPayload?.sub,
+      name: jwtPayload?.name,
+      email: jwtPayload?.email,
+      tenantId: jwtPayload?.tenantId,
+      hasJwtPayload: !!jwtPayload,
+      requestParams: JSON.stringify({ status, notes, assignedTo, deliveryDate })
+    })
+    
+    // Create consistent timestamp for SQLite format
+    const now = new Date()
+    const sqliteTimestamp = now.toISOString().slice(0, 19).replace('T', ' ')
+    
+    console.log(`[ORDER-CARD-STATE-FORTIFIED] Updating card ${cardId} for tenant ${tenantId}`)
+    console.log(`[ORDER-CARD-STATE-FORTIFIED] Update params:`, { 
       tenantId, 
       cardId, 
       deliveryDate, 
       status: status || 'unassigned', 
       assignedTo: assignedTo || null, 
       currentUserId,
-      notes: notes || null 
+      currentUserName,
+      notes: notes || null,
+      sqliteTimestamp
     })
     
-    // Use INSERT OR REPLACE to handle both new and existing records
+    // FORTIFIED: Use explicit timestamp and better error handling
     const result = await c.env.DB.prepare(`
       INSERT OR REPLACE INTO order_card_states 
       (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       tenantId, 
       cardId, 
@@ -1485,11 +1501,25 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       status || 'unassigned', 
       assignedTo || null, 
       currentUserId, 
-      notes || null
+      notes || null,
+      sqliteTimestamp
     ).run()
 
-    console.log(`[ORDER-CARD-STATE] Updated successfully: ${JSON.stringify(result)}`)
-    console.log(`[ORDER-CARD-STATE] Current timestamp: ${new Date().toISOString()}`)
+    console.log(`[ORDER-CARD-STATE-FORTIFIED] Updated successfully:`, {
+      success: result.success,
+      changes: result.changes,
+      lastRowId: result.meta?.last_row_id,
+      timestamp: sqliteTimestamp
+    })
+    
+    // FORTIFIED: Verify the update was saved correctly
+    const verification = await c.env.DB.prepare(`
+      SELECT card_id, status, assigned_to, notes, updated_at 
+      FROM order_card_states 
+      WHERE tenant_id = ? AND card_id = ?
+    `).bind(tenantId, cardId).first()
+    
+    console.log(`[ORDER-CARD-STATE-FORTIFIED] Verification query result:`, verification)
     
     return c.json({ 
       success: true, 
@@ -1497,10 +1527,11 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       status: status || 'unassigned',
       notes: notes || null,
       assignedTo: assignedTo || null,
-      updatedAt: new Date().toISOString()
+      updatedAt: sqliteTimestamp,
+      verification: verification
     })
   } catch (error: any) {
-    console.error("Error updating order card state:", error)
+    console.error("[ORDER-CARD-STATE-FORTIFIED] Error updating order card state:", error)
     return c.json({ error: "Failed to update order card state", details: error.message }, 500)
   }
 })
@@ -1594,52 +1625,77 @@ app.post("/api/tenants/:tenantId/order-card-states/bulk", async (c) => {
   }
 })
 
-// Real-time polling endpoint for order card states (replaces problematic SSE)
+// Real-time polling endpoint for order card states - FORTIFIED VERSION WITH AUTH
 app.get("/api/tenants/:tenantId/order-card-states/realtime-check", async (c) => {
   const tenantId = c.req.param("tenantId")
 
   try {
-    console.log(`[REALTIME-POLLING] Checking for recent order card state changes for tenant ${tenantId}`)
+    // FORTIFIED: Add JWT support for user tracking in polling
+    const jwtPayload = c.get('jwtPayload')
+    const currentUserId = jwtPayload?.sub || 'unknown'
+    const currentUserName = jwtPayload?.name || jwtPayload?.email || 'Unknown User'
+    const userAgent = c.req.header('User-Agent') || 'unknown'
+    const clientType = userAgent.includes('Mobile') ? 'Mobile' : 'Desktop'
     
-    // Get all recent order card state changes (last 30 seconds)
-    const thirtySecondsAgo = new Date(Date.now() - 30000)
+    console.log(`[REALTIME-POLLING-USER-DEBUG] ${clientType} polling request from user:`, {
+      userId: currentUserId,
+      userName: currentUserName,
+      tenantId: tenantId,
+      userAgent: userAgent.substring(0, 100),
+      clientType
+    })
+    
+    console.log(`[REALTIME-POLLING-FORTIFIED] Checking for recent order card state changes for tenant ${tenantId}`)
+    
+    // FORTIFIED: Use 60 seconds window for better coverage and consistent timestamps
+    const sixtySecondsAgo = new Date(Date.now() - 60000)
     const currentTime = new Date()
     
-          // Format for SQLite datetime comparison (YYYY-MM-DD HH:MM:SS)
-      const thirtySecondsAgoStr = thirtySecondsAgo.toISOString().slice(0, 19).replace('T', ' ')
-      const currentTimeStr = currentTime.toISOString().slice(0, 19).replace('T', ' ')
-      
-      console.log(`[REALTIME-POLLING] Looking for changes after: ${thirtySecondsAgoStr}`)
-      console.log(`[REALTIME-POLLING] Current time: ${currentTimeStr}`)
-      
-      const { results } = await c.env.DB.prepare(`
-        SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at
-        FROM order_card_states 
-        WHERE tenant_id = ? AND updated_at > ?
-        ORDER BY updated_at DESC
-      `).bind(tenantId, thirtySecondsAgoStr).all()
+    // FORTIFIED: Use exact same timestamp format as the PUT endpoint
+    const sixtySecondsAgoStr = sixtySecondsAgo.toISOString().slice(0, 19).replace('T', ' ')
+    const currentTimeStr = currentTime.toISOString().slice(0, 19).replace('T', ' ')
+    
+    console.log(`[REALTIME-POLLING-FORTIFIED] Looking for changes after: ${sixtySecondsAgoStr}`)
+    console.log(`[REALTIME-POLLING-FORTIFIED] Current time: ${currentTimeStr}`)
+    
+    // FORTIFIED: More comprehensive query with better logging
+    const { results } = await c.env.DB.prepare(`
+      SELECT card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at, delivery_date
+      FROM order_card_states 
+      WHERE tenant_id = ? AND updated_at > ?
+      ORDER BY updated_at DESC
+    `).bind(tenantId, sixtySecondsAgoStr).all()
 
-    console.log(`[REALTIME-POLLING] Raw database results:`, results)
+    console.log(`[REALTIME-POLLING-FORTIFIED] Raw database results (${results?.length || 0} rows):`, results)
 
+    // FORTIFIED: Enhanced change mapping with more data
     const changes = (results || []).map((state: any) => ({
       cardId: state.card_id,
       status: state.status,
       assignedTo: state.assigned_to,
       assignedBy: state.assigned_by,
       notes: state.notes,
-      sortOrder: state.sort_order,
-      updatedAt: state.updated_at
+      sortOrder: state.sort_order || 0,
+      updatedAt: state.updated_at,
+      deliveryDate: state.delivery_date
     }))
 
-    console.log(`[REALTIME-POLLING] Found ${changes.length} recent changes:`, changes)
+    console.log(`[REALTIME-POLLING-FORTIFIED] Found ${changes.length} recent changes:`, changes)
     
+    // FORTIFIED: Enhanced response with debugging info
     return c.json({ 
       changes,
-      timestamp: new Date().toISOString(),
-      count: changes.length
+      timestamp: currentTimeStr,
+      count: changes.length,
+      queryWindow: `${sixtySecondsAgoStr} to ${currentTimeStr}`,
+      debug: {
+        tenantId,
+        rawResultCount: results?.length || 0,
+        processedChangeCount: changes.length
+      }
     })
   } catch (error: any) {
-    console.error("Error checking real-time order card states:", error)
+    console.error("[REALTIME-POLLING-FORTIFIED] Error checking real-time order card states:", error)
     return c.json({ error: "Failed to check for updates", details: error.message }, 500)
   }
 })
@@ -1659,7 +1715,6 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
-    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     
     // AI Florist public endpoints (for customer-facing AI)
@@ -1713,7 +1768,6 @@ app.use("/api/tenants/:tenantId/*", async (c, next) => {
     '/api/tenants/:tenantId/analytics/florist-stats',
     '/api/tenants/:tenantId/orders/realtime-status',
     '/api/tenants/:tenantId/realtime/orders',
-    '/api/tenants/:tenantId/order-card-states/realtime-check',
     '/api/tenants/:tenantId/test-shopify',
     '/api/tenants/:tenantId/ai/saved-products',
     '/api/tenants/:tenantId/ai/knowledge-base',
@@ -1802,11 +1856,13 @@ app.post("/api/auth/login", async (c) => {
     // Get tenant information
     const tenant = await d1DatabaseService.getTenant(c.env, user.tenantId)
 
-    // Passwords match, generate JWT
+    // Passwords match, generate JWT with enhanced user info
     const payload = {
       sub: user.id,
       tenantId: user.tenantId,
       role: user.role,
+      name: user.name,
+      email: user.email,
       exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 24 hours
     }
     const token = await sign(payload, c.env.JWT_SECRET)
@@ -1861,11 +1917,13 @@ app.post("/api/auth/register", async (c) => {
       role: "admin", // First user is admin
     })
 
-    // Generate JWT token
+    // Generate JWT token with enhanced user info
     const payload = {
       sub: newUser.id,
       tenantId: newUser.tenantId,
       role: newUser.role,
+      name: newUser.name,
+      email: newUser.email,
       exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 24 hours
     }
     const token = await sign(payload, c.env.JWT_SECRET)
@@ -3331,7 +3389,9 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
     
     if (!deliveryDate) {
       console.log("[WEBHOOK] No delivery date found in tags or custom attributes for order:", shopifyOrder.id, "Tags:", shopifyOrder.tags);
-      return c.json({ error: "No delivery date found in order tags or custom attributes" }, 400);
+      console.log("[WEBHOOK] Order will be created as unscheduled");
+      // Use special marker for unscheduled orders (order_card_states doesn't allow NULL)
+      deliveryDate = 'unscheduled';
     }
     
     console.log("[WEBHOOK] Extracted delivery date:", deliveryDate, "for order:", shopifyOrder.id);
@@ -3368,8 +3428,8 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
       // REAL-TIME FIX: Update order_card_states for existing orders to trigger real-time updates
       try {
         await c.env.DB.prepare(`
-          INSERT OR REPLACE INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT OR REPLACE INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, delivery_date, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
           existingOrder.id,
           tenantId,
@@ -3378,6 +3438,7 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
           'webhook', // System user for webhook updates
           orderData.notes || null,
           0, // Default sort order
+          deliveryDate, // Include delivery date (can be null for unscheduled)
           new Date().toISOString().slice(0, 19).replace('T', ' ') // SQLite datetime format
         ).run();
         
@@ -3395,8 +3456,8 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
     // REAL-TIME FIX: Create order_card_states entry so new webhook orders appear in real-time
     try {
       await c.env.DB.prepare(`
-        INSERT INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO order_card_states (card_id, tenant_id, status, assigned_to, assigned_by, notes, sort_order, delivery_date, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         newOrder.id,
         tenantId,
@@ -3405,6 +3466,7 @@ app.post("/api/webhooks/shopify/orders-create/:tenantId/:storeId", async (c) => 
         'webhook', // System user for webhook-created orders
         newOrder.notes || null,
         0, // Default sort order
+        deliveryDate, // Include delivery date (can be null for unscheduled)
         new Date().toISOString().slice(0, 19).replace('T', ' ') // SQLite datetime format
       ).run();
       

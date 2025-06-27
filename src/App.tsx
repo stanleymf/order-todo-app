@@ -18,6 +18,7 @@ import { ProductsManagementRoute } from "./components/ProtectedRoute"
 import "./index.css"
 import { getTenantSettings } from "./services/api"
 import { useIsMobile } from "./components/hooks/use-mobile"
+import { RealtimeDebugInfo } from './components/RealtimeDebugInfo'
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -82,6 +83,7 @@ function AppContent() {
         )}
       </Router>
       <Toaster />
+      <RealtimeDebugInfo />
     </>
   )
 }

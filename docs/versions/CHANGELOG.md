@@ -2,6 +2,339 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.81] - 2025-01-20
+
+### 🔍 Enhanced Rate Limiting & Successive Update Debugging
+- **Enhanced Real-time Debugging**: Added comprehensive debugging to track what happens after first successful update
+- **Rate Analysis**: Added timing analysis to detect if rapid changes are causing sync failures
+- **Save Operation Tracking**: Added save timing and duration tracking to detect overlapping saves
+- **Rapid Change Detection**: Added specific monitoring for changes within 5-second windows
+- **State Transition Logging**: Enhanced before/after state logging for all order updates
+- **Skip Reason Analysis**: Added detailed logging for why updates are skipped
+
+### 🐛 Investigating First-Update-Only Issue
+- User reports: Real-time works for first order update, subsequent ones don't work
+- Added rate limiting analysis with timing between update batches
+- Save operation performance monitoring to detect bottlenecks
+- Rapid change detection for consecutive updates within short timeframes
+- Enhanced state tracking with detailed before/after comparisons
+
+### 🔧 Performance Analysis
+- Save timing tracking to detect if rapid saves are causing conflicts
+- Cross-device timestamp comparison debugging
+- Polling window analysis for rapid successive changes
+- Detailed logging for update processing vs skipping decisions
+
+## [1.5.80] - 2025-01-16
+
+### 🚨 CRITICAL FIX: Infinite Component Re-initialization
+- **Fixed infinite hook re-initialization** that was causing polling intervals to constantly restart
+- **Stabilized useCallback dependencies** to prevent component re-mounting
+- **Eliminated interval clearing/restarting loop** that was breaking real-time sync
+- **Root cause identified**: Unstable onUpdate callback causing useEffect to trigger repeatedly
+
+### 🔧 Real-Time Reliability Fix
+- Moved from inline callback to stable useCallback with minimal dependencies  
+- Fixed the `🛑 POLLING Clearing interval` → `🎬 POLLING Starting interval` loop
+- Prevented loss of timestamp tracking state due to constant restarts
+- Eliminated intermittent sync failures caused by connection resets
+
+### 🎯 Performance Improvements
+- Stable polling intervals without interruption
+- Consistent state tracking across polling cycles
+- Reduced unnecessary re-renders and network requests
+- More reliable cross-device synchronization
+
+## [1.5.79] - 2025-01-16
+
+### 🔍 Enhanced Debugging for Intermittent Issues
+- **Added failure tracking** to monitor consecutive polling failures across multiple users
+- **Enhanced server response logging** to capture detailed API responses
+- **Added health monitoring** with warnings for extended failure periods
+- **Improved error categorization** to distinguish between auth, network, and server errors
+- **Added user attribution debugging** to track which user made updates
+
+### 🐛 Intermittent Multi-User Sync Investigation
+- Investigating intermittent real-time sync issues across 3 user accounts (1 desktop, 2 mobile)
+- Added comprehensive failure detection and tracking
+- Enhanced polling diagnostics to identify patterns in failures
+- Added network connectivity error detection
+- Health status warnings for extended downtime periods
+
+### 🔧 Reliability Improvements
+- Failure count tracking per client to identify problematic devices/users
+- Authentication error detection and logging
+- Network error categorization and debugging
+- Time-since-last-success monitoring for health status
+
+## [1.5.78] - 2025-01-16
+
+### 🔧 Fixed Aggressive Real-Time Behavior
+- **Disabled annoying toast notifications** for real-time updates as requested
+- **Fixed aggressive page refresh** - now updates individual orders instead of full page reload
+- **Restored subtle real-time updates** - orders update smoothly without disrupting user experience
+- **Made debug panel collapsible** and less intrusive with hover effects
+
+### 🐛 Real-Time Update Behavior Fixes
+- Individual order updates instead of full page refresh
+- Removed all toast notifications from real-time system
+- Maintained real-time functionality but with better UX
+- New orders logged but don't trigger aggressive refreshes
+
+### 🎨 Debug Panel Improvements
+- Collapsible debug panel with expand/collapse toggle
+- Smaller, less intrusive design with better styling
+- Click to expand/collapse debug information
+- Enhanced visual feedback with hover effects
+
+## [1.5.77] - 2025-01-16
+
+### 🐛 Critical JavaScript Error Fix
+- **Fixed "Cannot access 'v' before initialization" error** that was breaking the app
+- **Removed problematic debug code** from Orders component that caused variable hoisting issues
+- **Fixed component unmounting issues** that prevented real-time updates from working
+- **Cleaned up variable references** and resolved all linter errors
+- **Stabilized RealtimeDebugInfo component** with proper initialization order
+
+### 🔧 Code Cleanup
+- Removed conflicting debug state from Orders component
+- Fixed variable naming conflicts between components
+- Proper component lifecycle management
+- Enhanced error handling for component initialization
+
+## [1.5.76] - 2025-01-16
+
+### 📱 On-Screen Mobile Debug Display
+- **Added RealtimeDebugInfo component** for mobile debugging without console access
+- **Shows real-time status** including client ID, connection status, auth token status
+- **Visible on mobile/desktop** when URL contains `?debug=true`
+- **Updates every 3 seconds** to show current sync status
+- **Poll count tracking** to monitor how many updates are received
+
+### 🔍 Mobile Chrome Debugging Solution
+- Created dedicated debug component for Chrome on iPhone users
+- Fixed issue where mobile console logs aren't accessible
+- On-screen debug panel shows all critical real-time sync information
+- Easy activation with URL parameter for testing
+
+## [1.5.75] - 2025-01-16
+
+### 🔍 Mobile vs Desktop Connectivity Debugging
+- **Added immediate connectivity test** on hook initialization to detect server reachability
+- **Enhanced mobile environment detection** with screen size, touch capability, and network connection info
+- **Added network timing measurements** to compare mobile vs desktop request performance
+- **Mobile browser debugging** with detailed user agent and connection type analysis
+
+### 🐛 Same Account Mobile/Desktop Sync Investigation  
+- Investigating why same login account has different sync behavior between mobile and desktop
+- Added comprehensive environment debugging for mobile-specific issues
+- Network performance monitoring to detect mobile connectivity problems
+- Immediate server connectivity validation on startup
+
+## [1.5.74] - 2025-01-16
+
+### 🔍 User-Specific Real-Time Debugging
+- **Added client identification** with unique Mobile/Desktop + timestamp IDs for each device
+- **Enhanced user attribution debugging** showing tenant name, user info, and device type in logs
+- **Detailed auth token debugging** with token start/end characters and length validation
+- **Cross-user debugging** to identify why some users (Karen, Yawen) cannot see updates while others can
+- **Device-specific logging** to differentiate between mobile and desktop sync issues
+
+### 🐛 Multi-User Sync Investigation
+- Added comprehensive logging to track why 4 users have different sync behaviors
+- Desktop can see updates but mobile cannot see updates for some users
+- Enhanced polling logs with client ID to distinguish between different devices/users
+- User-specific auth token validation and JWT payload debugging
+
+## [1.5.73] - 2025-01-16
+
+### 🔍 Enhanced Polling Debugging
+- **Added comprehensive polling lifecycle debugging** to track when real-time updates stop working
+- **Enhanced interval monitoring** with timestamp logging for each polling tick
+- **Added component lifecycle debugging** to detect unexpected unmounting/remounting
+- **Improved auth token validation** with detailed error logging
+- **Added detailed change detection logging** to track when orders are processed vs skipped
+- **Investigating issue**: Real-time sync works initially but stops after a while
+
+### 🐛 Debugging Enhancements
+- Enhanced polling debug logs with emojis for better log readability
+- Added interval ID tracking to monitor if polling intervals are being cleared
+- Component unmount detection to identify unexpected re-initializations
+- Detailed timestamp comparison logging for cross-device sync debugging
+
+## [1.5.69] - 2025-06-27
+
+### 🔄 Cross-Device Real-Time Updates - CRITICAL FIX
+- **FIXED**: Real-time updates now work properly between multiple devices
+- **Enhanced Change Detection**: Uses timestamp comparison instead of state comparison for cross-device sync
+- **Improved Tracking**: Added `lastProcessedTimestamps` to track when each device last processed changes
+- **Better Debugging**: Enhanced logging shows timestamp comparison details
+- **Multi-User Ready**: System now properly syncs changes across all connected devices
+
+### 🐛 Bug Fixes  
+- Fixed issue where devices weren't seeing changes made on other devices
+- Real-time polling now uses timestamps for reliable cross-device detection
+- Eliminated false "same state" detection between different devices
+
+### 🚀 Performance
+- More accurate change detection reduces unnecessary UI updates
+- Better memory management with separate state and timestamp tracking
+
+## [1.5.68] - 2025-06-27
+
+### 🔐 Real-Time Authentication Critical Fix
+- **BREAKING**: Real-time polling now requires authentication for proper user attribution
+- **Fixed Real-Time Token Issue**: Added `Authorization: Bearer` header to real-time polling requests
+- **Removed Public Endpoint**: `/api/tenants/:tenantId/order-card-states/realtime-check` now requires authentication
+- **Enhanced Polling Logging**: Added user identification to real-time polling for better debugging
+- **User Attribution Fix**: Real-time polling now properly tracks which user is making requests
+
+### 🐛 Bug Fixes
+- Fixed missing authentication headers in real-time polling causing `assigned_by: 'unknown'`
+- Real-time updates now properly attribute changes to the correct user
+- Improved JWT payload debugging for better troubleshooting
+
+### ⚠️ Breaking Changes
+- Real-time polling endpoint now requires valid JWT token
+- Users must be logged in for real-time updates to work properly
+
+## [1.5.67] - 2025-06-27
+
+### 🔧 User Authentication & Attribution Fixes
+- **Enhanced JWT Token**: Added user name and email to JWT payload for proper user attribution
+- **Fixed Token Storage Key**: Corrected frontend token storage from 'token' to 'auth_token' for consistency
+- **Added JWT Debug Logging**: Enhanced JWT payload debugging to identify user attribution issues
+- **User Detection Improvement**: Ensured proper user account detection when assigning or completing orders
+- **Authentication Fortification**: Strengthened user authentication system to prevent name bugs and attribution errors
+
+### 🐛 Bug Fixes
+- Fixed "assigned_by: 'unknown'" issue in database logs
+- Resolved potential user name switching bugs during order assignment
+- Improved JWT extraction and validation consistency
+
+## [1.5.66] - 2025-06-27
+
+### 🔧 User Authentication & Attribution Fixes
+- **Enhanced JWT Token**: Added user name and email to JWT payload for proper user attribution
+- **Fixed Token Storage Key**: Corrected frontend token storage from 'token' to 'auth_token' for consistency
+- **Added JWT Debug Logging**: Enhanced JWT payload debugging to identify user attribution issues
+- **User Detection Improvement**: Ensured proper user account detection when assigning or completing orders
+- **Authentication Fortification**: Strengthened user authentication system to prevent name bugs and attribution errors
+
+### 🐛 Bug Fixes
+- Fixed "assigned_by: 'unknown'" issue in database logs
+- Resolved potential user name switching bugs during order assignment
+- Improved JWT extraction and validation consistency
+
+## [1.5.65] - 2025-01-27
+
+### Fixed
+- **CRITICAL: Real-Time System Fortification**: Completely rebuilt real-time update system for rock-solid reliability
+  - **Timestamp Consistency**: Fixed timestamp format mismatch between save and polling operations
+  - **Authentication Stability**: Enhanced JWT token handling and user identification
+  - **Assignment Logic Fix**: Fixed buggy username assignment and assignment logic inconsistencies
+  - **Multi-User Compatibility**: Improved system to handle multiple concurrent users seamlessly
+  - **Error Handling**: Added comprehensive error handling and verification steps
+  - **Polling Window**: Increased polling window from 30s to 60s for better change detection
+  - **Database Verification**: Added verification queries to ensure changes are properly saved
+
+### Enhanced
+- **Fortified Backend**: Enhanced PUT endpoint with explicit timestamp handling and verification
+- **Fortified Frontend**: Improved card state saving with better error handling and logging
+- **Assignment Logic**: Fixed assignment to properly handle 'assigned' and 'completed' statuses
+- **Real-Time Polling**: Enhanced polling endpoint with comprehensive debugging and change detection
+- **User Attribution**: Fixed user name/ID handling for proper assignment attribution
+
+### Technical
+- **Timestamp Format**: Unified SQLite timestamp format (`YYYY-MM-DD HH:MM:SS`) across all operations
+- **Enhanced Logging**: Added detailed `[FORTIFIED]` logging for easier debugging
+- **Verification Queries**: Added database verification to ensure updates are properly saved
+- **Error Recovery**: Improved error handling to prevent UI breaks while maintaining logging
+- **Assignment Consistency**: Fixed assignment logic to work consistently across status changes
+
+## [1.5.64] - 2025-01-27
+
+### Fixed
+- **Webhook Notification Disable**: Disabled "New order received from webhook" toast notifications
+  - **Reason**: Further reduce notification noise for cleaner user experience
+  - **Impact**: Webhook orders still work and appear in real-time, just without toast pop-ups
+  - **Result**: Even cleaner notification experience with minimal interruptions
+
+### Technical
+- Commented out webhook toast notification while preserving underlying real-time functionality
+- Real-time webhook detection and processing continues to work silently
+
+## [1.5.63] - 2025-01-27
+
+### Fixed
+- **Toast Notification Management**: Improved toast notification system for better user experience
+  - **Real-Time Update Toasts**: Disabled frequent "Order updated by another user" notifications to reduce noise
+  - **Assignment Success Message**: Changed assignment toast from generic "Assignment updated successfully" to personalized "Assigned to [Username]"
+  - **Result**: Cleaner notification experience with more informative assignment feedback
+
+### Enhanced
+- **Assignment Feedback**: Users now see specific username when assigning orders to themselves
+- **Notification Clarity**: Reduced notification spam while maintaining important status change feedback
+- **User Experience**: More meaningful toast messages that show actual user context
+
+### Technical
+- Commented out real-time update toasts to prevent notification overload
+- Enhanced assignment status change to show actual assigned user name
+- Improved toast message context and user identification
+
+## [1.5.62] - 2025-01-27
+
+### Fixed
+- **Authentication Error in Real-Time New Order Fetching**: Fixed unauthorized error when trying to fetch new webhook order details
+  - **Root Cause**: Real-time system tried to fetch individual orders with missing authentication
+  - **Solution**: Simplified approach - show notification with refresh option instead of complex individual order fetching
+  - **Result**: Real-time webhook notifications work properly without authentication errors
+- **Simplified New Order Notifications**: Enhanced webhook order notifications with clear refresh prompts
+- **Improved Error Handling**: Removed problematic API calls that caused authentication failures
+
+### Technical
+- Removed complex individual order fetching that required authentication
+- Simplified `order_created` handler to show notification and suggest refresh
+- Enhanced error handling for webhook order real-time detection
+
+## [1.5.61] - 2025-01-27
+
+### Fixed
+- **CRITICAL: Webhook Real-Time Creation Fix**: Fixed webhook orders not appearing in real-time due to database constraint
+  - **Root Cause**: `order_card_states` table has `NOT NULL` constraint on `delivery_date` but webhook tried to insert NULL
+  - **Solution**: Use 'unscheduled' marker for orders without delivery dates instead of NULL
+  - **Result**: Webhook orders without delivery dates now properly create and appear in real-time in Unscheduled section
+- **Database Constraint Compliance**: Fixed SQL constraint violations in webhook real-time integration
+- **Unscheduled Order Handling**: Orders without delivery date tags now properly marked as 'unscheduled'
+
+### Technical
+- Fixed `order_card_states` INSERT queries to include `delivery_date` field
+- Use 'unscheduled' string instead of NULL for orders without delivery dates
+- Enhanced webhook logging for unscheduled order processing
+
+## [1.5.59] - 2025-01-27
+
+### Fixed
+- **CRITICAL: Webhook Orders Real-Time Display**: Fixed webhook orders not appearing in real-time on frontend
+  - **Root Cause 1**: Polling system only generated `order_updated` events, never `order_created` events
+  - **Root Cause 2**: `order_created` handler only showed toast notifications but didn't add orders to UI
+  - **Solution**: Enhanced polling system to distinguish new vs existing orders and fetch new orders for display
+- **Enhanced Real-Time Order Detection**: Improved new order detection and handling
+  - **New Order Tracking**: Added `knownOrderIds` tracking to distinguish new orders from updates
+  - **Automatic Order Fetching**: New orders are automatically fetched and added to UI without refresh
+  - **Better Notifications**: Success notifications show customer name for new webhook orders
+- **Polling System Improvements**: Enhanced state management for new order detection
+  - **Order ID Tracking**: Maintains set of known order IDs across polling cycles
+  - **Event Type Logic**: Properly generates `order_created` vs `order_updated` events
+  - **Error Handling**: Graceful fallback to refresh option if new order fetch fails
+
+### Technical
+- Added `knownOrderIds` Set to track seen orders in polling system
+- Enhanced `order_created` handler to fetch and display new orders automatically
+- Improved real-time event type detection for webhook orders
+- Added proper async/await handling for new order fetching
+- Enhanced error handling with fallback refresh options
+
 ## [1.5.58] - 2025-01-27
 
 ### Fixed

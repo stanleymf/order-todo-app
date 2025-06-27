@@ -24,63 +24,163 @@ interface UseRealtimeUpdatesOptions {
 }
 
 export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
-  const { enabled = true, pollInterval = 1000, onUpdate } = options // Even faster polling for debugging
+  const { enabled = true, pollInterval = 3000, onUpdate } = options
   const { tenant } = useAuth()
+
+  // Create unique client identifier for debugging
+  const clientId = useRef(`${navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop'}-${Date.now()}`).current
+
+  console.log('🔄 [REALTIME-HOOK] Initializing/re-initializing hook', {
+    clientId,
+    tenantId: tenant?.id,
+    tenantName: tenant?.name,
+    enabled,
+    hasCallback: !!onUpdate,
+    userAgent: navigator.userAgent.substring(0, 100),
+    timestamp: new Date().toISOString(),
+    // Mobile-specific environment debugging
+    environment: {
+      isMobile: navigator.userAgent.includes('Mobile'),
+      isTouch: 'ontouchstart' in window,
+      screenSize: `${window.screen.width}x${window.screen.height}`,
+      viewportSize: `${window.innerWidth}x${window.innerHeight}`,
+      connection: (navigator as any).connection ? {
+        effectiveType: (navigator as any).connection.effectiveType,
+        downlink: (navigator as any).connection.downlink
+      } : 'unknown'
+    }
+  })
+
   const [isConnected, setIsConnected] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState<string>(getCurrentSingaporeTime())
   const [updates, setUpdates] = useState<RealtimeUpdate[]>([])
+  const lastUpdate = updates[updates.length - 1]
+
+  // ENHANCED: Add failure tracking and rate monitoring
+  const consecutiveFailures = useRef(0)
+  const lastSuccessTime = useRef<number>(Date.now())
+  const lastUpdateTime = useRef<number>(0)
+  const updateCount = useRef<number>(0)
+
   const pollIntervalRef = useRef<number | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
-  const lastKnownStates = useRef<Map<string, string>>(new Map()) // Track last known states
+  const lastKnownStates = useRef<Map<string, string>>(new Map()) // Track last known states per order
+  const lastProcessedTimestamps = useRef<Map<string, string>>(new Map()) // Track when we last processed each order
+  const knownOrderIds = useRef<Set<string>>(new Set()) // Track last known states
 
   // Enhanced polling-based real-time updates (no SSE)
   const checkForUpdates = useCallback(async () => {
     if (!tenant?.id || !enabled) {
-      console.log('❌ [POLLING] Skipped - tenantId:', tenant?.id, 'enabled:', enabled)
+      console.log(`❌ [${clientId}] POLLING Stopped - missing tenant or disabled:`, { 
+        tenantId: tenant?.id, 
+        tenantName: tenant?.name,
+        enabled 
+      })
       return
     }
 
+    console.log(`🔄 [${clientId}] POLLING Checking updates...`, new Date().toLocaleTimeString())
+
     try {
       const url = `${API_BASE_URL}/api/tenants/${tenant.id}/order-card-states/realtime-check`
-      console.log('🔄 [POLLING] Checking for order card state changes...', url)
       
-      // Check for changes in order_card_states table directly
-      const response = await fetch(url)
+      // Start timing the request
+      const startTime = performance.now()
+      
+      // Debug auth token with detailed info
+      const authToken = localStorage.getItem('auth_token')
+      if (!authToken) {
+        console.error(`❌ [${clientId}] POLLING No auth token found!`, {
+          localStorage_keys: Object.keys(localStorage),
+          tenantId: tenant?.id,
+          tenantName: tenant?.name
+        })
+        setIsConnected(false)
+        return
+      }
+      
+      // Log token info (first/last few chars for security)
+      console.log(`🔑 [${clientId}] POLLING Auth token:`, {
+        tokenStart: authToken.substring(0, 10),
+        tokenEnd: authToken.substring(authToken.length - 10),
+        tokenLength: authToken.length,
+        tenantId: tenant.id,
+        tenantName: tenant?.name
+      })
+      
+      // Check for changes in order_card_states table directly with auth
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      })
 
-      console.log('🔄 [POLLING] Response status:', response.status, response.statusText)
+      const endTime = performance.now()
+      const requestDuration = Math.round(endTime - startTime)
+
+      console.log(`📡 [${clientId}] POLLING Response:`, response.status, response.statusText, `(${requestDuration}ms)`)
 
       if (response.ok) {
         const data = await response.json()
-        console.log('🔄 [POLLING] Response received:', data)
-        console.log('🔄 [POLLING] Number of changes:', data.changes?.length || 0)
+        console.log(`📊 [${clientId}] POLLING Changes found:`, data.changes?.length || 0)
+        
+        // ENHANCED: Reset failure tracking on success
+        consecutiveFailures.current = 0
+        lastSuccessTime.current = Date.now()
+        
+        // ENHANCED: Log the actual server response for debugging
+        console.log(`🔍 [${clientId}] POLLING Server response:`, {
+          changesCount: data.changes?.length || 0,
+          timestamp: data.timestamp,
+          debug: data.debug,
+          queryWindow: data.queryWindow
+        })
         
         if (data.changes && data.changes.length > 0) {
           const newUpdates: RealtimeUpdate[] = []
           
-          console.log('🔍 [POLLING] Processing changes:', data.changes)
-          
           for (const change of data.changes) {
-            const stateKey = `${change.cardId}-${change.status}-${change.assignedTo || 'none'}-${change.notes || 'none'}-${change.sortOrder || 0}`
-            const lastKnownState = lastKnownStates.current.get(change.cardId)
+            const lastProcessedTimestamp = lastProcessedTimestamps.current.get(change.cardId)
             
-            console.log(`🔍 [POLLING] Checking change for ${change.cardId}:`, {
-              stateKey,
-              lastKnownState,
-              isNew: lastKnownState !== stateKey,
-              notes: change.notes,
-              sortOrder: change.sortOrder
+            // Check if this is a new order (not seen before) or an updated order
+            const isNewOrder = !knownOrderIds.current.has(change.cardId)
+            const hasNewerTimestamp = !lastProcessedTimestamp || change.updatedAt > lastProcessedTimestamp
+            
+            console.log(`🔍 [${clientId}] POLLING Order ${change.cardId}:`, {
+              isNewOrder,
+              hasNewerTimestamp,
+              changeTime: change.updatedAt,
+              lastProcessed: lastProcessedTimestamp,
+              willUpdate: isNewOrder || hasNewerTimestamp,
+              assignedBy: change.assignedBy
             })
             
-            if (lastKnownState !== stateKey) {
-              console.log(`🔥 [POLLING] DETECTED CHANGE for ${change.cardId}:`, {
-                old: lastKnownState,
-                new: stateKey
+            // FIXED: Use timestamp comparison for cross-device detection
+            if (isNewOrder || hasNewerTimestamp) {
+              console.log(`🔥 [${clientId}] POLLING DETECTED ${isNewOrder ? 'NEW ORDER' : 'CHANGE'} for ${change.cardId}`)
+              
+              // ENHANCED: Log before state update
+              console.log(`📝 [${clientId}] POLLING BEFORE STATE UPDATE:`, {
+                orderId: change.cardId,
+                oldTimestamp: lastProcessedTimestamp,
+                newTimestamp: change.updatedAt,
+                currentKnownOrders: knownOrderIds.current.size,
+                currentTimestamps: Object.fromEntries(lastProcessedTimestamps.current)
               })
               
-              lastKnownStates.current.set(change.cardId, stateKey)
+              // Update tracking
+              lastProcessedTimestamps.current.set(change.cardId, change.updatedAt)
+              knownOrderIds.current.add(change.cardId)
+              
+              // ENHANCED: Log after state update
+              console.log(`✅ [${clientId}] POLLING AFTER STATE UPDATE:`, {
+                orderId: change.cardId,
+                newStoredTimestamp: lastProcessedTimestamps.current.get(change.cardId),
+                totalKnownOrders: knownOrderIds.current.size,
+                allStoredTimestamps: Object.fromEntries(lastProcessedTimestamps.current)
+              })
               
               const update: RealtimeUpdate = {
-                type: 'order_updated',
+                type: isNewOrder ? 'order_created' : 'order_updated',
                 orderId: change.cardId,
                 tenantId: tenant.id,
                 timestamp: change.updatedAt,
@@ -93,99 +193,98 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
               
               newUpdates.push(update)
             } else {
-              console.log(`⏸️ [POLLING] No change detected for ${change.cardId} (same state)`)
+              // ENHANCED: Log why update was skipped
+              console.log(`⏭️ [${clientId}] POLLING SKIPPING ORDER ${change.cardId}:`, {
+                reason: isNewOrder ? 'not new' : 'timestamp not newer',
+                isNewOrder,
+                hasNewerTimestamp,
+                changeTime: change.updatedAt,
+                lastProcessed: lastProcessedTimestamp,
+                timeDiff: lastProcessedTimestamp ? new Date(change.updatedAt).getTime() - new Date(lastProcessedTimestamp).getTime() : 'no previous time'
+              })
             }
           }
           
           if (newUpdates.length > 0) {
+            console.log(`🎯 [${clientId}] POLLING Triggering`, newUpdates.length, 'updates')
             setUpdates(prev => [...prev, ...newUpdates])
-            setIsConnected(true) // Mark as connected when we get successful responses
+            setIsConnected(true)
+            
+            // ENHANCED: Rate analysis
+            const now = Date.now()
+            const timeSinceLastUpdate = now - lastUpdateTime.current
+            updateCount.current += newUpdates.length
+            lastUpdateTime.current = now
+            
+            console.log(`⏱️ [${clientId}] POLLING RATE ANALYSIS:`, {
+              updatesInBatch: newUpdates.length,
+              timeSinceLastBatch: timeSinceLastUpdate,
+              totalUpdatesProcessed: updateCount.current,
+              averageTimeBetweenBatches: updateCount.current > 1 ? (now - lastSuccessTime.current) / (updateCount.current - 1) : 'first batch'
+            })
             
             // Call the onUpdate callback for each update
             newUpdates.forEach(update => {
-              console.log('🎯 [POLLING] Triggering update callback for:', update.orderId)
+              console.log(`🚀 [${clientId}] POLLING Callback for:`, update.orderId, 'by', update.updatedBy)
               onUpdate?.(update)
             })
+
+            // ENHANCED: Check for rapid changes
+            const rapidChanges = newUpdates.filter(change => {
+              const changeTime = new Date(change.timestamp).getTime()
+              const now = Date.now()
+              return (now - changeTime) < 5000 // Changes within last 5 seconds
+            })
+            
+            if (rapidChanges.length > 1) {
+              console.log(`⚡ [${clientId}] POLLING DETECTED RAPID CHANGES:`, {
+                totalChanges: newUpdates.length,
+                rapidChanges: rapidChanges.length,
+                rapidChangeDetails: rapidChanges.map(c => ({
+                  orderId: c.orderId,
+                  timestamp: c.timestamp,
+                  ageMs: Date.now() - new Date(c.timestamp).getTime()
+                }))
+              })
+            }
+          } else {
+            console.log(`⏸️ [${clientId}] POLLING No new updates to process`)
           }
         } else {
+          console.log(`✅ [${clientId}] POLLING No changes found`)
           setIsConnected(true) // Still connected, just no changes
         }
       } else {
-        console.error('🚨 [POLLING] Failed to check for updates:', response.status)
+        // ENHANCED: Track failures
+        consecutiveFailures.current += 1
+        console.error(`🚨 [${clientId}] POLLING Failed:`, response.status, await response.text())
+        console.error(`📊 [${clientId}] POLLING Failure count:`, consecutiveFailures.current)
         setIsConnected(false)
+        
+        // ENHANCED: Check if it's an auth error specifically
+        if (response.status === 401 || response.status === 403) {
+          console.error(`🔒 [${clientId}] POLLING Authentication failed - token may be expired`)
+        }
       }
     } catch (error) {
-      console.error('🚨 [POLLING] Error checking for updates:', error)
+      // ENHANCED: Track failures
+      consecutiveFailures.current += 1
+      console.error(`🚨 [${clientId}] POLLING Error:`, error)
+      console.error(`📊 [${clientId}] POLLING Failure count:`, consecutiveFailures.current)
       setIsConnected(false)
-    }
-  }, [tenant?.id, enabled, onUpdate])
-
-  // Function to establish SSE connection
-  const connectSSE = useCallback(() => {
-    if (!tenant?.id || !enabled) return
-
-    try {
-      const eventSource = new EventSource(`${API_BASE_URL}/api/tenants/${tenant.id}/realtime/orders`)
       
-      eventSource.onopen = () => {
-        setIsConnected(true)
-        console.log('🚀 REAL-TIME SSE CONNECTION ESTABLISHED!')
+      // ENHANCED: Log network error details
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        console.error(`🌐 [${clientId}] POLLING Network error - check connectivity`)
       }
-
-      const handleEvent = (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data);
-          return data;
-        } catch (error) {
-          console.error('Error parsing SSE message:', error);
-          return null;
-        }
-      };
-
-      eventSource.addEventListener('connected', (event) => {
-        const data = handleEvent(event);
-        if (data) {
-            console.log('SSE connected:', data.message)
-        }
-      });
-
-      eventSource.addEventListener('order_update', (event) => {
-        const data = handleEvent(event);
-        if (data) {
-          console.log('[SSE-FRONTEND] 🔥 RECEIVED ORDER UPDATE EVENT:', data);
-          
-          const update: RealtimeUpdate = {
-            type: data.type || 'order_updated',
-            orderId: data.orderId,
-            tenantId: tenant?.id || '',
-            timestamp: data.updatedAt || data.timestamp,
-            updatedBy: data.updatedBy || 'unknown',
-          };
-          
-          console.log('[SSE-FRONTEND] 🎯 PROCESSED UPDATE FOR ORDER:', update.orderId, 'BY:', update.updatedBy);
-          setUpdates(prev => [...prev, update]);
-          onUpdate?.(update);
-        }
-      });
-
-      eventSource.addEventListener('heartbeat', (event) => {
-        const data = handleEvent(event);
-        if (data) {
-          console.log('SSE heartbeat:', data.timestamp)
-        }
-      });
-
-      eventSource.onerror = (error) => {
-        console.error('SSE connection error:', error)
-        setIsConnected(false)
-        eventSource.close()
-      }
-
-      eventSourceRef.current = eventSource
-    } catch (error) {
-      console.error('Error establishing SSE connection:', error)
     }
-  }, [tenant?.id, enabled, onUpdate])
+    
+    // ENHANCED: Log health status
+    const timeSinceLastSuccess = Date.now() - lastSuccessTime.current
+    if (timeSinceLastSuccess > 30000) { // 30 seconds
+      console.warn(`⚠️ [${clientId}] POLLING Health warning: No successful poll in ${Math.round(timeSinceLastSuccess/1000)}s`)
+    }
+  }, [tenant?.id, enabled, onUpdate, clientId])
 
   // Function to disconnect
   const disconnect = useCallback(() => {
@@ -202,57 +301,73 @@ export function useRealtimeUpdates(options: UseRealtimeUpdatesOptions = {}) {
     setIsConnected(false)
   }, [])
 
-  // Effect to start polling (SSE disabled due to HTTP/2 issues)
+  // Start/stop polling
   useEffect(() => {
-    if (!enabled || !tenant?.id) {
-      console.log('❌ [POLLING] Not starting - enabled:', enabled, 'tenantId:', tenant?.id)
-      return
-    }
-
-    console.log('🚀 [POLLING] Starting polling-based real-time updates...', {
-      tenantId: tenant.id,
-      pollInterval,
-      enabled
-    })
-    
-    // Start polling for real-time updates
-    pollIntervalRef.current = setInterval(checkForUpdates, pollInterval) as unknown as number
-    console.log('⏰ [POLLING] Interval set with ID:', pollIntervalRef.current)
-
-    // Initial check
-    console.log('🎯 [POLLING] Running initial check...')
-    checkForUpdates()
-
-    // Cleanup on unmount
-    return () => {
-      console.log('🧹 [POLLING] Cleaning up polling interval:', pollIntervalRef.current)
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current)
-        pollIntervalRef.current = null
-      }
-    }
-  }, [enabled, tenant?.id, pollInterval, checkForUpdates])
-
-  // Effect to handle tenant changes
-  useEffect(() => {
-    if (tenant?.id) {
-      disconnect()
-      // Reconnect with new tenant
-      setTimeout(() => {
-        if (enabled) {
-          connectSSE()
-          pollIntervalRef.current = setInterval(checkForUpdates, pollInterval) as unknown as number
+    if (enabled && tenant?.id) {
+      console.log(`🎬 [${clientId}] POLLING Starting interval polling for tenant:`, tenant.id, tenant.name)
+      
+      // CONNECTIVITY TEST: Test if we can reach the server immediately
+      const testConnectivity = async () => {
+        try {
+          const authToken = localStorage.getItem('auth_token')
+          if (!authToken) {
+            console.error(`❌ [${clientId}] CONNECTIVITY TEST: No auth token!`)
+            return
+          }
+          
+          console.log(`🧪 [${clientId}] CONNECTIVITY TEST: Testing server connection...`)
+          const testResponse = await fetch(`${API_BASE_URL}/api/tenants/${tenant.id}/order-card-states/realtime-check`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          })
+          
+          console.log(`🧪 [${clientId}] CONNECTIVITY TEST: Response:`, testResponse.status, testResponse.statusText)
+          
+          if (testResponse.ok) {
+            const testData = await testResponse.json()
+            console.log(`✅ [${clientId}] CONNECTIVITY TEST: SUCCESS - Server reachable, got ${testData.changes?.length || 0} changes`)
+          } else {
+            console.error(`❌ [${clientId}] CONNECTIVITY TEST: FAILED -`, testResponse.status, await testResponse.text())
+          }
+        } catch (error) {
+          console.error(`❌ [${clientId}] CONNECTIVITY TEST: ERROR -`, error)
         }
-      }, 1000)
+      }
+      
+      // Run connectivity test immediately
+      testConnectivity()
+      
+      // Initial check
+      checkForUpdates()
+      
+      // Start interval
+      const interval = setInterval(() => {
+        console.log(`⏰ [${clientId}] POLLING Interval tick at`, new Date().toLocaleTimeString())
+        checkForUpdates()
+      }, pollInterval)
+      
+      console.log(`✅ [${clientId}] POLLING Interval ID:`, interval, 'every', pollInterval, 'ms')
+
+      return () => {
+        console.log(`🛑 [${clientId}] POLLING Clearing interval:`, interval)
+        clearInterval(interval)
+      }
+    } else {
+      console.log(`⭕ [${clientId}] POLLING Not starting - enabled:`, enabled, 'tenant:', tenant?.id)
     }
-  }, [tenant?.id])
+  }, [enabled, tenant?.id, checkForUpdates, pollInterval, clientId])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      console.log(`🧹 [${clientId}] REALTIME-HOOK Component unmounting - cleaning up`)
+    }
+  }, [])
 
   return {
     isConnected,
     updates,
     lastUpdate,
     checkForUpdates,
-    connectSSE,
     disconnect
   }
 } 

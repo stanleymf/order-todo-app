@@ -86,42 +86,81 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
   
   // Textarea ref for auto-resizing
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  
+  // ENHANCED: Track save timing
+  const lastSaveTimeRef = useRef<number>(0)
 
   const { user, tenant } = useAuth()
 
-  // Auto-save function with debouncing
+  // FORTIFIED: Auto-save function with better error handling and logging
   const saveCardState = async (newStatus?: string, newNotes?: string) => {
-    if (!tenant?.id || !deliveryDate) return
+    if (!tenant?.id || !deliveryDate) {
+      console.warn('[CARD-SAVE-FORTIFIED] Missing tenant ID or delivery date, skipping save')
+      return
+    }
 
     const cardId = order.cardId || order.id
-    if (!cardId) return
+    if (!cardId) {
+      console.warn('[CARD-SAVE-FORTIFIED] Missing card ID, skipping save')
+      return
+    }
+
+    const finalStatus = newStatus || status
+    // FORTIFIED: Better assignment logic
+    const shouldAssign = finalStatus === 'assigned' || finalStatus === 'completed'
+    const assignedToUser = shouldAssign ? (user?.name || user?.email || 'Unknown User') : null
+
+    // ENHANCED: Track save timing to detect rapid saves
+    const saveStartTime = Date.now()
+    const timeSinceLastSave = saveStartTime - (lastSaveTimeRef.current || 0)
+    lastSaveTimeRef.current = saveStartTime
+    
+    console.log(`[CARD-SAVE-FORTIFIED] Starting save for ${cardId}:`, {
+      status: finalStatus,
+      assignedTo: assignedToUser,
+      notes: newNotes !== undefined ? newNotes : notes,
+      deliveryDate,
+      timeSinceLastSave,
+      isRapidSave: timeSinceLastSave < 1000 // Less than 1 second
+    })
 
     setIsSaving(true)
     try {
-      // Save to order_card_states table (for UI state)
+      console.log(`[CARD-SAVE-FORTIFIED] Saving card ${cardId}:`, {
+        status: finalStatus,
+        assignedTo: assignedToUser,
+        notes: newNotes !== undefined ? newNotes : notes,
+        deliveryDate
+      })
+
+      // FORTIFIED: Save to order_card_states table with better payload
       const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${cardId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         },
         body: JSON.stringify({
-          status: newStatus || status,
+          status: finalStatus,
           notes: newNotes !== undefined ? newNotes : notes,
-          assignedTo: (newStatus === 'assigned' || status === 'assigned') ? (user?.name || user?.email) : null,
+          assignedTo: assignedToUser,
           deliveryDate
         })
       })
 
-      // Real-time sync now handled by polling system - no extra API call needed
-
       if (!response.ok) {
-        console.error('Failed to save card state:', await response.text())
+        const errorText = await response.text()
+        console.error('[CARD-SAVE-FORTIFIED] Failed to save card state:', errorText)
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
       } else {
-        console.log(`[CARD-SAVE] Saved state for card ${cardId}`)
+        const result = await response.json()
+        const saveEndTime = Date.now()
+        const saveDuration = saveEndTime - saveStartTime
+        console.log(`[CARD-SAVE-FORTIFIED] Saved successfully in ${saveDuration}ms:`, result)
       }
     } catch (error) {
-      console.error('Error saving card state:', error)
+      console.error('[CARD-SAVE-FORTIFIED] Error saving card state:', error)
+      // Don't throw error to prevent UI breaks, but log it
     } finally {
       setIsSaving(false)
     }

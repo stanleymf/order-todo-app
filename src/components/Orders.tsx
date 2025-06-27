@@ -121,133 +121,58 @@ export const Orders: React.FC = () => {
     }
   }, [activeUpdateIds])
 
-  const { isConnected, updates } = useRealtimeUpdates({
-    enabled: realtimeEnabled,
-    pollInterval: 3000, // Back to 3 seconds for responsiveness
-    onUpdate: (update) => {
-      console.log('[REALTIME] Received update:', update)
+  // Real-time updates hook - STABILIZED
+  const handleRealtimeUpdate = useCallback((update: any) => {
+    console.log('🔄 Real-time update received:', update)
+    
+    // SUBTLE UPDATE: Update individual order instead of full refresh
+    if (update.type === 'order_updated' && update.orderId) {
+      console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
       
-      // Google Sheets-style filtering and updates
-      const now = Date.now()
-      const currentUserId = user?.id || 'unknown'
-      const currentUserName = user?.name || user?.email || 'unknown'
-      const isOwnUpdate = update.updatedBy === currentUserId
-      const withinCooldown = (now - lastRefreshTime) < refreshCooldown
-
-      console.log('🔍 [REALTIME] UPDATE CHECK:', {
-        updateType: update.type,
-        orderId: update.orderId,
-        isOwnUpdate,
-        withinCooldown,
-        timeSinceLastUpdate: now - lastRefreshTime,
-        updatedBy: update.updatedBy,
-        currentUserId: currentUserId,
-        currentUserName: currentUserName
-      })
-
-      // Handle different update types like Google Sheets
-      if (!withinCooldown && (update.type === 'order_updated' || update.type === 'order_created' || update.type === 'order_deleted')) {
-        setLastRefreshTime(now)
-
-        if (update.type === 'order_updated' && update.orderId) {
-          // GOOGLE SHEETS APPROACH: Update individual order, even if it's our own
-          // The key is we don't refresh the page, just update the specific data
-          console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
-          
-          // Create update data from the polling response
-          const updateData = {
-            status: update.status || 'unassigned',
-            assignedTo: update.assignedTo,
-            notes: update.notes,
-            sortOrder: update.sortOrder // Add sort order support for drag-and-drop
-          }
-          
-          updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
-          
-          // If sort order changed, trigger re-sorting of the arrays
-          if (update.sortOrder !== undefined) {
-            console.log(`[REALTIME] Sort order changed for ${update.orderId}, triggering re-sort`)
-            
-            // Re-sort all order arrays based on the new sort orders
-            const sortByUpdatedOrder = (a: any, b: any) => {
-              // Primary sort by sortOrder (if available)
-              if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
-                return a.sortOrder - b.sortOrder
-              }
-              
-              // Fallback to existing sorting logic
-              if (a.sortOrder !== undefined && b.sortOrder === undefined) return -1
-              if (a.sortOrder === undefined && b.sortOrder !== undefined) return 1
-              
-              // Default difficulty/wedding priority sort
-              const aIsWedding = a.difficultyLabel?.toLowerCase().includes('wedding') || a.productTypeLabel?.toLowerCase().includes('wedding')
-              const bIsWedding = b.difficultyLabel?.toLowerCase().includes('wedding') || b.productTypeLabel?.toLowerCase().includes('wedding')
-              
-              if (aIsWedding && !bIsWedding) return -1
-              if (!aIsWedding && bIsWedding) return 1
-              
-              return 0
-            }
-            
-            setAllOrders(prev => [...prev].sort(sortByUpdatedOrder))
-            setMainOrders(prev => [...prev].sort(sortByUpdatedOrder))
-            setAddOnOrders(prev => [...prev].sort(sortByUpdatedOrder))
-            setUnscheduledOrders(prev => [...prev].sort(sortByUpdatedOrder))
-            setStoreContainers(prev => 
-              prev.map(container => ({
-                ...container,
-                orders: [...container.orders].sort(sortByUpdatedOrder)
-              }))
-            )
-          }
-          
-          // Show notification for others' changes only
-          if (!isOwnUpdate) {
-            // For now, show a generic message since updatedBy contains user ID, not name
-            // TODO: Implement user lookup to show actual user names
-            toast.info(`Order updated by another user`, {
-              duration: 3000
-            })
-          }
-        } else if (update.type === 'order_created') {
-          // For new orders, we might need a partial refresh or fetch the new order
-          console.log('[REALTIME] New order created, showing notification')
-          toast.info(`New order created by another user`, {
-            duration: 3000,
-            action: {
-              label: 'Refresh',
-              onClick: () => handleFetchOrders()
-            }
-          })
-        } else if (update.type === 'order_deleted') {
-          // Remove the deleted order from arrays
-          console.log(`[REALTIME] Order ${update.orderId} deleted, removing from UI`)
-          const removeOrder = (orders: any[]) => 
-            orders.filter((order: any) => 
-              order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
-            )
-
-          setAllOrders(prev => removeOrder(prev))
-          setMainOrders(prev => removeOrder(prev))
-          setAddOnOrders(prev => removeOrder(prev))
-          setUnscheduledOrders(prev => removeOrder(prev))
-          setStoreContainers(prev => 
-            prev.map(container => ({
-              ...container,
-              orders: removeOrder(container.orders)
-            }))
-          )
-
-          if (!isOwnUpdate) {
-            toast.info(`Order deleted by another user`, {
-              duration: 3000
-            })
-          }
-        }
-      } else {
-        console.log('[REALTIME] Skipping update - within cooldown or unsupported type')
+      // Create update data from the polling response
+      const updateData = {
+        status: update.status || 'unassigned',
+        assignedTo: update.assignedTo,
+        notes: update.notes,
+        sortOrder: update.sortOrder
       }
+      
+      updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
+      
+      // NO TOAST NOTIFICATIONS - removed as requested
+      
+    } else if (update.type === 'order_created') {
+      // For new orders, just log - no aggressive refresh
+      console.log('[REALTIME] New order detected:', update.orderId, '- refresh manually if needed')
+      
+      // NO TOAST NOTIFICATIONS - removed as requested
+      
+    } else if (update.type === 'order_deleted') {
+      // Remove the deleted order from arrays
+      console.log(`[REALTIME] Order ${update.orderId} deleted, removing from UI`)
+      const removeOrder = (orders: any[]) => 
+        orders.filter((order: any) => 
+          order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
+        )
+
+      setAllOrders(prev => removeOrder(prev))
+      setMainOrders(prev => removeOrder(prev))
+      setAddOnOrders(prev => removeOrder(prev))
+      setUnscheduledOrders(prev => removeOrder(prev))
+      setStoreContainers(prev => 
+        prev.map(container => ({
+          ...container,
+          orders: removeOrder(container.orders)
+        }))
+      )
+      
+      // NO TOAST NOTIFICATIONS - removed as requested
     }
+  }, [updateIndividualOrder])
+
+  const { isConnected, lastUpdate } = useRealtimeUpdates({
+    enabled: realtimeEnabled,
+    onUpdate: handleRealtimeUpdate
   })
   
   // Manual real-time toggle (now defaults to enabled)
@@ -256,7 +181,7 @@ export const Orders: React.FC = () => {
     toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
   }
   
-  console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}, Updates received: ${updates.length}`)
+  console.log(`[REALTIME] Connection status: ${isConnected ? 'Connected' : 'Disconnected'}`)
   
   // Helper function to get today's date in YYYY-MM-DD format (local timezone)
   const getTodayDate = () => {
@@ -367,8 +292,6 @@ export const Orders: React.FC = () => {
         const response = await getOrdersFromDbByDate(tenant.id, dateStr)
         console.log("Orders response after sync:", response)
         
-        // Debug logs removed - double-encoding fix completed
-        
         // CACHE-FIX: Force clear all order state before setting new data
         setAllOrders([])
         setMainOrders([])
@@ -416,20 +339,16 @@ export const Orders: React.FC = () => {
       const response = await getOrdersFromDbByDate(tenant.id, dateStr)
       console.log("Orders response:", response)
       
-      // Debug logs removed - double-encoding fix completed
-        
-        // CACHE-FIX: Force clear all order state before setting new data
-        setAllOrders([])
-        setMainOrders([])
-        setAddOnOrders([])
-        setStoreContainers([])
-        
-        // Handle both old format (array) and new format (object with categories)
+      // CACHE-FIX: Force clear all order state before setting new data
+      setAllOrders([])
+      setMainOrders([])
+      setAddOnOrders([])
+      setStoreContainers([])
+      
+      // Handle both old format (array) and new format (object with categories)
       if (Array.isArray(response)) {
         // Old format - treat all as main orders
         console.log("Setting orders (old format):", response.length)
-        // DEBUG: Check shopifyOrderData in first order
-        // Debug logs removed - double-encoding fix completed
         setAllOrders(response)
         setMainOrders(response)
         setAddOnOrders([])
@@ -442,8 +361,6 @@ export const Orders: React.FC = () => {
           addOns: response.addOnOrders?.length || 0,
           storeContainers: response.storeContainers?.length || 0
         })
-        // DEBUG: Check shopifyOrderData in first order
-        // Debug logs removed - double-encoding fix completed
         setAllOrders(response.orders || [])
         setMainOrders(response.mainOrders || [])
         setAddOnOrders(response.addOnOrders || [])
@@ -828,9 +745,12 @@ export const Orders: React.FC = () => {
       }))
     )
 
-    // Toast notification for completed orders
+    // Toast notifications for status changes
     if (newStatus === 'completed') {
       toast.success("Order Completed!")
+    } else if (newStatus === 'assigned') {
+      const assignedTo = user?.name || user?.email || 'Unknown User'
+      toast.success(`Assigned to ${assignedTo}`)
     }
   }
 
@@ -963,7 +883,7 @@ export const Orders: React.FC = () => {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
           },
           body: JSON.stringify({
             status: newStatus,
@@ -1299,18 +1219,18 @@ export const Orders: React.FC = () => {
                      : 'border-gray-300 text-gray-600'
                  }`}
                >
-                 <div className={`w-2 h-2 rounded-full mr-2 ${
-                   realtimeEnabled && isConnected ? 'bg-green-500' : 'bg-gray-400'
-                 }`} />
-                 <span className="text-xs font-medium">
-                   {realtimeEnabled ? (isConnected ? 'Live' : 'Connecting') : 'Off'}
+                                   <div className={`w-2 h-2 rounded-full mr-2 ${
+                    realtimeEnabled && isConnected ? 'bg-green-500' : 'bg-gray-400'
+                  }`} />
+                  <span className="text-xs font-medium">
+                    {realtimeEnabled ? (isConnected ? 'Live' : 'Connecting') : 'Off'}
                  </span>
                </Button>
-               {updates.length > 0 && (
-                 <div className="text-xs text-muted-foreground">
-                   {updates.length} updates
-                 </div>
-               )}
+                               {lastUpdate && (
+                  <div className="text-xs text-muted-foreground">
+                    Last update: {lastUpdate.type}
+                  </div>
+                )}
              </div>
           </CardTitle>
         </CardHeader>
