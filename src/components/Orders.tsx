@@ -748,15 +748,22 @@ export const Orders: React.FC = () => {
   const handleRealtimeUpdate = useCallback((update: any) => {
     console.log('🔄 Real-time update received:', update)
     
-    // ANTI-LOOP: Skip updates from current user to prevent drag conflicts
-    if (update.updatedBy === user?.id || update.updatedBy === user?.email || update.updatedBy === user?.name) {
-      console.log(`⏭️ [REALTIME] Skipping own update from ${update.updatedBy}`)
-      return
-    }
+    // DEBUG: Log user identification details
+    console.log(`[REALTIME-DEBUG] Current user: id=${user?.id}, email=${user?.email}, name=${user?.name}`)
+    console.log(`[REALTIME-DEBUG] Update updatedBy: ${update.updatedBy}`)
     
-    // SUBTLE UPDATE: Update individual order instead of full refresh
-    if (update.type === 'order_updated' && update.orderId) {
-      console.log(`[REALTIME] Applying individual update to order ${update.orderId}`)
+    // ANTI-LOOP: Skip updates from current user - BUT ONLY FOR STATUS CHANGES, NOT SORT ORDER
+    // Sort order needs cross-device sync and sendOptimisticUpdate handles immediate conflicts
+    const isOwnUpdate = update.updatedBy === user?.id || update.updatedBy === user?.email || update.updatedBy === user?.name
+    
+    if (update.type === 'order_updated') {
+      // Only skip status updates from same user, allow all sortOrder updates for cross-device sync
+      if (isOwnUpdate && update.status && !update.sortOrder) {
+        console.log(`⏭️ [REALTIME] Skipping own STATUS update from ${update.updatedBy}`)
+        return
+      }
+      
+      console.log('📦 Processing order update:', update.orderId)
       
       // Create update data from the polling response
       const updateData = {
@@ -776,35 +783,53 @@ export const Orders: React.FC = () => {
       } else if (update.sortOrder !== undefined) {
         // CRITICAL FIX: Handle sort order changes from drag reordering
         console.log(`[REALTIME] Sort order change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}`)
+        console.log(`[REALTIME-DEBUG] Full update data:`, update)
         
         // Apply individual update with sort order and then re-sort all containers
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
         
         // Force re-sort all containers to reflect new order sequence
+        console.log(`[REALTIME-RESORT] Starting re-sort process for sortOrder change`)
         setTimeout(() => {
           // Re-sort store containers by sortOrder
-          setStoreContainers(prev => 
-            prev.map(container => ({
+          setStoreContainers(prev => {
+            const newContainers = prev.map(container => ({
               ...container,
               orders: container.orders.slice().sort((a: any, b: any) => {
                 const aSortOrder = a.sortOrder || 9999
                 const bSortOrder = b.sortOrder || 9999
+                console.log(`[REALTIME-RESORT] Comparing ${a.cardId || a.id}: ${aSortOrder} vs ${b.cardId || b.id}: ${bSortOrder}`)
                 return aSortOrder - bSortOrder
               })
             }))
-          )
+            console.log(`[REALTIME-RESORT] Store containers re-sorted`)
+            return newContainers
+          })
           
           // Re-sort main arrays by sortOrder
           const sortByOrder = (orders: any[]) => 
             orders.slice().sort((a: any, b: any) => {
               const aSortOrder = a.sortOrder || 9999
               const bSortOrder = b.sortOrder || 9999
+              console.log(`[REALTIME-RESORT] Main array: ${a.cardId || a.id}: ${aSortOrder} vs ${b.cardId || b.id}: ${bSortOrder}`)
               return aSortOrder - bSortOrder
             })
           
-          setMainOrders(prev => sortByOrder(prev))
-          setAddOnOrders(prev => sortByOrder(prev))
-          setAllOrders(prev => sortByOrder(prev))
+          setMainOrders(prev => {
+            const sorted = sortByOrder(prev)
+            console.log(`[REALTIME-RESORT] Main orders re-sorted`)
+            return sorted
+          })
+          setAddOnOrders(prev => {
+            const sorted = sortByOrder(prev)
+            console.log(`[REALTIME-RESORT] Add-on orders re-sorted`)
+            return sorted
+          })
+          setAllOrders(prev => {
+            const sorted = sortByOrder(prev)
+            console.log(`[REALTIME-RESORT] All orders re-sorted`)
+            return sorted
+          })
           
           console.log(`[REALTIME] Re-sorted all containers for sortOrder change: ${update.orderId}`)
         }, 50) // Small delay to ensure individual update is applied first
@@ -836,9 +861,9 @@ export const Orders: React.FC = () => {
         }))
       )
     }
-  }, [updateIndividualOrder, handleOrderStatusChange, user])
+  }, [updateIndividualOrder])
 
-  // Initialize WebSocket hook with the real-time handler
+  // Initialize WebSocket hook with the real-time handler (RESTORED - this was working!)
   const { isConnected, connectionStatus, updates, sendOptimisticUpdate } = useRealtimeWebSocket({
     enabled: realtimeEnabled,
     onUpdate: handleRealtimeUpdate
@@ -1041,9 +1066,12 @@ export const Orders: React.FC = () => {
             // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
             if (sendOptimisticUpdate) {
               console.log(`[DRAG-DROP] Sending optimistic updates for reordered orders`)
+              console.log(`[DRAG-DROP] Order sequence:`, orderIds.map((id, idx) => `${id}: sortOrder ${(idx + 1) * 10}`))
               orderIds.forEach((orderId, index) => {
+                const sortOrder = (index + 1) * 10
+                console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
                 sendOptimisticUpdate(orderId, {
-                  sortOrder: (index + 1) * 10 // Same logic as backend
+                  sortOrder: sortOrder // Same logic as backend
                 })
               })
             }
@@ -1082,9 +1110,12 @@ export const Orders: React.FC = () => {
             // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
             if (sendOptimisticUpdate) {
               console.log(`[DRAG-DROP] Sending optimistic updates for reordered add-on orders`)
+              console.log(`[DRAG-DROP] Order sequence:`, orderIds.map((id, idx) => `${id}: sortOrder ${(idx + 1) * 10}`))
               orderIds.forEach((orderId, index) => {
+                const sortOrder = (index + 1) * 10
+                console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
                 sendOptimisticUpdate(orderId, {
-                  sortOrder: (index + 1) * 10 // Same logic as backend
+                  sortOrder: sortOrder // Same logic as backend
                 })
               })
             }

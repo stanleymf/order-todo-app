@@ -188,11 +188,11 @@ export const OrderDetailCard: React.FC<OrderDetailCardProps> = ({
     [status, deliveryDate, tenant?.id]
   )
 
-  // Initialize state from order data
+  // Initialize state from order data - FIXED: Include order.cardId to detect when component gets different order
   useEffect(() => {
     setStatus(order.status || 'unassigned')
     setNotes(order.notes || "")
-  }, [order.status, order.notes])
+  }, [order.cardId, order.id, order.status, order.notes])
 
   // Auto-resize textarea when content changes or component expands
   useEffect(() => {

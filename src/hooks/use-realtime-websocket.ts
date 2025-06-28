@@ -138,12 +138,6 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
           const data = JSON.parse(event.data)
           console.log('📨 [SSE-REALTIME] Order update received:', data.type)
           
-          // ANTI-LOOP: Skip updates from this user (already applied optimistically)
-          if (data.updatedBy === user?.id) {
-            console.log('⏭️ [SSE-REALTIME] Skipping own update:', data.orderId)
-            return
-          }
-          
           // ANTI-DUPLICATE: Check if already processed
           const duplicateKey = `${data.orderId}-${data.timestamp}`
           if (processedUpdateIds.current.has(duplicateKey)) {
