@@ -1503,7 +1503,7 @@ app.get("/api/tenants/:tenantId/orders-from-db-by-date", async (c) => {
 app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
   const tenantId = c.req.param("tenantId")
   const cardId = c.req.param("cardId")
-  const { status, notes, assignedTo, deliveryDate } = await c.req.json()
+  const { status, notes, assignedTo, deliveryDate, sortOrder } = await c.req.json()
 
   if (!deliveryDate) {
     return c.json({ error: "Delivery date is required" }, 400)
@@ -1539,14 +1539,15 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       currentUserId,
       currentUserName,
       notes: notes || null,
+      sortOrder: sortOrder || null,
       sqliteTimestamp
     })
     
-    // FORTIFIED: Use explicit timestamp and better error handling
+    // FORTIFIED: Use explicit timestamp and better error handling - NOW WITH SORT ORDER SUPPORT
     const result = await c.env.DB.prepare(`
       INSERT OR REPLACE INTO order_card_states 
-      (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       tenantId, 
       cardId, 
@@ -1555,6 +1556,7 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       assignedTo || null, 
       currentUserId, 
       notes || null,
+      sortOrder || null,
       sqliteTimestamp
     ).run()
 
@@ -1580,6 +1582,7 @@ app.put("/api/tenants/:tenantId/order-card-states/:cardId", async (c) => {
       status: status || 'unassigned',
       notes: notes || null,
       assignedTo: assignedTo || null,
+      sortOrder: sortOrder || null,
       updatedAt: sqliteTimestamp,
       verification: verification
     })
