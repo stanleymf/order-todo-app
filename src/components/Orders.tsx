@@ -822,23 +822,30 @@ export const Orders: React.FC = () => {
           isRecent: isRecentSortOrderUpdate
         })
         
-        // CRITICAL FIX: For sort order updates, also skip if updatedBy is 'unknown' (from reorder operations)
-        // This happens because reorder endpoint doesn't set assigned_by, so SSE sends updatedBy: 'unknown'
-        const isLikelyOwnReorderUpdate = (update.updatedBy === 'unknown' || !update.updatedBy) && isRecentSortOrderUpdate
+        // FIXED ANTI-SNAPBACK: Only skip if we can definitively identify same user
+        // For cross-device sync, we MUST process 'unknown' updates (could be other users)
+        const isDefinitelyOwnUpdate = isOwnUpdate && update.updatedBy !== 'unknown' && update.updatedBy
         
         // SNAPBACK DEBUG: Check if protection is working
-        console.log(`[SNAPBACK-DEBUG] Sort order update:`, {
+        console.log(`[CROSS-DEVICE-SYNC] Sort order update analysis:`, {
           orderId: update.orderId,
           sortOrder: update.sortOrder,
           updatedBy: update.updatedBy,
+          currentUser: user?.id,
           timeSinceUpdate: Math.round(timeSinceUpdate/1000),
-          willSkip: (isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate
+          isDefinitelyOwnUpdate,
+          willSkip: isDefinitelyOwnUpdate && isRecentSortOrderUpdate,
+          crossDeviceSync: update.updatedBy === 'unknown' ? 'WILL_PROCESS' : 'IDENTIFIED_USER'
         })
         
-        if ((isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate) {
-          console.log(`[REALTIME-SNAPBACK-FIX] ✅ SKIPPING recent sort order update within 10s: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
+        // Only skip if we can DEFINITELY identify this as our own recent update
+        if (isDefinitelyOwnUpdate && isRecentSortOrderUpdate) {
+          console.log(`[REALTIME-SNAPBACK-FIX] ✅ SKIPPING definitely own recent update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
           return
         }
+        
+        // CROSS-DEVICE-SYNC: Process all 'unknown' and other-user updates for real-time sync
+        console.log(`[CROSS-DEVICE-SYNC] ✅ PROCESSING sort order update for cross-device sync: ${update.orderId} - updatedBy: ${update.updatedBy || 'unknown'}`)
         
         console.log(`[SNAPBACK-DEBUG] ❌ NOT SKIPPED - Processing sort order update:`, update.orderId)
         
