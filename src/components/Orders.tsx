@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -123,9 +123,20 @@ export const Orders: React.FC = () => {
 
   // WebSocket hook will be initialized after the real-time handler is defined
   
+  // Track recent toggle to prevent snapback
+  const recentToggleRef = useRef<number>(0)
+  
   // Manual real-time toggle (now defaults to enabled)
   const toggleRealtime = () => {
+    const wasEnabled = realtimeEnabled
     setRealtimeEnabled(!realtimeEnabled)
+    
+    // Track when real-time is being re-enabled to prevent snapback
+    if (!wasEnabled) {
+      recentToggleRef.current = Date.now()
+      console.log('[TOGGLE-PROTECTION] Real-time re-enabled, protecting against snapback for 5 seconds')
+    }
+    
     toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
   }
   
@@ -748,9 +759,20 @@ export const Orders: React.FC = () => {
   const handleRealtimeUpdate = useCallback((update: any) => {
     console.log('🔄 Real-time update received:', update)
     
+    // TOGGLE-PROTECTION: Skip updates immediately after re-enabling real-time to prevent snapback
+    const timeSinceToggle = Date.now() - recentToggleRef.current;
+    if (recentToggleRef.current > 0 && timeSinceToggle < 5000) { // 5 seconds protection
+      console.log('[TOGGLE-PROTECTION] Skipping update due to recent real-time re-enable to prevent snapback:', update.orderId);
+      return;
+    }
+    
     // DEBUG: Log user identification details
     console.log(`[REALTIME-DEBUG] Current user: id=${user?.id}, email=${user?.email}, name=${user?.name}`)
     console.log(`[REALTIME-DEBUG] Update updatedBy: ${update.updatedBy}`)
+    
+    // DEBUG: Check if sortOrder is present in the update
+    console.log(`[SORTORDER-DEBUG] update.sortOrder:`, update.sortOrder, `(type: ${typeof update.sortOrder})`)
+    console.log(`[SORTORDER-DEBUG] update.changes:`, update.changes)
     
     // ANTI-LOOP: Skip updates from current user - BUT ONLY FOR STATUS CHANGES, NOT SORT ORDER
     // Sort order needs cross-device sync and sendOptimisticUpdate handles immediate conflicts
@@ -806,16 +828,33 @@ export const Orders: React.FC = () => {
         const timeSinceUpdate = update.updatedAt ? Date.now() - new Date(update.updatedAt).getTime() : 0
         const isRecentSortOrderUpdate = timeSinceUpdate < 10000 // 10 seconds
         
+        // TIMESTAMP DEBUG: Check if timing calculation is working
+        console.log(`[TIMESTAMP-DEBUG]`, {
+          updateUpdatedAt: update.updatedAt,
+          currentTime: new Date().toISOString(),
+          timeSinceUpdate: timeSinceUpdate,
+          isRecent: isRecentSortOrderUpdate
+        })
+        
         // CRITICAL FIX: For sort order updates, also skip if updatedBy is 'unknown' (from reorder operations)
         // This happens because reorder endpoint doesn't set assigned_by, so SSE sends updatedBy: 'unknown'
         const isLikelyOwnReorderUpdate = (update.updatedBy === 'unknown' || !update.updatedBy) && isRecentSortOrderUpdate
         
-        // SNAPBACK FIX: Applied - debug logging removed for cleaner logs
+        // SNAPBACK DEBUG: Check if protection is working
+        console.log(`[SNAPBACK-DEBUG] Sort order update:`, {
+          orderId: update.orderId,
+          sortOrder: update.sortOrder,
+          updatedBy: update.updatedBy,
+          timeSinceUpdate: Math.round(timeSinceUpdate/1000),
+          willSkip: (isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate
+        })
         
         if ((isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate) {
           console.log(`[REALTIME-SNAPBACK-FIX] ✅ SKIPPING recent sort order update within 10s: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
           return
         }
+        
+        console.log(`[SNAPBACK-DEBUG] ❌ NOT SKIPPED - Processing sort order update:`, update.orderId)
         
         console.log(`[REALTIME-ENHANCED] Processing cross-device sort order update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
         
@@ -895,7 +934,7 @@ export const Orders: React.FC = () => {
         }))
       )
     }
-  }, [updateIndividualOrder])
+  }, [updateIndividualOrder, user])
 
   // Initialize WebSocket hook with the real-time handler (RESTORED - this was working!)
   const { isConnected, connectionStatus, updates, sendOptimisticUpdate } = useRealtimeWebSocket({
