@@ -66,6 +66,7 @@ export const Orders: React.FC = () => {
   // NEW: Pending changes tracking for admin-only reordering
   const [pendingReorderChanges, setPendingReorderChanges] = useState<Record<string, number>>({})
   const [isSavingReorder, setIsSavingReorder] = useState(false)
+  const [recentlySaved, setRecentlySaved] = useState(false)
   
   // NEW: Smart auto-refresh for cross-device sync (since backend doesn't broadcast sortOrder)
   const [lastSaveTimestamp, setLastSaveTimestamp] = useState<number>(() => {
@@ -1047,7 +1048,12 @@ export const Orders: React.FC = () => {
       const hasSortOrderChange = update.sortOrder !== undefined
       
       if (hasStatusChange && !hasSortOrderChange) {
-        // Pure status change (no sortOrder)
+        // Pure status change (no sortOrder) - but check for pending reorder changes
+        const hasPendingReorderChange = pendingReorderChanges[update.orderId] !== undefined
+        if (hasPendingReorderChange) {
+          console.log(`[REALTIME-PROTECTION] ⚠️ Status change for ${update.orderId} but has pending reorder - allowing status change but protecting sortOrder`)
+        }
+        
         console.log(`[REALTIME] Pure status change detected: ${update.orderId} -> ${update.status}`)
         // CRITICAL FIX: Pass assignedTo from real-time update to preserve cross-device attribution
         console.log(`[REALTIME-ATTRIBUTION] Preserving assignedTo: ${update.assignedTo} for ${update.orderId}`)
@@ -1060,6 +1066,19 @@ export const Orders: React.FC = () => {
         if (hasStatusChange) {
           console.log(`[REALTIME-DIRECT] Processing status change: ${update.orderId} -> ${update.status}`)
           handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true, update.assignedTo)
+        }
+        
+        // CRITICAL FIX: Protect pending local drag changes from real-time snapback
+        const hasPendingChange = pendingReorderChanges[update.orderId] !== undefined
+        if (hasPendingChange) {
+          console.log(`[REALTIME-PROTECTION] 🛡️ BLOCKING real-time sortOrder update for ${update.orderId} - has pending local change: ${pendingReorderChanges[update.orderId]} vs incoming: ${update.sortOrder}`)
+          return
+        }
+        
+        // Additional protection: Block stale updates immediately after save
+        if (recentlySaved) {
+          console.log(`[REALTIME-PROTECTION] 🛡️ BLOCKING stale real-time update during post-save protection period for ${update.orderId}`)
+          return
         }
         
         // DIRECT ANTI-LOOP: Skip own updates to prevent conflicts
@@ -1441,6 +1460,14 @@ export const Orders: React.FC = () => {
         // Clear pending changes ONLY after successful database save and refresh
         setPendingReorderChanges({})
         
+        // Add protection window to prevent stale real-time updates after save
+        console.log('[SAVE-REORDER] 🔒 Activating post-save protection against stale updates')
+        setRecentlySaved(true)
+        setTimeout(() => {
+          console.log('[SAVE-REORDER] 🔓 Deactivating post-save protection - allowing real-time updates')
+          setRecentlySaved(false)
+        }, 3000) // 3 second protection window
+        
         toast.success(`Reorder changes saved to database and synced to all devices`, {
           duration: 3000
         })
@@ -1498,6 +1525,15 @@ export const Orders: React.FC = () => {
         }))
         
         setPendingReorderChanges({})
+        
+        // Add protection window here too for individual API calls
+        console.log('[SAVE-REORDER] 🔒 Activating post-save protection after individual API calls')
+        setRecentlySaved(true)
+        setTimeout(() => {
+          console.log('[SAVE-REORDER] 🔓 Deactivating post-save protection after individual calls')
+          setRecentlySaved(false)
+        }, 3000) // 3 second protection window
+        
         toast.success(`Reorder changes saved to database and syncing to other devices`, {
           duration: 3000
         })
