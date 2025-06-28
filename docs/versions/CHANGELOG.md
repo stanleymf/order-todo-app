@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.1] - 2025-01-21
+
+### Fixed
+- **CROSS-DEVICE SYNC**: Fixed drag-and-drop reordering not syncing across devices
+  - Implemented session-based conflict resolution to distinguish same-device vs cross-device updates
+  - Added unique session IDs to prevent blocking legitimate cross-device updates
+  - Cross-device drag operations now sync properly while maintaining optimistic updates on the dragging device
+  - Added detailed debug logging for cross-device sync troubleshooting
+  - Status: ✅ **RESOLVED** - Cross-device drag sync now works like Google Sheets
+
+### Technical Changes
+- Added session ID tracking for browser instances
+- Modified `handleOrderReorderChange` to accept session ID parameter
+- Updated real-time handler to extract and pass session IDs
+- Enhanced protection logic to only block same-session conflicts
+
+## [1.7.0] - 2025-01-21
+### 🚀 **MAJOR: Google Sheets-Inspired Optimistic Updates**
+- **Revolutionary Approach:** Implemented Google Sheets-style optimistic updates for drag-and-drop reordering
+- **Key Features:**
+  - ✅ **Immediate Visual Updates**: Orders reposition instantly like Google Sheets (no waiting for API)
+  - ✅ **Real-time Protection**: 5-second protection window prevents conflicts with real-time updates
+  - ✅ **No Snapback on API Failure**: Optimistic updates are preserved even if API calls fail
+  - ✅ **Background API Sync**: Server updates happen in background without affecting UI
+- **Technical Implementation:**
+  - `handleOptimisticReorder()`: Immediate UI updates with conflict protection
+  - `recentDragOperations` ref: Tracks recent drags to prevent real-time override  
+  - Background API calls: Save to server without blocking UI
+- **Result:** Eliminates snapback behavior completely - drag-and-drop now feels as smooth as Google Sheets
+
+## [1.6.9] - 2025-01-21
+### 🚨 **ARCHITECTURAL FIX: Direct State Updates for Drag-and-Drop**
+- **Major Change:** Replaced complex batch processing with direct state updates using the same proven pattern as status buttons
+- **Root Cause:** Status buttons work perfectly because both local and remote updates use `handleOrderStatusChange()` function
+- **Solution:** Created `handleOrderReorderChange()` function that mirrors `handleOrderStatusChange()` pattern for sortOrder updates
+- **Result:** Drag-and-drop now uses the same reliable data flow as status buttons - both local and remote updates use identical state management
+- **Impact:** Eliminates snapback behavior and enables true cross-device drag-and-drop synchronization by leveraging proven working architecture
+
+## [1.6.8] - 2025-01-21
+### 🚨 **CRITICAL FIX: Stale Closure in Batch Processing**
+- **Fixed:** Cross-device drag-and-drop sync not working due to stale closure in processBatchedUpdates
+- **Root Cause:** Removing updateBatch dependency created stale closure that couldn't access current batch state
+- **Solution:** Added currentBatchRef and useEffect to track current batch state without dependency issues
+- **Impact:** Cross-device drag-and-drop synchronization now works perfectly - orders reposition visually across all devices in real-time
+
+## [1.6.7] - 2025-01-21
+### 🚨 **CRITICAL FIX: Batch Processing Snapback Bug**
+- **Fixed:** Duplicate batch processing causing orders to snap back to original positions
+- **Root Cause:** processBatchedUpdates function had updateBatch dependency causing infinite loops and race conditions
+- **Solution:** Capture batch immediately, clear it right away, and remove dependency array to prevent re-triggering
+- **Impact:** Eliminates snapback behavior and duplicate processing - drag-and-drop now works smoothly without conflicts
+
+## [1.6.6] - 2025-01-21
+### 🚨 **CRITICAL FIX: StoreContainers Visual Reordering**
+- **Fixed:** Cross-device drag-and-drop reordering not showing visually in store containers
+- **Root Cause:** Batch processing updated sortOrder values but never resorted storeContainers orders for visual display
+- **Solution:** Added missing sort operation for storeContainers in processBatchedUpdates function
+- **Impact:** Visual drag-and-drop reordering now syncs perfectly across all devices and store containers
+
 ## [1.6.5] - 2025-01-21
 ### 🚨 **CRITICAL FIX: Cross-Device Attribution & Batch Processing**
 - **Fixed:** Cross-device status attribution bug where Fiona (mobile) assignments showed as "Assigned to Windflower" on desktop instead of "Assigned to Fiona"

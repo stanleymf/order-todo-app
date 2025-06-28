@@ -750,20 +750,151 @@ export const Orders: React.FC = () => {
     }
   }
 
-  // Batch updates to prevent snapback during bulk drag operations (now handles status + sortOrder)
-  const [updateBatch, setUpdateBatch] = useState<{[orderId: string]: {sortOrder?: number, status?: string, assignedTo?: string}}>({})
+  // Google Sheets-style optimistic reordering with conflict protection
+  const recentDragOperations = useRef<Record<string, number>>({})
+  
+  // Generate a unique session ID for this browser session to distinguish same-device vs cross-device updates
+  const sessionId = useRef<string>(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+
+  const handleOptimisticReorder = (orderId: string, newSortOrder: number) => {
+    console.log(`[GOOGLE-SHEETS-DRAG] 🎯 Optimistic reorder: ${orderId} -> ${newSortOrder}`)
+    
+    // Track this drag operation with session info
+    recentDragOperations.current[orderId] = Date.now()
+    
+    // Apply immediate optimistic update (Google Sheets style)
+    handleOrderReorderChange(orderId, newSortOrder, false)
+    
+    // Background API save with session identification
+    if (tenant?.id && selectedDate) {
+      const deliveryDate = new Date(selectedDate).toLocaleDateString('en-GB')
+      
+      // Save to server with session info for conflict resolution
+      fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'X-Session-ID': sessionId.current // Add session ID header
+        },
+        body: JSON.stringify({
+          sortOrder: newSortOrder,
+          deliveryDate,
+          _optimisticUpdate: true,
+          _sessionId: sessionId.current
+        })
+      }).then(response => {
+        if (response.ok) {
+          console.log(`[GOOGLE-SHEETS-DRAG] Background API save completed successfully`)
+        } else {
+          console.error(`[GOOGLE-SHEETS-DRAG] Background API save failed:`, response.status)
+        }
+      }).catch(error => {
+        console.error(`[GOOGLE-SHEETS-DRAG] Background API save error:`, error)
+        // Note: We don't rollback on API failure (Google Sheets approach)
+      })
+    }
+    
+    // Clear drag tracking after protection window
+    setTimeout(() => {
+      delete recentDragOperations.current[orderId]
+      console.log(`[GOOGLE-SHEETS-DRAG] Cleared drag protection for ${orderId}`)
+    }, 5000)
+  }
+
+  // CRITICAL FIX: Create handleOrderReorderChange - same pattern as handleOrderStatusChange
+  const handleOrderReorderChange = (orderId: string, newSortOrder: number, isFromRealtime = false, updateSessionId?: string) => {
+    console.log(`[REORDER-DIRECT] ${isFromRealtime ? 'Remote' : 'Local'} reorder: ${orderId} -> sortOrder: ${newSortOrder}`)
+    
+    // CROSS-DEVICE FIX: Only skip updates from SAME SESSION, not all updates
+    if (isFromRealtime && recentDragOperations.current[orderId]) {
+      const timeSinceLocalDrag = Date.now() - recentDragOperations.current[orderId]
+      
+      // Check if this update is from the same session (same device)
+      const isSameSession = updateSessionId && updateSessionId === sessionId.current
+      
+      if (timeSinceLocalDrag < 5000 && isSameSession) {
+        console.log(`[OPTIMISTIC-DRAG] ⏭️  SKIPPING same-session update for recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago)`)
+        return
+      } else if (timeSinceLocalDrag < 5000 && !isSameSession) {
+        console.log(`[CROSS-DEVICE-SYNC] ✅ ALLOWING cross-device update despite recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago, different session)`)
+      }
+    }
+    
+    // CROSS-DEVICE DEBUG: Log what's happening with real-time updates
+    if (isFromRealtime) {
+      console.log(`[CROSS-DEVICE-DEBUG] Processing real-time sortOrder update:`)
+      console.log(`[CROSS-DEVICE-DEBUG] - orderId: ${orderId}`)
+      console.log(`[CROSS-DEVICE-DEBUG] - newSortOrder: ${newSortOrder}`)
+      console.log(`[CROSS-DEVICE-DEBUG] - recentDragOperations:`, Object.keys(recentDragOperations.current))
+      console.log(`[CROSS-DEVICE-DEBUG] - hasRecentDrag: ${!!recentDragOperations.current[orderId]}`)
+    } else {
+      console.log(`[LOCAL-DRAG-DEBUG] Local drag reorder: ${orderId} -> ${newSortOrder}`)
+    }
+    
+    // Update the order sortOrder in all relevant arrays (same pattern as handleOrderStatusChange)
+    const updateOrderSortOrder = (orders: any[]) => 
+      orders.map((order: any) => 
+        (order.cardId === orderId || order.id === orderId) 
+          ? { ...order, sortOrder: newSortOrder }
+          : order
+      )
+
+    // Sort orders by sortOrder (same pattern as status function)  
+    const sortOrdersByPosition = (orders: any[]) => {
+      return orders.sort((a, b) => {
+        const aSortOrder = a.sortOrder || 9999
+        const bSortOrder = b.sortOrder || 9999
+        return aSortOrder - bSortOrder
+      })
+    }
+
+    // Update all arrays (same pattern as handleOrderStatusChange)
+    setAllOrders((prev: any[]) => sortOrdersByPosition(updateOrderSortOrder(prev)))
+    setMainOrders((prev: any[]) => sortOrdersByPosition(updateOrderSortOrder(prev)))
+    setAddOnOrders((prev: any[]) => sortOrdersByPosition(updateOrderSortOrder(prev)))
+    setUnscheduledOrders((prev: any[]) => sortOrdersByPosition(updateOrderSortOrder(prev)))
+    
+    // Also update store containers with sorting (same pattern as handleOrderStatusChange)
+    setStoreContainers((prev: any[]) => 
+      prev.map((container: any) => ({
+        ...container,
+        orders: sortOrdersByPosition(updateOrderSortOrder(container.orders))
+      }))
+    )
+
+    console.log(`[REORDER-DIRECT] Successfully updated sortOrder for ${orderId} in all arrays`)
+  }
+
+  // Real-time batch processing state
+  const [updateBatch, setUpdateBatch] = useState<any>({})
   const updateBatchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const currentBatchRef = useRef<any>({}) // CRITICAL FIX: Ref to track current batch
+  
+  // CRITICAL FIX: Update ref whenever batch changes
+  useEffect(() => {
+    currentBatchRef.current = updateBatch
+  }, [updateBatch])
 
   const processBatchedUpdates = useCallback(() => {
-    if (Object.keys(updateBatch).length === 0) return
+    const currentBatch = currentBatchRef.current // CRITICAL FIX: Use ref to get current state
     
-    console.log(`[REALTIME-BATCH] Processing ${Object.keys(updateBatch).length} batched updates`)
+    if (Object.keys(currentBatch).length === 0) {
+      console.log(`[REALTIME-BATCH] No items in batch to process`)
+      return
+    }
+    
+    console.log(`[REALTIME-BATCH] Processing ${Object.keys(currentBatch).length} batched updates`)
+    
+    // Clear the batch immediately to prevent race conditions
+    setUpdateBatch({})
+    currentBatchRef.current = {} // CRITICAL FIX: Clear ref too
     
     // Apply all updates at once (sortOrder, status, assignedTo)
     const updateOrdersWithBatchedData = (orders: any[]) => 
       orders.map((order: any) => {
         const orderId = order.cardId || order.id || order.orderId
-        const batchUpdate = updateBatch[orderId]
+        const batchUpdate = currentBatch[orderId]
         if (batchUpdate) {
           console.log(`[REALTIME-BATCH] Applying ${orderId} ->`, batchUpdate)
           return { 
@@ -796,15 +927,22 @@ export const Orders: React.FC = () => {
       })
 
     setTimeout(() => {
-      setMainOrders(prev => sortByOrder(prev))
-      setAddOnOrders(prev => sortByOrder(prev))
-      setAllOrders(prev => sortByOrder(prev))
-      console.log(`[REALTIME-BATCH] Final re-sort completed for ${Object.keys(updateBatch).length} orders`)
+      setMainOrders((prev: any[]) => sortByOrder(prev))
+      setAddOnOrders((prev: any[]) => sortByOrder(prev))
+      setAllOrders((prev: any[]) => sortByOrder(prev))
+      
+      // CRITICAL FIX: Also sort the storeContainers orders for visual reordering
+      setStoreContainers((prev: any[]) => 
+        prev.map((container: any) => ({
+          ...container,
+          orders: sortByOrder(container.orders)
+        }))
+      )
+      
+      console.log(`[REALTIME-BATCH] Final re-sort completed for ${Object.keys(currentBatch).length} orders (including storeContainers)`)
     }, 50)
 
-    // Clear the batch
-    setUpdateBatch({})
-  }, [updateBatch])
+  }, [])  // Keep empty dependency array but use ref for current state
 
   // Real-time updates hook - STABILIZED (moved here to access handleOrderStatusChange)
   const handleRealtimeUpdate = useCallback((update: any) => {
@@ -871,44 +1009,33 @@ export const Orders: React.FC = () => {
         console.log(`[REALTIME-ATTRIBUTION] Preserving assignedTo: ${update.assignedTo} for ${update.orderId}`)
         handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true, update.assignedTo)
       } else if (hasSortOrderChange) {
-        // BATCH SORTORDER UPDATES: Collect multiple updates and process together
-        console.log(`[REALTIME-BATCH] SortOrder update detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
+        // CRITICAL FIX: Use direct handleOrderReorderChange instead of batch processing
+        console.log(`[REALTIME-DIRECT] SortOrder update detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
         
+        // Handle status change first if present
         if (hasStatusChange) {
-          console.log(`[REALTIME-BATCH] ⚠️  DRAG-DROP UPDATE: Has both status AND sortOrder - adding to batch`)
+          console.log(`[REALTIME-DIRECT] Processing status change: ${update.orderId} -> ${update.status}`)
+          handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true, update.assignedTo)
         }
         
-        // BATCH ANTI-LOOP: Skip own updates to prevent conflicts
+        // DIRECT ANTI-LOOP: Skip own updates to prevent conflicts
         const isDefinitelyOwnUpdate = isOwnUpdate && update.updatedBy !== 'unknown' && update.updatedBy
         const timeSinceUpdate = update.updatedAt ? Date.now() - new Date(update.updatedAt).getTime() : 0
         const isRecentSortOrderUpdate = timeSinceUpdate < 10000 // 10 seconds
         
         if (isDefinitelyOwnUpdate && isRecentSortOrderUpdate) {
-          console.log(`[REALTIME-BATCH] ✅ SKIPPING definitely own recent update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
+          console.log(`[REALTIME-DIRECT] ✅ SKIPPING definitely own recent update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
           return
         }
         
-        console.log(`[REALTIME-BATCH] ✅ ADDING to batch: ${update.orderId} (updatedBy: ${update.updatedBy || 'unknown'})`)
+        // Use the same direct state update pattern as status buttons
+        console.log(`[REALTIME-DIRECT] ✅ APPLYING sortOrder directly: ${update.orderId} -> ${update.sortOrder}`)
         
-        // Add to batch
-        setUpdateBatch(prev => ({
-          ...prev,
-          [update.orderId]: {
-            sortOrder: update.sortOrder,
-            status: hasStatusChange ? update.status : undefined,
-            assignedTo: hasStatusChange ? update.assignedTo : undefined
-          }
-        }))
+        // Extract session ID from update if available (for cross-device sync)
+        const updateSessionId = update._sessionId || update.sessionId
+        console.log(`[CROSS-DEVICE-DEBUG] Update session ID: ${updateSessionId}, Current session: ${sessionId.current}`)
         
-        // Clear existing timeout and set new one (debounce)
-        if (updateBatchTimeoutRef.current) {
-          clearTimeout(updateBatchTimeoutRef.current)
-        }
-        
-        updateBatchTimeoutRef.current = setTimeout(() => {
-          console.log(`[REALTIME-BATCH] Timeout triggered - processing batch`)
-          processBatchedUpdates()
-        }, 200) // Wait 200ms for more updates to batch together
+        handleOrderReorderChange(update.orderId, update.sortOrder, true, updateSessionId)
         
       } else {
         // Neither status nor sortOrder change - handle other field updates
@@ -927,15 +1054,15 @@ export const Orders: React.FC = () => {
           order.cardId !== update.orderId && order.id !== update.orderId && order.orderId !== update.orderId
         )
 
-      setAllOrders(prev => removeOrder(prev))
-      setMainOrders(prev => removeOrder(prev))
-      setAddOnOrders(prev => removeOrder(prev))
-      setUnscheduledOrders(prev => removeOrder(prev))
-      setStoreContainers(prev => 
-        prev.map(container => ({
+      setAllOrders((prev: any[]) => removeOrder(prev))
+      setMainOrders((prev: any[]) => removeOrder(prev))
+      setAddOnOrders((prev: any[]) => removeOrder(prev))
+      setUnscheduledOrders((prev: any[]) => removeOrder(prev))
+      setStoreContainers((prev: any[]) => 
+        prev.map((container: any) => ({
           ...container,
           orders: removeOrder(container.orders)
-        }))
+        })).filter((container: any) => container.orders.length > 0)
       )
     }
   }, [updateIndividualOrder, user])
@@ -969,17 +1096,17 @@ export const Orders: React.FC = () => {
           order.cardId !== orderId && order.id !== orderId
         )
 
-      setAllOrders(prev => removeOrder(prev))
-      setMainOrders(prev => removeOrder(prev))
-      setAddOnOrders(prev => removeOrder(prev))
-      setUnscheduledOrders(prev => removeOrder(prev))
+      setAllOrders((prev: any[]) => removeOrder(prev))
+      setMainOrders((prev: any[]) => removeOrder(prev))
+      setAddOnOrders((prev: any[]) => removeOrder(prev))
+      setUnscheduledOrders((prev: any[]) => removeOrder(prev))
       
       // Also remove from store containers
-      setStoreContainers(prev => 
-        prev.map(container => ({
+      setStoreContainers((prev: any[]) => 
+        prev.map((container: any) => ({
           ...container,
           orders: removeOrder(container.orders)
-        })).filter(container => container.orders.length > 0)
+        })).filter((container: any) => container.orders.length > 0)
       )
       
       toast.success("Order deleted successfully")
@@ -1125,37 +1252,28 @@ export const Orders: React.FC = () => {
           if (newOrderIndex !== -1) {
             console.log(`[DRAG-DROP-FIXED] Target position found at index ${newOrderIndex}`)
             
-            // CRITICAL FIX: Reorder within the same store container using original state
+            // GOOGLE SHEETS APPROACH: Calculate new sort orders for the reordered sequence
             const newOrders = arrayMove(container.orders, activeOrderIndex, newOrderIndex)
-            
-            // CRITICAL FIX: Update the correct container in state (use direct index)
-            const newStoreContainers = [...storeContainers]
-            newStoreContainers[containerIndex] = {
-              ...newStoreContainers[containerIndex],
-              orders: newOrders
-            }
-            
-            // Set the updated state
-            setStoreContainers(newStoreContainers)
-            
-            // Also update mainOrders state for backward compatibility
-            const allMainOrdersFromContainers = newStoreContainers.flatMap(c => c.orders)
-            setMainOrders(allMainOrdersFromContainers)
-            
-            // CRITICAL FIX: Extract order IDs in new sequence for this store
             const orderIds = newOrders.map((order: any) => order.cardId || order.id)
             const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
-            console.log(`[DRAG-DROP-FIXED] New order sequence:`, orderIds)
+            console.log(`[GOOGLE-SHEETS-DRAG] New order sequence:`, orderIds)
             
-            // NEW APPROACH: Use individual order-card-states API calls (same as status buttons)
+            // GOOGLE SHEETS APPROACH: Do optimistic updates immediately, then save to API
             try {
-              console.log(`[DRAG-DROP-INDIVIDUAL] Using individual API calls (same as status buttons)`)
+              console.log(`[GOOGLE-SHEETS-DRAG] Applying optimistic updates immediately`)
               
-              // Use the SAME endpoint as status buttons for each order individually
+              // Apply optimistic updates for each order in the new sequence
+              orderIds.forEach((orderId, index) => {
+                const newSortOrder = (index + 1) * 10
+                console.log(`[GOOGLE-SHEETS-DRAG] Optimistic update: ${orderId} -> sortOrder: ${newSortOrder}`)
+                handleOptimisticReorder(orderId, newSortOrder)
+              })
+
+              // Then save to API in background (like Google Sheets)
+              console.log(`[GOOGLE-SHEETS-DRAG] Saving to API in background`)
               const updatePromises = orderIds.map(async (orderId, index) => {
                 const newSortOrder = (index + 1) * 10
-                console.log(`[DRAG-DROP-INDIVIDUAL] Updating ${orderId} -> sortOrder: ${newSortOrder}`)
                 
                 const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
                   method: 'PUT',
@@ -1175,26 +1293,24 @@ export const Orders: React.FC = () => {
                   throw new Error(`HTTP ${response.status}: ${await response.text()}`)
                 }
 
-                const result = await response.json()
-                console.log(`[DRAG-DROP-INDIVIDUAL] ✅ Updated ${orderId} successfully`)
-                return result
+                return await response.json()
               })
 
               await Promise.all(updatePromises)
-              console.log(`[DRAG-DROP-INDIVIDUAL] All sort order updates completed successfully`)
+              console.log(`[GOOGLE-SHEETS-DRAG] Background API save completed successfully`)
               
               toast.success("Order sequence updated")
               foundInStoreContainer = true
               
             } catch (error) {
-              console.error('[DRAG-DROP-FIXED] Failed to save order sequence:', error)
+              console.error('[GOOGLE-SHEETS-DRAG] Failed to save to API, but optimistic update is preserved:', error)
               
-              // CRITICAL FIX: Rollback state on error
-              console.log(`[DRAG-DROP-FIXED] Rolling back state due to save error`)
-              setStoreContainers(storeContainers) // Restore original state
-              setMainOrders(storeContainers.flatMap(c => c.orders)) // Restore main orders
+              // GOOGLE SHEETS APPROACH: Don't rollback on API failure - keep optimistic updates
+              // This prevents snapback and allows the user to see their changes
+              console.log(`[GOOGLE-SHEETS-DRAG] Keeping optimistic updates despite API failure`)
               
-              toast.error("Failed to update order sequence: " + (error as Error).message)
+              toast.error("Failed to save changes, but your reordering is preserved locally")
+              foundInStoreContainer = true
             }
             
             break
@@ -1290,6 +1406,7 @@ export const Orders: React.FC = () => {
   // Check if reordering is enabled (only when showing all orders without filters)
   const isReorderingEnabled = !activeFilters.status && !activeFilters.stores?.length
 
+  // CRITICAL FIX: Create handleOrderReorderChange - same pattern as handleOrderStatusChange
   return (
     <div className="flex-1 space-y-4 sm:space-y-6 p-2 sm:p-4 md:p-6">
       {/* Header */}
