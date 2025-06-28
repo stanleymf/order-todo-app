@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.4] - 2025-01-21
+### 🚨 **CRITICAL FIX: Batch Processing for Drag-Drop Snapback**
+- **Fixed:** Drag-drop operations causing "snapback" to original order due to 43 individual real-time updates triggering sequential re-sorts with mixed old/new sortOrder values
+- **Root Cause:** Each sortOrder update triggered immediate re-sort, creating temporary conflicts when orders had mixed sortOrder values during bulk updates
+- **Solution:** Implemented batch processing system that collects multiple sortOrder updates within 200ms window and applies them atomically
+- **Impact:** Eliminated snapback behavior - drag-drop operations now maintain final positions correctly across all devices
+
 ## [1.6.3] - 2025-01-21
 ### 🚨 **CRITICAL FIX: Real-Time Cross-Device Drag-Drop Sync**
 - **Fixed:** Real-time updates with both `status` and `sortOrder` were only processing status changes and completely ignoring sortOrder due to if/else logic

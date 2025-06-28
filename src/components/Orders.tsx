@@ -744,6 +744,56 @@ export const Orders: React.FC = () => {
     }
   }
 
+  // Batch sortOrder updates to prevent snapback during bulk drag operations
+  const [sortOrderUpdateBatch, setSortOrderUpdateBatch] = useState<{[orderId: string]: number}>({})
+  const sortOrderBatchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const processBatchedSortOrderUpdates = useCallback(() => {
+    if (Object.keys(sortOrderUpdateBatch).length === 0) return
+    
+    console.log(`[REALTIME-BATCH] Processing ${Object.keys(sortOrderUpdateBatch).length} batched sortOrder updates`)
+    
+    // Apply all sortOrder updates at once
+    const updateOrdersWithBatchedSortOrders = (orders: any[]) => 
+      orders.map((order: any) => {
+        const orderId = order.cardId || order.id || order.orderId
+        if (sortOrderUpdateBatch[orderId] !== undefined) {
+          console.log(`[REALTIME-BATCH] Applying ${orderId} -> sortOrder: ${sortOrderUpdateBatch[orderId]}`)
+          return { ...order, sortOrder: sortOrderUpdateBatch[orderId] }
+        }
+        return order
+      })
+
+    // Update all arrays at once
+    setAllOrders(prev => updateOrdersWithBatchedSortOrders(prev))
+    setMainOrders(prev => updateOrdersWithBatchedSortOrders(prev))
+    setAddOnOrders(prev => updateOrdersWithBatchedSortOrders(prev))
+    setStoreContainers(prev => 
+      prev.map(container => ({
+        ...container,
+        orders: updateOrdersWithBatchedSortOrders(container.orders)
+      }))
+    )
+
+    // Then do ONE final re-sort
+    const sortByOrder = (orders: any[]) => 
+      orders.slice().sort((a: any, b: any) => {
+        const aSortOrder = a.sortOrder || 9999
+        const bSortOrder = b.sortOrder || 9999
+        return aSortOrder - bSortOrder
+      })
+
+    setTimeout(() => {
+      setMainOrders(prev => sortByOrder(prev))
+      setAddOnOrders(prev => sortByOrder(prev))
+      setAllOrders(prev => sortByOrder(prev))
+      console.log(`[REALTIME-BATCH] Final re-sort completed for ${Object.keys(sortOrderUpdateBatch).length} orders`)
+    }, 50)
+
+    // Clear the batch
+    setSortOrderUpdateBatch({})
+  }, [sortOrderUpdateBatch])
+
   // Real-time updates hook - STABILIZED (moved here to access handleOrderStatusChange)
   const handleRealtimeUpdate = useCallback((update: any) => {
     console.log('🔄 Real-time update received:', update)
@@ -807,126 +857,40 @@ export const Orders: React.FC = () => {
         console.log(`[REALTIME] Pure status change detected: ${update.orderId} -> ${update.status}`)
         handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
       } else if (hasSortOrderChange) {
-        // sortOrder change (with or without status)
-        console.log(`[REALTIME] SortOrder change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
+        // BATCH SORTORDER UPDATES: Collect multiple updates and process together
+        console.log(`[REALTIME-BATCH] SortOrder update detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
         
-                 if (hasStatusChange) {
-           console.log(`[REALTIME] ⚠️  DRAG-DROP UPDATE: Has both status AND sortOrder - processing sortOrder path`)
-         }
-         
-         console.log(`[REALTIME-DEBUG] Full update data:`, update)
+        if (hasStatusChange) {
+          console.log(`[REALTIME-BATCH] ⚠️  DRAG-DROP UPDATE: Has both status AND sortOrder - adding to batch`)
+        }
         
-        // SNAPBACK FIX: Skip sort order updates from same user within 10 seconds to prevent optimistic update conflicts
+        // BATCH ANTI-LOOP: Skip own updates to prevent conflicts
+        const isDefinitelyOwnUpdate = isOwnUpdate && update.updatedBy !== 'unknown' && update.updatedBy
         const timeSinceUpdate = update.updatedAt ? Date.now() - new Date(update.updatedAt).getTime() : 0
         const isRecentSortOrderUpdate = timeSinceUpdate < 10000 // 10 seconds
         
-        // TIMESTAMP DEBUG: Check if timing calculation is working
-        console.log(`[TIMESTAMP-DEBUG]`, {
-          updateUpdatedAt: update.updatedAt,
-          currentTime: new Date().toISOString(),
-          timeSinceUpdate: timeSinceUpdate,
-          isRecent: isRecentSortOrderUpdate
-        })
-        
-        // FIXED ANTI-SNAPBACK: Only skip if we can definitively identify same user
-        // For cross-device sync, we MUST process 'unknown' updates (could be other users)
-        const isDefinitelyOwnUpdate = isOwnUpdate && update.updatedBy !== 'unknown' && update.updatedBy
-        
-        // SNAPBACK DEBUG: Check if protection is working
-        console.log(`[CROSS-DEVICE-SYNC] Sort order update analysis:`, {
-          orderId: update.orderId,
-          sortOrder: update.sortOrder,
-          updatedBy: update.updatedBy,
-          currentUser: user?.id,
-          timeSinceUpdate: Math.round(timeSinceUpdate/1000),
-          isDefinitelyOwnUpdate,
-          willSkip: isDefinitelyOwnUpdate && isRecentSortOrderUpdate,
-          crossDeviceSync: update.updatedBy === 'unknown' ? 'WILL_PROCESS' : 'IDENTIFIED_USER'
-        })
-        
-        // Only skip if we can DEFINITELY identify this as our own recent update
         if (isDefinitelyOwnUpdate && isRecentSortOrderUpdate) {
-          console.log(`[REALTIME-SNAPBACK-FIX] ✅ SKIPPING definitely own recent update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
+          console.log(`[REALTIME-BATCH] ✅ SKIPPING definitely own recent update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
           return
         }
         
-        // CROSS-DEVICE-SYNC: Process all 'unknown' and other-user updates for real-time sync
-        console.log(`[CROSS-DEVICE-SYNC] ✅ PROCESSING sort order update for cross-device sync: ${update.orderId} - updatedBy: ${update.updatedBy || 'unknown'}`)
+        console.log(`[REALTIME-BATCH] ✅ ADDING to batch: ${update.orderId} (updatedBy: ${update.updatedBy || 'unknown'})`)
         
-        console.log(`[SNAPBACK-DEBUG] ❌ NOT SKIPPED - Processing sort order update:`, update.orderId)
+        // Add to batch
+        setSortOrderUpdateBatch(prev => ({
+          ...prev,
+          [update.orderId]: update.sortOrder
+        }))
         
-        console.log(`[REALTIME-ENHANCED] Processing cross-device sort order update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
+        // Clear existing timeout and set new one (debounce)
+        if (sortOrderBatchTimeoutRef.current) {
+          clearTimeout(sortOrderBatchTimeoutRef.current)
+        }
         
-        // Apply individual update with sort order and then re-sort all containers
-        console.log(`[BEFORE-UPDATE] About to update ${update.orderId} with sortOrder: ${update.sortOrder}`)
-        updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
-        console.log(`[AFTER-UPDATE] Updated ${update.orderId}, checking if sortOrder was applied...`)
-        
-        // DEBUG: Check if the order actually has the new sortOrder
-        setTimeout(() => {
-          const checkOrder = (orders: any[], label: string) => {
-            const order = orders.find(o => (o.cardId || o.id) === update.orderId)
-            if (order) {
-              console.log(`[SORTORDER-CHECK] ${label} - Order ${update.orderId}: sortOrder = ${order.sortOrder} (expected: ${update.sortOrder})`)
-            }
-          }
-          
-          // Check all order arrays
-          checkOrder(allOrders, 'AllOrders')
-          checkOrder(mainOrders, 'MainOrders') 
-          checkOrder(addOnOrders, 'AddOnOrders')
-          
-          // Check store containers
-          storeContainers.forEach(container => {
-            checkOrder(container.orders, `Container-${container.storeName}`)
-          })
-        }, 25)
-        
-        // Force re-sort all containers to reflect new order sequence
-        console.log(`[REALTIME-RESORT] Starting re-sort process for sortOrder change`)
-        setTimeout(() => {
-          // Re-sort store containers by sortOrder
-          setStoreContainers(prev => {
-            const newContainers = prev.map(container => ({
-              ...container,
-              orders: container.orders.slice().sort((a: any, b: any) => {
-                const aSortOrder = a.sortOrder || 9999
-                const bSortOrder = b.sortOrder || 9999
-                console.log(`[REALTIME-RESORT] Comparing ${a.cardId || a.id}: ${aSortOrder} vs ${b.cardId || b.id}: ${bSortOrder}`)
-                return aSortOrder - bSortOrder
-              })
-            }))
-            console.log(`[REALTIME-RESORT] Store containers re-sorted`)
-            return newContainers
-          })
-          
-          // Re-sort main arrays by sortOrder
-          const sortByOrder = (orders: any[]) => 
-            orders.slice().sort((a: any, b: any) => {
-              const aSortOrder = a.sortOrder || 9999
-              const bSortOrder = b.sortOrder || 9999
-              console.log(`[REALTIME-RESORT] Main array: ${a.cardId || a.id}: ${aSortOrder} vs ${b.cardId || b.id}: ${bSortOrder}`)
-              return aSortOrder - bSortOrder
-            })
-          
-          setMainOrders(prev => {
-            const sorted = sortByOrder(prev)
-            console.log(`[REALTIME-RESORT] Main orders re-sorted`)
-            return sorted
-          })
-          setAddOnOrders(prev => {
-            const sorted = sortByOrder(prev)
-            console.log(`[REALTIME-RESORT] Add-on orders re-sorted`)
-            return sorted
-          })
-          setAllOrders(prev => {
-            const sorted = sortByOrder(prev)
-            console.log(`[REALTIME-RESORT] All orders re-sorted`)
-            return sorted
-          })
-          
-          console.log(`[REALTIME-ENHANCED] Re-sorted all containers for sortOrder change: ${update.orderId}`)
-        }, isDragOperation ? 150 : 50) // Longer delay for drag operations to prevent conflicts
+        sortOrderBatchTimeoutRef.current = setTimeout(() => {
+          console.log(`[REALTIME-BATCH] Timeout triggered - processing batch`)
+          processBatchedSortOrderUpdates()
+        }, 200) // Wait 200ms for more updates to batch together
         
       } else {
         // Neither status nor sortOrder change - handle other field updates
