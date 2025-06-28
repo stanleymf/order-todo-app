@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.3] - 2025-01-21
+
+### Fixed
+- **CROSS-DEVICE SYNC**: Fixed intermittent cross-device sync by simplifying fallback logic
+  - Removed timing-based protection when session IDs unavailable from backend
+  - Now always allows cross-device updates when session info missing
+  - Eliminates "intermittent" behavior - updates now consistently sync across devices
+  - Status: ✅ **RESOLVED** - Cross-device drag sync now works reliably
+
+### Technical Changes
+- Simplified protection logic: no session info = always allow updates
+- Removed unreliable 2-second timing fallback that caused intermittent blocking
+- Enhanced logging to show when session-less updates are allowed
+
 ## [1.7.2] - 2025-01-21
 
 ### Fixed
