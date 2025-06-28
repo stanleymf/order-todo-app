@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.5] - 2025-01-21
+
+### 🔧 **CRITICAL FIX: Post-Save Interference Prevention**
+- **Issue**: After first successful save, subsequent reorder attempts experienced snapback behavior
+- **Root Cause**: Admin was triggering cross-device sync on their own save events, creating interference loops
+- **Solution**: Prevent admins from triggering cross-device sync on their own saves + timing improvements
+
+#### **Post-Save Interference Fixes**
+- **Self-Save Filtering**: Admins no longer trigger cross-device sync on their own save events
+- **Race Condition Prevention**: Added 500ms delay to database refresh after saves
+- **Reduced Protection Window**: Lowered from 3s to 1s since main interference source is eliminated  
+- **Enhanced Protection Logic**: Protection now allows database refreshes while blocking stale real-time updates
+
+**Result**: Subsequent reorder operations work consistently without interference after the first save
+
 ## [1.9.4] - 2025-01-21
 
 ### 🔧 **CRITICAL FIX: Real-Time Snapback Protection**
