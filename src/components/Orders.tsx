@@ -799,8 +799,23 @@ export const Orders: React.FC = () => {
         handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
       } else if (update.sortOrder !== undefined) {
         // CRITICAL FIX: Handle sort order changes from drag reordering
-        console.log(`[REALTIME] Sort order change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}`)
+        console.log(`[REALTIME-ENHANCED] Sort order change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}`)
         console.log(`[REALTIME-DEBUG] Full update data:`, update)
+        
+        // SNAPBACK FIX: Skip sort order updates from same user within 10 seconds to prevent optimistic update conflicts
+        const timeSinceUpdate = update.updatedAt ? Date.now() - new Date(update.updatedAt).getTime() : 0
+        const isRecentSortOrderUpdate = timeSinceUpdate < 10000 // 10 seconds
+        
+        // CRITICAL FIX: For sort order updates, also skip if updatedBy is 'unknown' (from reorder operations)
+        // This happens because reorder endpoint doesn't set assigned_by, so SSE sends updatedBy: 'unknown'
+        const isLikelyOwnReorderUpdate = (update.updatedBy === 'unknown' || !update.updatedBy) && isRecentSortOrderUpdate
+        
+        if ((isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate) {
+          console.log(`[REALTIME-SNAPBACK-FIX] Skipping recent sort order update within 10s: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
+          return
+        }
+        
+        console.log(`[REALTIME-ENHANCED] Processing cross-device sort order update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
         
         // Apply individual update with sort order and then re-sort all containers
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')

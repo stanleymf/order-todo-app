@@ -2173,6 +2173,7 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
         WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
       `).bind(tenantId, orderId, deliveryDate).first()
       
+      // CRITICAL FIX: For reordering, don't set assigned_by to allow cross-device sync
       const result = await c.env.DB.prepare(`
         INSERT OR REPLACE INTO order_card_states 
         (tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
@@ -2183,25 +2184,26 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
         orderId, 
         existing?.status || 'unassigned',
         existing?.assigned_to || null,
-        currentUserId, // CRITICAL FIX: Set assigned_by to current user for anti-loop protection
+        existing?.assigned_by || null, // CRITICAL FIX: Keep existing assigned_by, don't overwrite with current user
         existing?.notes || null,
         sortOrder
       ).run()
 
-      console.log(`[REORDER] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder}), updated by: ${currentUserId}`)
+      console.log(`[REORDER-FIXED] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder}) - preserved existing assigned_by for cross-device sync`)
       return result
     })
 
     await Promise.all(updatePromises)
 
-    console.log(`[REORDER] Successfully updated order sequence for tenant ${tenantId} on ${deliveryDate}`)
+    console.log(`[REORDER-FIXED] Successfully updated order sequence for tenant ${tenantId} on ${deliveryDate} - ready for cross-device sync`)
     
     return c.json({ 
       success: true, 
       message: `Updated order sequence for ${orderIds.length} orders`,
       orderIds: orderIds,
       deliveryDate: deliveryDate,
-      updatedBy: currentUserId // Include in response for debugging
+      reorderOperator: currentUserId, // Renamed to avoid confusion with assigned_by
+      crossDeviceSync: true // Flag indicating this should sync across devices
     })
 
   } catch (error) {
