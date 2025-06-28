@@ -87,7 +87,7 @@ export const Orders: React.FC = () => {
                 status: updateData.status || order.status,
                 assignedTo: updateData.assignedTo || order.assignedTo,
                 notes: updateData.notes !== undefined ? updateData.notes : order.notes,
-                sortOrder: updateData.sortOrder || order.sortOrder
+                sortOrder: updateData.sortOrder !== undefined ? updateData.sortOrder : order.sortOrder // FIX: Handle sortOrder 0
               }
             : order
         )
@@ -798,17 +798,23 @@ export const Orders: React.FC = () => {
         sortOrder: update.sortOrder
       }
       
-      // CRITICAL FIX: Use handleOrderStatusChange instead of updateIndividualOrder
-      // This ensures that completed orders move to bottom for all users in real-time
-      if (update.status && ['unassigned', 'assigned', 'completed'].includes(update.status)) {
-        console.log(`[REALTIME] Status change detected: ${update.orderId} -> ${update.status}`)
-        
-        // Apply status change with proper sorting (title will be found in handleOrderStatusChange)
+      // FIXED: Process both status AND sortOrder (drag-drop updates have both!)
+      const hasStatusChange = update.status && ['unassigned', 'assigned', 'completed'].includes(update.status)
+      const hasSortOrderChange = update.sortOrder !== undefined
+      
+      if (hasStatusChange && !hasSortOrderChange) {
+        // Pure status change (no sortOrder)
+        console.log(`[REALTIME] Pure status change detected: ${update.orderId} -> ${update.status}`)
         handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
-      } else if (update.sortOrder !== undefined) {
-        // CRITICAL FIX: Handle sort order changes from drag reordering
-        console.log(`[REALTIME-ENHANCED] Sort order change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}`)
-        console.log(`[REALTIME-DEBUG] Full update data:`, update)
+      } else if (hasSortOrderChange) {
+        // sortOrder change (with or without status)
+        console.log(`[REALTIME] SortOrder change detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
+        
+                 if (hasStatusChange) {
+           console.log(`[REALTIME] ⚠️  DRAG-DROP UPDATE: Has both status AND sortOrder - processing sortOrder path`)
+         }
+         
+         console.log(`[REALTIME-DEBUG] Full update data:`, update)
         
         // SNAPBACK FIX: Skip sort order updates from same user within 10 seconds to prevent optimistic update conflicts
         const timeSinceUpdate = update.updatedAt ? Date.now() - new Date(update.updatedAt).getTime() : 0
@@ -852,7 +858,29 @@ export const Orders: React.FC = () => {
         console.log(`[REALTIME-ENHANCED] Processing cross-device sort order update: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago)`)
         
         // Apply individual update with sort order and then re-sort all containers
+        console.log(`[BEFORE-UPDATE] About to update ${update.orderId} with sortOrder: ${update.sortOrder}`)
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
+        console.log(`[AFTER-UPDATE] Updated ${update.orderId}, checking if sortOrder was applied...`)
+        
+        // DEBUG: Check if the order actually has the new sortOrder
+        setTimeout(() => {
+          const checkOrder = (orders: any[], label: string) => {
+            const order = orders.find(o => (o.cardId || o.id) === update.orderId)
+            if (order) {
+              console.log(`[SORTORDER-CHECK] ${label} - Order ${update.orderId}: sortOrder = ${order.sortOrder} (expected: ${update.sortOrder})`)
+            }
+          }
+          
+          // Check all order arrays
+          checkOrder(allOrders, 'AllOrders')
+          checkOrder(mainOrders, 'MainOrders') 
+          checkOrder(addOnOrders, 'AddOnOrders')
+          
+          // Check store containers
+          storeContainers.forEach(container => {
+            checkOrder(container.orders, `Container-${container.storeName}`)
+          })
+        }, 25)
         
         // Force re-sort all containers to reflect new order sequence
         console.log(`[REALTIME-RESORT] Starting re-sort process for sortOrder change`)
@@ -901,7 +929,8 @@ export const Orders: React.FC = () => {
         }, isDragOperation ? 150 : 50) // Longer delay for drag operations to prevent conflicts
         
       } else {
-        // For other non-status updates, use the individual update method
+        // Neither status nor sortOrder change - handle other field updates
+        console.log(`[REALTIME] Other field update: ${update.orderId}`, updateData)
         updateIndividualOrder(update.orderId, updateData, update.updatedBy || 'remote user')
       }
     } else if (update.type === 'order_created') {

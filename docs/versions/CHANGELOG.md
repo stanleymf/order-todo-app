@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.3] - 2025-01-21
+### 🚨 **CRITICAL FIX: Real-Time Cross-Device Drag-Drop Sync**
+- **Fixed:** Real-time updates with both `status` and `sortOrder` were only processing status changes and completely ignoring sortOrder due to if/else logic
+- **Root Cause:** Drag-drop operations send updates with both fields, but real-time handler processed only the first condition (status) and skipped sortOrder entirely
+- **Solution:** Changed logic to detect and handle both status AND sortOrder updates, enabling drag-drop changes to sync across devices
+- **Impact:** Cross-device drag-drop reordering now works correctly - orders maintain their new positions across all connected devices
+
+## [1.6.2] - 2025-01-21
+### Fixed
+- Fixed critical bug in `updateIndividualOrder` where `sortOrder: 0` was being treated as falsy, causing drag-drop to first position to retain old sortOrder values instead of updating to 0
+- Changed `sortOrder: updateData.sortOrder || order.sortOrder` to `sortOrder: updateData.sortOrder !== undefined ? updateData.sortOrder : order.sortOrder` to properly handle zero values
+
+## [1.6.1] - 2025-01-21
+### Fixed
+- Modified anti-snapback logic to only skip definitively identified own updates, fixing cross-device sync for drag-drop operations
+- Changed from blocking all 'unknown' updates to only blocking confirmed own updates with proper user attribution
+
+## [1.6.0] - 2025-01-21
+### Added
+- Complete drag-and-drop cross-device sync system using individual order-card-states API calls
+- Replaced bulk reorder endpoint with proven status button infrastructure for better reliability
+
+### Fixed
+- Database schema fix: Added missing `sortOrder` parameter handling in order-card-states PUT endpoint
+- Fixed drag-drop operations not persisting to database due to missing SQL column mapping
+- Enhanced real-time anti-snapback protection to preserve cross-device synchronization
+
+## [1.5.99] - 2025-01-21
+### Fixed
+- Fixed drag-drop reordering by replacing `reorderOrders()` calls with individual `saveCardState()` calls
+- Each order now updates via the same proven endpoint as status button changes
+- Removed unused `reorderOrders` import from Orders component
+
+## [1.5.98] - 2025-01-21
+### Fixed
+- Removed all anti-snapback mechanisms that were interfering with cross-device drag-drop sync
+- Simplified real-time processing to ensure consistent cross-device updates
+
+## [1.5.97] - 2025-01-21
+### Added
+- Advanced anti-snapback protection for drag-drop operations
+- Detection of recent sort order updates to prevent own-device reordering conflicts
+- Enhanced real-time processing with operation type detection
+
+## [1.5.96] - 2025-01-21
+### Added
+- Basic anti-snapback mechanism for drag-drop operations
+- Protection against processing own reorder updates in real-time system
+
+## [1.5.95] - 2025-01-21  
+### Fixed
+- Implemented proper drag-drop cross-device sync using individual order-card-state API calls
+- Replaced bulk reorder API with proven status button infrastructure
+- Enhanced real-time detection for sort order changes
+
 ## [1.5.92] - 2025-12-23
 ### 🚨 **CRITICAL FIX: Drag and Drop Reordering System**
 - **Fixed:** State consistency issue where `handleDragEnd` used filtered containers but updated original state
