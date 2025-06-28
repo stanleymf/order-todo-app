@@ -134,7 +134,17 @@ export const Orders: React.FC = () => {
     // Track when real-time is being re-enabled to prevent snapback
     if (!wasEnabled) {
       recentToggleRef.current = Date.now()
-      console.log('[TOGGLE-PROTECTION] Real-time re-enabled, protecting against snapback for 5 seconds')
+      console.log('[TOGGLE-PROTECTION] Real-time re-enabled, protecting against snapback for 15 seconds and batch updates for 30 seconds')
+      
+      // Auto-reset protection after 35 seconds to allow normal updates
+      setTimeout(() => {
+        recentToggleRef.current = 0
+        console.log('[TOGGLE-PROTECTION] Protection period ended, normal real-time updates resumed')
+      }, 35000)
+    } else {
+      // Clear protection when disabling real-time
+      recentToggleRef.current = 0
+      console.log('[TOGGLE-PROTECTION] Real-time disabled, protection cleared')
     }
     
     toast.info(realtimeEnabled ? 'Real-time updates disabled' : 'Real-time updates enabled')
@@ -761,9 +771,17 @@ export const Orders: React.FC = () => {
     
     // TOGGLE-PROTECTION: Skip updates immediately after re-enabling real-time to prevent snapback
     const timeSinceToggle = Date.now() - recentToggleRef.current;
-    if (recentToggleRef.current > 0 && timeSinceToggle < 5000) { // 5 seconds protection
-      console.log('[TOGGLE-PROTECTION] Skipping update due to recent real-time re-enable to prevent snapback:', update.orderId);
+    if (recentToggleRef.current > 0 && timeSinceToggle < 15000) { // Extended to 15 seconds protection
+      console.log(`[TOGGLE-PROTECTION] Skipping update due to recent real-time re-enable (${Math.round(timeSinceToggle/1000)}s ago) - preventing snapback:`, update.orderId);
       return;
+    }
+    
+    // RECONNECTION-PROTECTION: Skip large batches and unknown updates immediately after toggle
+    if (recentToggleRef.current > 0 && timeSinceToggle < 30000) { // 30 seconds for batches
+      if (update.updatedBy === 'unknown' || !update.updatedBy) {
+        console.log(`[RECONNECTION-PROTECTION] Skipping unknown/batch update (${Math.round(timeSinceToggle/1000)}s after toggle):`, update.orderId);
+        return;
+      }
     }
     
     // DEBUG: Log user identification details
