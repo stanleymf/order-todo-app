@@ -67,6 +67,14 @@ export const Orders: React.FC = () => {
   const [pendingReorderChanges, setPendingReorderChanges] = useState<Record<string, number>>({})
   const [isSavingReorder, setIsSavingReorder] = useState(false)
   
+  // NEW: Smart auto-refresh for cross-device sync (since backend doesn't broadcast sortOrder)
+  const [lastSaveTimestamp, setLastSaveTimestamp] = useState<number>(() => {
+    // Initialize with stored timestamp if available
+    const stored = localStorage.getItem('lastReorderSave')
+    return stored ? parseInt(stored) : 0
+  })
+  const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  
   // Google Sheets-style real-time updates with individual order updates
   const [lastRefreshTime, setLastRefreshTime] = useState<number>(0)
   const [realtimeEnabled, setRealtimeEnabled] = useState(true) // Default enabled like Google Sheets
@@ -338,8 +346,8 @@ export const Orders: React.FC = () => {
         setStoreContainers(response.storeContainers || [])
       }
       
-      console.log(`Refreshed ${(response.orders || response).length} orders for ${dateStr}`)
-      toast.success("Orders refreshed from database")
+      console.log(`[CROSS-DEVICE-SYNC] ✅ Refreshed ${(response.orders || response).length} orders for ${dateStr}`)
+      toast.success("Orders refreshed from database", { duration: 1500 })
     } catch (error) {
       console.error("Failed to refresh orders:", error)
       toast.error("Failed to refresh orders")
@@ -354,6 +362,78 @@ export const Orders: React.FC = () => {
       handleRefreshFromDatabase()
     }
   }, [handleRefreshFromDatabase, tenant?.id, selectedDate])
+
+  // ENHANCED: Cross-device sync with real-time + localStorage fallback
+  useEffect(() => {
+    if (!tenant?.id || !selectedDate) {
+      return
+    }
+
+    console.log(`[CROSS-DEVICE-SYNC] Starting enhanced cross-device sync (admin: ${isAdmin})`)
+    
+    const checkForReorderChanges = () => {
+      // Check localStorage for admin save events (works for same-browser multi-tab scenarios)
+      const storedTimestamp = localStorage.getItem('lastReorderSave')
+      if (storedTimestamp) {
+        const timestamp = parseInt(storedTimestamp)
+        const isRecentChange = timestamp > Date.now() - 30000 // 30 seconds
+        const isNewChange = timestamp > lastSaveTimestamp
+        
+        if (isNewChange && isRecentChange) {
+          console.log(`[CROSS-DEVICE-SYNC] 🔄 Detected reorder changes (timestamp: ${timestamp}), refreshing...`)
+          setLastSaveTimestamp(timestamp)
+          handleRefreshFromDatabase()
+          
+          if (!isAdmin) {
+            toast.info("Order sequence updated by admin", { duration: 2000 })
+          }
+        }
+      }
+    }
+
+    // Initial check
+    checkForReorderChanges()
+    
+    // Listen for immediate cross-tab reorder events (same browser)
+    const handleReorderEvent = (event: CustomEvent) => {
+      const { timestamp, adminId, adminName } = event.detail
+      if (timestamp > lastSaveTimestamp) {
+        console.log(`[CROSS-DEVICE-SYNC] 🚀 Immediate cross-tab reorder detected from ${adminName}`)
+        setLastSaveTimestamp(timestamp)
+        handleRefreshFromDatabase()
+        
+        if (!isAdmin) {
+          toast.info(`Order sequence updated by ${adminName}`, { duration: 2000 })
+        }
+      }
+    }
+    
+    window.addEventListener('reorderSaved', handleReorderEvent as EventListener)
+    
+    // For non-admin devices: poll more frequently for admin changes
+    // For admin devices: still poll but less frequently to detect changes from other admin sessions
+    const pollInterval = isAdmin ? 5000 : 2000 // Admin: 5s, Non-admin: 2s
+    
+    autoRefreshIntervalRef.current = setInterval(checkForReorderChanges, pollInterval)
+
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current)
+        autoRefreshIntervalRef.current = null
+      }
+      window.removeEventListener('reorderSaved', handleReorderEvent as EventListener)
+    }
+  }, [tenant?.id, selectedDate, isAdmin, lastSaveTimestamp, handleRefreshFromDatabase])
+
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current)
+        autoRefreshIntervalRef.current = null
+      }
+    }
+  }, [])
 
   // Back to Top scroll listener
   useEffect(() => {
@@ -992,9 +1072,15 @@ export const Orders: React.FC = () => {
           return
         }
         
-        // Use the same direct state update pattern as status buttons
-        console.log(`[REALTIME-DIRECT] ✅ APPLYING sortOrder directly: ${update.orderId} -> ${update.sortOrder}`)
+        // DATABASE-FIRST: Apply sortOrder changes from D1 database via real-time
+        console.log(`[REALTIME-DATABASE] ✅ Applying sortOrder from D1 database: ${update.orderId} -> ${update.sortOrder}`)
         handleOrderReorderChange(update.orderId, update.sortOrder, true)
+        
+        // Enhanced: Show cross-device reorder notification from database
+        if (!isDefinitelyOwnUpdate) {
+          const updateSource = update.updatedBy && update.updatedBy !== 'unknown' ? update.updatedBy : 'another admin'
+          console.log(`[REALTIME-DATABASE] 🔄 Cross-device sortOrder update from D1 database by: ${updateSource}`)
+        }
         
       } else {
         // Neither status nor sortOrder change - handle other field updates
@@ -1296,7 +1382,7 @@ export const Orders: React.FC = () => {
     }
   }
 
-  // NEW: Save all pending reorder changes
+  // DATABASE-FIRST: Save all pending reorder changes with state recovery
   const handleSaveReorder = async () => {
     if (!tenant?.id || Object.keys(pendingReorderChanges).length === 0) {
       return
@@ -1309,9 +1395,12 @@ export const Orders: React.FC = () => {
 
     setIsSavingReorder(true)
     const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+    
+    // CRITICAL: Store original state for rollback on failure
+    const originalPendingChanges = { ...pendingReorderChanges }
 
     try {
-      console.log(`[SAVE-REORDER] Saving ${Object.keys(pendingReorderChanges).length} pending changes`)
+      console.log(`[SAVE-REORDER] Saving ${Object.keys(pendingReorderChanges).length} pending changes to D1 database`)
       
       // Create bulk update API call for guaranteed real-time broadcast
       const response = await fetch(`/api/tenants/${tenant.id}/bulk-reorder`, {
@@ -1331,12 +1420,28 @@ export const Orders: React.FC = () => {
 
       if (response.ok) {
         const result = await response.json()
-        console.log(`[SAVE-REORDER] ✅ Bulk reorder saved successfully:`, result)
+        console.log(`[SAVE-REORDER] ✅ Bulk reorder saved to D1 database:`, result)
         
-        // Clear pending changes
+        // DATABASE-FIRST: Refresh from database to ensure consistency
+        await handleRefreshFromDatabase()
+        
+        // ENHANCED: Broadcast save timestamp for cross-device sync
+        const saveTimestamp = Date.now()
+        setLastSaveTimestamp(saveTimestamp)
+        
+        // Store in localStorage for cross-device detection (same-browser tabs)
+        localStorage.setItem('lastReorderSave', saveTimestamp.toString())
+        console.log(`[CROSS-DEVICE-SYNC] ✅ Broadcasting save timestamp: ${saveTimestamp}`)
+        
+        // Also dispatch a custom event for immediate same-browser detection
+        window.dispatchEvent(new CustomEvent('reorderSaved', { 
+          detail: { timestamp: saveTimestamp, adminId: user?.id, adminName: user?.name || user?.email }
+        }))
+        
+        // Clear pending changes ONLY after successful database save and refresh
         setPendingReorderChanges({})
         
-        toast.success(`Reorder changes saved and synced to all devices`, {
+        toast.success(`Reorder changes saved to database and synced to all devices`, {
           duration: 3000
         })
       } else {
@@ -1376,29 +1481,60 @@ export const Orders: React.FC = () => {
         await Promise.all(updatePromises)
         console.log(`[SAVE-REORDER] ✅ Individual API calls completed`)
         
+        // DATABASE-FIRST: Refresh from database after individual saves
+        await handleRefreshFromDatabase()
+        
+        // ENHANCED: Broadcast save timestamp for cross-device sync
+        const saveTimestamp = Date.now()
+        setLastSaveTimestamp(saveTimestamp)
+        
+        // Store in localStorage for cross-device detection (same-browser tabs)
+        localStorage.setItem('lastReorderSave', saveTimestamp.toString())
+        console.log(`[CROSS-DEVICE-SYNC] ✅ Broadcasting save timestamp: ${saveTimestamp}`)
+        
+        // Also dispatch a custom event for immediate same-browser detection
+        window.dispatchEvent(new CustomEvent('reorderSaved', { 
+          detail: { timestamp: saveTimestamp, adminId: user?.id, adminName: user?.name || user?.email }
+        }))
+        
         setPendingReorderChanges({})
-        toast.success(`Reorder changes saved`, {
+        toast.success(`Reorder changes saved to database and syncing to other devices`, {
           duration: 3000
         })
       }
     } catch (error) {
-      console.error('[SAVE-REORDER] Failed to save reorder changes:', error)
-      toast.error("Failed to save reorder changes: " + (error as Error).message)
+      console.error('[SAVE-REORDER] Failed to save reorder changes to database:', error)
+      
+      // DATABASE-FIRST: Restore original state from database on failure
+      console.log('[SAVE-REORDER] Restoring state from database due to save failure...')
+      await handleRefreshFromDatabase()
+      
+      // Restore pending changes so user can retry
+      setPendingReorderChanges(originalPendingChanges)
+      
+      toast.error("Failed to save reorder changes to database. State restored. Please try again.", {
+        duration: 5000
+      })
     } finally {
       setIsSavingReorder(false)
     }
   }
 
-  // NEW: Clear pending changes
-  const handleCancelReorder = () => {
+  // DATABASE-FIRST: Clear pending changes and restore from database
+  const handleCancelReorder = async () => {
     if (Object.keys(pendingReorderChanges).length === 0) {
       return
     }
 
-    // Reload data to restore original order
-    handleRefreshFromDatabase()
+    console.log('[CANCEL-REORDER] Restoring state from D1 database...')
+    
+    // DATABASE-FIRST: Always refresh from database to ensure consistency
+    await handleRefreshFromDatabase()
     setPendingReorderChanges({})
-    toast.info("Pending reorder changes cancelled")
+    
+    toast.info("Pending reorder changes cancelled. Order restored from database.", {
+      duration: 3000
+    })
   }
 
   // NEW: Check if reordering is enabled (admin only, no filters)

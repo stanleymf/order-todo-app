@@ -116,7 +116,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         if (hasChanges) {
           console.log(`[SSE-REALTIME] 📨 Found ${cardStateChanges?.length || 0} card state changes and ${orderChanges?.length || 0} order changes`)
           
-          const changeEvents = []
+          const changeEvents: any[] = []
 
           // Process card state changes (these are the main status updates)
           if (cardStateChanges && cardStateChanges.length > 0) {
@@ -125,7 +125,8 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
               if (!knownUpdates.has(changeKey)) {
                 knownUpdates.set(changeKey, change.updated_at)
                 
-                                 changeEvents.push({
+                // Enhanced real-time event with better sortOrder handling
+                const updateEvent = {
                    type: "order_updated",
                    orderId: String(change.card_id),
                    tenantId: tenantId,
@@ -136,8 +137,18 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    deliveryDate: String(change.delivery_date),
                    sortOrder: change.sort_order !== null && change.sort_order !== undefined ? Number(change.sort_order) : undefined,
                    notes: change.notes ? String(change.notes) : '',
-                   timestamp: new Date().toISOString()
-                 })
+                   timestamp: new Date().toISOString(),
+                   // Add flags to help identify reorder operations
+                   _isSortOrderUpdate: change.sort_order !== null && change.sort_order !== undefined,
+                   _dragOperation: true // Mark as potential drag operation for better handling
+                 }
+                
+                changeEvents.push(updateEvent)
+                
+                // Enhanced logging for sortOrder updates
+                if (updateEvent._isSortOrderUpdate) {
+                  console.log(`[SSE-REALTIME] 🎯 sortOrder update detected: ${change.card_id} -> ${change.sort_order}`)
+                }
               }
             }
           }
@@ -149,7 +160,8 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
               if (!knownUpdates.has(changeKey)) {
                 knownUpdates.set(changeKey, change.updated_at)
                 
-                                 changeEvents.push({
+                // Enhanced real-time event for main order changes
+                const mainOrderEvent = {
                    type: "order_updated", 
                    orderId: String(change.id),
                    tenantId: tenantId,
@@ -160,8 +172,12 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    deliveryDate: String(change.delivery_date),
                    sortOrder: change.sort_order !== null && change.sort_order !== undefined ? Number(change.sort_order) : undefined,
                    notes: change.notes ? String(change.notes) : '',
-                   timestamp: new Date().toISOString()
-                 })
+                   timestamp: new Date().toISOString(),
+                   _isSortOrderUpdate: change.sort_order !== null && change.sort_order !== undefined,
+                   _dragOperation: true
+                 }
+                
+                changeEvents.push(mainOrderEvent)
               }
             }
           }
@@ -1678,6 +1694,84 @@ app.post("/api/tenants/:tenantId/order-card-states/bulk", async (c) => {
   } catch (error: any) {
     console.error("Error bulk updating order card states:", error)
     return c.json({ error: "Failed to bulk update order card states", details: error.message }, 500)
+  }
+})
+
+// NEW: Bulk reorder endpoint with guaranteed real-time broadcasting
+app.post("/api/tenants/:tenantId/bulk-reorder", async (c) => {
+  const tenantId = c.req.param("tenantId")
+  const { changes, deliveryDate, adminId, adminName, timestamp } = await c.req.json()
+
+  if (!changes || !deliveryDate) {
+    return c.json({ error: "Changes object and deliveryDate are required" }, 400)
+  }
+
+  try {
+    const jwtPayload = c.get('jwtPayload')
+    const currentUserId = jwtPayload?.sub || adminId || 'unknown'
+    const currentUserName = jwtPayload?.name || jwtPayload?.email || adminName || 'Unknown Admin'
+    
+    console.log(`[BULK-REORDER] Processing ${Object.keys(changes).length} reorder changes for tenant ${tenantId}`)
+    console.log(`[BULK-REORDER] Admin: ${currentUserName} (${currentUserId})`)
+    
+    // Create unique timestamp for this batch
+    const batchTimestamp = new Date().toISOString().slice(0, 23).replace('T', ' ')
+    
+    // Prepare batch updates with enhanced real-time tracking
+    const updatePromises = Object.entries(changes).map(async ([orderId, sortOrder]) => {
+      // Get existing state to preserve other fields
+      const existing = await c.env.DB.prepare(`
+        SELECT status, assigned_to, assigned_by, notes FROM order_card_states
+        WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
+      `).bind(tenantId, orderId, deliveryDate).first()
+      
+      // Update with sortOrder and preserve existing fields
+      const result = await c.env.DB.prepare(`
+        INSERT OR REPLACE INTO order_card_states 
+        (tenant_id, card_id, delivery_date, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        tenantId,
+        orderId,
+        deliveryDate,
+        existing?.status || 'unassigned',
+        existing?.assigned_to || null,
+        existing?.assigned_by || currentUserId, // Track who made the reorder
+        existing?.notes || null,
+        sortOrder,
+        batchTimestamp
+      ).run()
+
+      console.log(`[BULK-REORDER] Updated ${orderId} -> sortOrder: ${sortOrder}`)
+      return { orderId, sortOrder, success: result.success }
+    })
+
+    const results = await Promise.all(updatePromises)
+    const successCount = results.filter(r => r.success).length
+
+    console.log(`[BULK-REORDER] Completed: ${successCount}/${results.length} updates successful`)
+    
+    // Force broadcast to all connected clients for cross-device sync
+    // Note: This will be picked up by the SSE real-time system automatically
+    // since we've updated the order_card_states table with new timestamps
+    
+    return c.json({ 
+      success: true,
+      message: `Bulk reorder completed: ${successCount} orders updated`,
+      updated: successCount,
+      total: results.length,
+      batchTimestamp,
+      adminId: currentUserId,
+      adminName: currentUserName,
+      crossDeviceSync: true
+    })
+
+  } catch (error: any) {
+    console.error("[BULK-REORDER] Error processing bulk reorder:", error)
+    return c.json({ 
+      error: "Failed to process bulk reorder", 
+      details: error.message 
+    }, 500)
   }
 })
 
