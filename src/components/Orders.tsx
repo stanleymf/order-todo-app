@@ -398,8 +398,15 @@ export const Orders: React.FC = () => {
     // Listen for immediate cross-tab reorder events (same browser)
     const handleReorderEvent = (event: CustomEvent) => {
       const { timestamp, adminId, adminName } = event.detail
+      
+      // CRITICAL FIX: Don't trigger cross-device sync for own saves (prevents interference)
+      if (adminId === user?.id) {
+        console.log(`[CROSS-DEVICE-SYNC] 🚫 Ignoring own save event from ${adminName} to prevent interference`)
+        return
+      }
+      
       if (timestamp > lastSaveTimestamp) {
-        console.log(`[CROSS-DEVICE-SYNC] 🚀 Immediate cross-tab reorder detected from ${adminName}`)
+        console.log(`[CROSS-DEVICE-SYNC] 🚀 Cross-tab reorder detected from different admin: ${adminName}`)
         setLastSaveTimestamp(timestamp)
         handleRefreshFromDatabase()
         
@@ -1075,8 +1082,8 @@ export const Orders: React.FC = () => {
           return
         }
         
-        // Additional protection: Block stale updates immediately after save
-        if (recentlySaved) {
+        // Additional protection: Block stale updates immediately after save, but NOT for database refreshes
+        if (recentlySaved && !update.fromDatabaseRefresh) {
           console.log(`[REALTIME-PROTECTION] 🛡️ BLOCKING stale real-time update during post-save protection period for ${update.orderId}`)
           return
         }
@@ -1441,8 +1448,10 @@ export const Orders: React.FC = () => {
         const result = await response.json()
         console.log(`[SAVE-REORDER] ✅ Bulk reorder saved to D1 database:`, result)
         
-        // DATABASE-FIRST: Refresh from database to ensure consistency
-        await handleRefreshFromDatabase()
+        // DATABASE-FIRST: Small delay then refresh from database to ensure consistency  
+        setTimeout(async () => {
+          await handleRefreshFromDatabase()
+        }, 500) // 500ms delay to prevent race conditions
         
         // ENHANCED: Broadcast save timestamp for cross-device sync
         const saveTimestamp = Date.now()
@@ -1466,7 +1475,7 @@ export const Orders: React.FC = () => {
         setTimeout(() => {
           console.log('[SAVE-REORDER] 🔓 Deactivating post-save protection - allowing real-time updates')
           setRecentlySaved(false)
-        }, 3000) // 3 second protection window
+        }, 1000) // 1 second protection window (reduced since we fixed main interference)
         
         toast.success(`Reorder changes saved to database and synced to all devices`, {
           duration: 3000
@@ -1508,8 +1517,10 @@ export const Orders: React.FC = () => {
         await Promise.all(updatePromises)
         console.log(`[SAVE-REORDER] ✅ Individual API calls completed`)
         
-        // DATABASE-FIRST: Refresh from database after individual saves
-        await handleRefreshFromDatabase()
+        // DATABASE-FIRST: Small delay then refresh from database after individual saves
+        setTimeout(async () => {
+          await handleRefreshFromDatabase()
+        }, 500) // 500ms delay to prevent race conditions
         
         // ENHANCED: Broadcast save timestamp for cross-device sync
         const saveTimestamp = Date.now()
@@ -1532,7 +1543,7 @@ export const Orders: React.FC = () => {
         setTimeout(() => {
           console.log('[SAVE-REORDER] 🔓 Deactivating post-save protection after individual calls')
           setRecentlySaved(false)
-        }, 3000) // 3 second protection window
+        }, 1000) // 1 second protection window (reduced since we fixed main interference)
         
         toast.success(`Reorder changes saved to database and syncing to other devices`, {
           duration: 3000
