@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.4] - 2025-01-21
+
+### 🔧 **CRITICAL FIX: Real-Time Snapback Protection**
+- **Issue**: Orders would snap back to original position during drag operations due to race conditions between local changes and real-time updates
+- **Root Cause**: Real-time SSE updates were overriding pending local drag changes before they could be saved
+- **Solution**: Implemented multi-layered protection against real-time snapback
+
+#### **Anti-Snapback Mechanisms**
+- **Pending Change Protection**: Block real-time updates for orders with unsaved local changes
+- **Post-Save Protection Window**: 3-second protection period after successful saves to prevent stale updates
+- **Enhanced Anti-Loop Logic**: Improved detection of own updates vs. external updates
+- **Comprehensive Logging**: Detailed protection logs for debugging cross-device sync issues
+
+#### **Technical Implementation**
+- Added `recentlySaved` state tracking for post-save protection
+- Enhanced real-time handler with pending change detection
+- Protected both bulk-reorder and individual API call fallback paths
+- Maintained database-first consistency principles
+
+**Result**: Drag operations now maintain local changes until successfully saved to D1 database
+
 ## [1.9.3] - 2025-01-21
 
 ### 🔧 **CRITICAL FIX: Database-First State Management**
