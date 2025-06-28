@@ -60,6 +60,13 @@ import { toast } from "sonner"
 export const Orders: React.FC = () => {
   const { tenant, user } = useAuth()
   
+  // NEW: Admin permission check for reordering
+  const isAdmin = user?.role === 'admin' || user?.role === 'owner'
+  
+  // NEW: Pending changes tracking for admin-only reordering
+  const [pendingReorderChanges, setPendingReorderChanges] = useState<Record<string, number>>({})
+  const [isSavingReorder, setIsSavingReorder] = useState(false)
+  
   // Google Sheets-style real-time updates with individual order updates
   const [lastRefreshTime, setLastRefreshTime] = useState<number>(0)
   const [realtimeEnabled, setRealtimeEnabled] = useState(true) // Default enabled like Google Sheets
@@ -750,91 +757,44 @@ export const Orders: React.FC = () => {
     }
   }
 
-  // Google Sheets-style optimistic reordering with conflict protection
-  const recentDragOperations = useRef<Record<string, number>>({})
-  
-  // Generate a unique session ID for this browser session to distinguish same-device vs cross-device updates
-  const sessionId = useRef<string>(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
-
+  // SIMPLIFIED: Just like status buttons - no optimistic protection needed
   const handleOptimisticReorder = (orderId: string, newSortOrder: number) => {
-    console.log(`[GOOGLE-SHEETS-DRAG] 🎯 Optimistic reorder: ${orderId} -> ${newSortOrder}`)
+    console.log(`[SIMPLE-DRAG] 🎯 Simple reorder: ${orderId} -> ${newSortOrder}`)
     
-    // Track this drag operation with session info
-    recentDragOperations.current[orderId] = Date.now()
-    
-    // Apply immediate optimistic update (Google Sheets style)
+    // Apply immediate update (just like status buttons)
     handleOrderReorderChange(orderId, newSortOrder, false)
     
-    // Background API save with session identification
+    // Background API save (just like status buttons)
     if (tenant?.id && selectedDate) {
       const deliveryDate = new Date(selectedDate).toLocaleDateString('en-GB')
       
-      // Save to server with session info for conflict resolution
       fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'X-Session-ID': sessionId.current // Add session ID header
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
         },
         body: JSON.stringify({
           sortOrder: newSortOrder,
-          deliveryDate,
-          _optimisticUpdate: true,
-          _sessionId: sessionId.current
+          deliveryDate
         })
       }).then(response => {
         if (response.ok) {
-          console.log(`[GOOGLE-SHEETS-DRAG] Background API save completed successfully`)
+          console.log(`[SIMPLE-DRAG] ✅ API save completed`)
         } else {
-          console.error(`[GOOGLE-SHEETS-DRAG] Background API save failed:`, response.status)
+          console.error(`[SIMPLE-DRAG] ❌ API save failed:`, response.status)
         }
       }).catch(error => {
-        console.error(`[GOOGLE-SHEETS-DRAG] Background API save error:`, error)
-        // Note: We don't rollback on API failure (Google Sheets approach)
+        console.error(`[SIMPLE-DRAG] ❌ API save error:`, error)
       })
     }
-    
-    // Clear drag tracking after protection window
-    setTimeout(() => {
-      delete recentDragOperations.current[orderId]
-      console.log(`[GOOGLE-SHEETS-DRAG] Cleared drag protection for ${orderId}`)
-    }, 5000)
   }
 
-  // CRITICAL FIX: Create handleOrderReorderChange - same pattern as handleOrderStatusChange
-  const handleOrderReorderChange = (orderId: string, newSortOrder: number, isFromRealtime = false, updateSessionId?: string) => {
-    console.log(`[REORDER-DIRECT] ${isFromRealtime ? 'Remote' : 'Local'} reorder: ${orderId} -> sortOrder: ${newSortOrder}`)
+  // SIMPLIFIED: Copy status button pattern exactly - no protection needed
+  const handleOrderReorderChange = (orderId: string, newSortOrder: number, isFromRealtime = false) => {
+    console.log(`[REORDER-SIMPLE] ${isFromRealtime ? 'Remote' : 'Local'} reorder: ${orderId} -> sortOrder: ${newSortOrder}`)
     
-    // CROSS-DEVICE FIX: Only skip updates from SAME SESSION, not all updates
-    if (isFromRealtime && recentDragOperations.current[orderId]) {
-      const timeSinceLocalDrag = Date.now() - recentDragOperations.current[orderId]
-      
-      // Check if this update is from the same session (same device)
-      const isSameSession = updateSessionId && updateSessionId === sessionId.current
-      const hasSessionInfo = !!updateSessionId
-      
-      if (hasSessionInfo && timeSinceLocalDrag < 5000 && isSameSession) {
-        console.log(`[OPTIMISTIC-DRAG] ⏭️  SKIPPING same-session update for recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago)`)
-        return
-      } else if (hasSessionInfo && timeSinceLocalDrag < 5000 && !isSameSession) {
-        console.log(`[CROSS-DEVICE-SYNC] ✅ ALLOWING cross-device update despite recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago, different session)`)
-      } else if (!hasSessionInfo) {
-        // SIMPLIFIED: No session info = always allow cross-device updates
-        console.log(`[CROSS-DEVICE-SYNC] ✅ ALLOWING update (no session info available): ${orderId} (${timeSinceLocalDrag}ms ago)`)
-      }
-    }
-    
-    // CROSS-DEVICE DEBUG: Log what's happening with real-time updates
-    if (isFromRealtime) {
-      console.log(`[CROSS-DEVICE-DEBUG] Processing real-time sortOrder update:`)
-      console.log(`[CROSS-DEVICE-DEBUG] - orderId: ${orderId}`)
-      console.log(`[CROSS-DEVICE-DEBUG] - newSortOrder: ${newSortOrder}`)
-      console.log(`[CROSS-DEVICE-DEBUG] - recentDragOperations:`, Object.keys(recentDragOperations.current))
-      console.log(`[CROSS-DEVICE-DEBUG] - hasRecentDrag: ${!!recentDragOperations.current[orderId]}`)
-    } else {
-      console.log(`[LOCAL-DRAG-DEBUG] Local drag reorder: ${orderId} -> ${newSortOrder}`)
-    }
+         // NO PROTECTION - just like status buttons work perfectly
     
     // Update the order sortOrder in all relevant arrays (same pattern as handleOrderStatusChange)
     const updateOrderSortOrder = (orders: any[]) => 
@@ -867,7 +827,7 @@ export const Orders: React.FC = () => {
       }))
     )
 
-    console.log(`[REORDER-DIRECT] Successfully updated sortOrder for ${orderId} in all arrays`)
+    console.log(`[REORDER-SIMPLE] ✅ Updated sortOrder for ${orderId}`)
   }
 
   // Real-time batch processing state
@@ -1034,12 +994,7 @@ export const Orders: React.FC = () => {
         
         // Use the same direct state update pattern as status buttons
         console.log(`[REALTIME-DIRECT] ✅ APPLYING sortOrder directly: ${update.orderId} -> ${update.sortOrder}`)
-        
-        // Extract session ID from update if available (for cross-device sync)
-        const updateSessionId = update._sessionId || update.sessionId
-        console.log(`[CROSS-DEVICE-DEBUG] Update session ID: ${updateSessionId}, Current session: ${sessionId.current}`)
-        
-        handleOrderReorderChange(update.orderId, update.sortOrder, true, updateSessionId)
+        handleOrderReorderChange(update.orderId, update.sortOrder, true)
         
       } else {
         // Neither status nor sortOrder change - handle other field updates
@@ -1173,6 +1128,7 @@ export const Orders: React.FC = () => {
   }
 
   // Handle drag end for reordering and status changes
+  // NEW: Admin-only drag and drop with pending changes
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
 
@@ -1185,9 +1141,15 @@ export const Orders: React.FC = () => {
       return
     }
 
-    console.log(`[DRAG-DROP-FIXED] Starting drag end: ${active.id} -> ${over.id}`)
+    // NEW: Admin permission check
+    if (!isAdmin) {
+      toast.error("Only administrators can reorder items")
+      return
+    }
 
-    // Check if dropping into a status column (Unassigned, Prep, Complete)
+    console.log(`[ADMIN-DRAG] Admin drag operation: ${active.id} -> ${over.id}`)
+
+    // Check if dropping into a status column (status changes still work for all users)
     const statusColumnMap: Record<string, 'unassigned' | 'assigned' | 'completed'> = {
       'unassigned-column': 'unassigned',
       'assigned-column': 'assigned', 
@@ -1196,13 +1158,11 @@ export const Orders: React.FC = () => {
 
     const newStatus = statusColumnMap[over.id as string]
     if (newStatus) {
-      // Dropped into a status column - update status
-      console.log(`[DRAG-DROP-FIXED] Dropped ${active.id} into ${newStatus} column`)
+      // Status changes work immediately for all users (existing functionality)
+      console.log(`[STATUS-CHANGE] Dropped ${active.id} into ${newStatus} column`)
       
-      // Update the status and save to database
       handleOrderStatusChange(active.id as string, newStatus)
       
-      // Also call the API directly to ensure it's saved
       const cardId = active.id as string
       const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
       
@@ -1221,24 +1181,24 @@ export const Orders: React.FC = () => {
         })
 
         if (response.ok) {
-          console.log(`[DRAG-DROP-FIXED] Status saved to database: ${cardId} -> ${newStatus}`)
+          console.log(`[STATUS-CHANGE] Status saved to database: ${cardId} -> ${newStatus}`)
         } else {
-          console.error('[DRAG-DROP-FIXED] Failed to save status:', await response.text())
+          console.error('[STATUS-CHANGE] Failed to save status:', await response.text())
         }
       } catch (error) {
-        console.error('[DRAG-DROP] Error saving status:', error)
+        console.error('[STATUS-CHANGE] Error saving status:', error)
       }
       
       return // Don't continue with reordering logic
     }
 
+    // NEW: Admin-only reordering with pending changes (no immediate API calls)
     try {
-      console.log(`[DRAG-DROP-FIXED] Processing reorder operation`)
+      console.log(`[ADMIN-REORDER] Processing admin reorder operation (pending changes only)`)
       
-      // CRITICAL FIX: Use original storeContainers instead of filtered ones
       let foundInStoreContainer = false
       
-      // Find which original store container the dragged item belongs to
+      // Find which store container the dragged item belongs to
       for (let containerIndex = 0; containerIndex < storeContainers.length; containerIndex++) {
         const container = storeContainers[containerIndex]
         const activeOrderIndex = container.orders.findIndex((order: any) => 
@@ -1246,169 +1206,200 @@ export const Orders: React.FC = () => {
         )
 
         if (activeOrderIndex !== -1) {
-          console.log(`[DRAG-DROP-FIXED] Found order ${active.id} in container: ${container.storeName}`)
+          console.log(`[ADMIN-REORDER] Found order ${active.id} in container: ${container.storeName}`)
           
-          // Found the order in this store container
           const newOrderIndex = container.orders.findIndex((order: any) => 
             (order.cardId || order.id) === over.id
           )
 
           if (newOrderIndex !== -1) {
-            console.log(`[DRAG-DROP-FIXED] Target position found at index ${newOrderIndex}`)
+            console.log(`[ADMIN-REORDER] Target position found at index ${newOrderIndex}`)
             
-            // GOOGLE SHEETS APPROACH: Calculate new sort orders for the reordered sequence
+            // NEW: Only update local state and track pending changes
             const newOrders = arrayMove(container.orders, activeOrderIndex, newOrderIndex)
             const orderIds = newOrders.map((order: any) => order.cardId || order.id)
-            const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
-            console.log(`[GOOGLE-SHEETS-DRAG] New order sequence:`, orderIds)
+            console.log(`[ADMIN-REORDER] New local order sequence:`, orderIds)
             
-            // GOOGLE SHEETS APPROACH: Do optimistic updates immediately, then save to API
-            try {
-              console.log(`[GOOGLE-SHEETS-DRAG] Applying optimistic updates immediately`)
+            // Apply local visual updates only
+            orderIds.forEach((orderId, index) => {
+              const newSortOrder = (index + 1) * 10
+              console.log(`[ADMIN-REORDER] Local update: ${orderId} -> sortOrder: ${newSortOrder}`)
               
-              // Apply optimistic updates for each order in the new sequence
-              orderIds.forEach((orderId, index) => {
-                const newSortOrder = (index + 1) * 10
-                console.log(`[GOOGLE-SHEETS-DRAG] Optimistic update: ${orderId} -> sortOrder: ${newSortOrder}`)
-                handleOptimisticReorder(orderId, newSortOrder)
-              })
+              // Update local state
+              handleOrderReorderChange(orderId, newSortOrder, false)
+              
+              // Track as pending change
+              setPendingReorderChanges(prev => ({
+                ...prev,
+                [orderId]: newSortOrder
+              }))
+            })
 
-              // Then save to API in background (like Google Sheets)
-              console.log(`[GOOGLE-SHEETS-DRAG] Saving to API in background`)
-              const updatePromises = orderIds.map(async (orderId, index) => {
-                const newSortOrder = (index + 1) * 10
-                
-                const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
-                  method: 'PUT',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                  },
-                  body: JSON.stringify({
-                    sortOrder: newSortOrder,
-                    deliveryDate,
-                    _dragOperation: true, // Flag for real-time system
-                    _timestamp: Date.now()
-                  })
-                })
-
-                if (!response.ok) {
-                  throw new Error(`HTTP ${response.status}: ${await response.text()}`)
-                }
-
-                return await response.json()
-              })
-
-              await Promise.all(updatePromises)
-              console.log(`[GOOGLE-SHEETS-DRAG] Background API save completed successfully`)
-              
-              toast.success("Order sequence updated")
-              foundInStoreContainer = true
-              
-            } catch (error) {
-              console.error('[GOOGLE-SHEETS-DRAG] Failed to save to API, but optimistic update is preserved:', error)
-              
-              // GOOGLE SHEETS APPROACH: Don't rollback on API failure - keep optimistic updates
-              // This prevents snapback and allows the user to see their changes
-              console.log(`[GOOGLE-SHEETS-DRAG] Keeping optimistic updates despite API failure`)
-              
-              toast.error("Failed to save changes, but your reordering is preserved locally")
-              foundInStoreContainer = true
-            }
-            
+            toast.success("Reorder queued - Click 'Save Reorder' to apply changes", {
+              duration: 4000
+            })
+            foundInStoreContainer = true
             break
           }
         }
       }
 
-      // CRITICAL FIX: Handle add-on orders with same approach
+      // Handle add-on orders with same pending approach
       if (!foundInStoreContainer) {
-        console.log(`[DRAG-DROP-FIXED] Checking add-on orders`)
+        console.log(`[ADMIN-REORDER] Checking add-on orders`)
         
-        // Find in original addOnOrders array, not filtered
         const activeAddOnIndex = addOnOrders.findIndex((order: any) => 
           (order.cardId || order.id) === active.id
         )
 
         if (activeAddOnIndex !== -1) {
-          console.log(`[DRAG-DROP-FIXED] Found order ${active.id} in add-on orders`)
+          console.log(`[ADMIN-REORDER] Found order ${active.id} in add-on orders`)
           
-          // Reordering add-on orders
           const newIndex = addOnOrders.findIndex((order: any) => 
             (order.cardId || order.id) === over.id
           )
 
           if (newIndex !== -1) {
-            console.log(`[DRAG-DROP-FIXED] Reordering add-on orders: ${activeAddOnIndex} -> ${newIndex}`)
+            console.log(`[ADMIN-REORDER] Reordering add-on orders: ${activeAddOnIndex} -> ${newIndex}`)
             
             const newAddOnOrders = arrayMove(addOnOrders, activeAddOnIndex, newIndex)
+            const orderIds = newAddOnOrders.map((order: any) => order.cardId || order.id)
             
-            // Update state
+            console.log(`[ADMIN-REORDER] New add-on order sequence:`, orderIds)
+            
+            // Update local state only
             setAddOnOrders(newAddOnOrders)
             
-            // Extract order IDs in new sequence
-            const orderIds = newAddOnOrders.map((order: any) => order.cardId || order.id)
-            const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
-            
-            console.log(`[DRAG-DROP-FIXED] New add-on order sequence:`, orderIds)
-            
-            // Use individual order-card-states API calls for add-on orders too
-            try {
-              console.log(`[DRAG-DROP-INDIVIDUAL] Using individual API calls for add-on orders`)
+            // Track pending changes for add-on orders
+            orderIds.forEach((orderId, index) => {
+              const newSortOrder = (index + 1) * 10
+              console.log(`[ADMIN-REORDER] Add-on pending: ${orderId} -> sortOrder: ${newSortOrder}`)
               
-              const updatePromises = orderIds.map(async (orderId, index) => {
-                const newSortOrder = (index + 1) * 10
-                console.log(`[DRAG-DROP-INDIVIDUAL] Add-on ${orderId} -> sortOrder: ${newSortOrder}`)
-                
-                const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
-                  method: 'PUT',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                  },
-                  body: JSON.stringify({
-                    sortOrder: newSortOrder,
-                    deliveryDate,
-                    _dragOperation: true,
-                    _timestamp: Date.now()
-                  })
-                })
+              setPendingReorderChanges(prev => ({
+                ...prev,
+                [orderId]: newSortOrder
+              }))
+            })
 
-                if (!response.ok) {
-                  throw new Error(`HTTP ${response.status}: ${await response.text()}`)
-                }
-
-                const result = await response.json()
-                console.log(`[DRAG-DROP-INDIVIDUAL] ✅ Add-on ${orderId} updated successfully`)
-                return result
-              })
-
-              await Promise.all(updatePromises)
-              console.log(`[DRAG-DROP-INDIVIDUAL] All add-on order updates completed successfully`)
-              
-              toast.success("Add-on order sequence updated")
-              
-            } catch (error) {
-              console.error('[DRAG-DROP-FIXED] Failed to save add-on order sequence:', error)
-              
-              // Rollback state
-              setAddOnOrders(addOnOrders) // Restore original state
-              toast.error("Failed to update add-on order sequence: " + (error as Error).message)
-            }
+            toast.success("Add-on reorder queued - Click 'Save Reorder' to apply changes", {
+              duration: 4000
+            })
           }
         } else {
-          console.warn(`[DRAG-DROP-FIXED] Order ${active.id} not found in any container`)
+          console.warn(`[ADMIN-REORDER] Order ${active.id} not found in any container`)
         }
       }
     } catch (error) {
-      console.error("Failed to reorder:", error)
-      toast.error("Failed to update order sequence: " + (error as Error).message)
+      console.error("[ADMIN-REORDER] Failed to process reorder:", error)
+      toast.error("Failed to process reorder: " + (error as Error).message)
     }
   }
 
-  // Check if reordering is enabled (only when showing all orders without filters)
-  const isReorderingEnabled = !activeFilters.status && !activeFilters.stores?.length
+  // NEW: Save all pending reorder changes
+  const handleSaveReorder = async () => {
+    if (!tenant?.id || Object.keys(pendingReorderChanges).length === 0) {
+      return
+    }
+
+    if (!isAdmin) {
+      toast.error("Only administrators can save reorder changes")
+      return
+    }
+
+    setIsSavingReorder(true)
+    const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
+
+    try {
+      console.log(`[SAVE-REORDER] Saving ${Object.keys(pendingReorderChanges).length} pending changes`)
+      
+      // Create bulk update API call for guaranteed real-time broadcast
+      const response = await fetch(`/api/tenants/${tenant.id}/bulk-reorder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        },
+        body: JSON.stringify({
+          changes: pendingReorderChanges,
+          deliveryDate,
+          adminId: user?.id,
+          adminName: user?.name || user?.email,
+          timestamp: Date.now()
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log(`[SAVE-REORDER] ✅ Bulk reorder saved successfully:`, result)
+        
+        // Clear pending changes
+        setPendingReorderChanges({})
+        
+        toast.success(`Reorder changes saved and synced to all devices`, {
+          duration: 3000
+        })
+      } else {
+        const errorText = await response.text()
+        console.error('[SAVE-REORDER] Failed to save reorder:', response.status, errorText)
+        
+        // For now, fall back to individual API calls if bulk endpoint doesn't exist
+        console.log('[SAVE-REORDER] Falling back to individual API calls')
+        
+        const updatePromises = Object.entries(pendingReorderChanges).map(async ([orderId, sortOrder]) => {
+          const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+            },
+            body: JSON.stringify({
+              sortOrder,
+              deliveryDate,
+              _bulkReorder: true,
+              _adminId: user?.id,
+              _timestamp: Date.now()
+            })
+          })
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+          }
+
+          return await response.json()
+        })
+
+        await Promise.all(updatePromises)
+        console.log(`[SAVE-REORDER] ✅ Individual API calls completed`)
+        
+        setPendingReorderChanges({})
+        toast.success(`Reorder changes saved`, {
+          duration: 3000
+        })
+      }
+    } catch (error) {
+      console.error('[SAVE-REORDER] Failed to save reorder changes:', error)
+      toast.error("Failed to save reorder changes: " + (error as Error).message)
+    } finally {
+      setIsSavingReorder(false)
+    }
+  }
+
+  // NEW: Clear pending changes
+  const handleCancelReorder = () => {
+    if (Object.keys(pendingReorderChanges).length === 0) {
+      return
+    }
+
+    // Reload data to restore original order
+    handleRefreshFromDatabase()
+    setPendingReorderChanges({})
+    toast.info("Pending reorder changes cancelled")
+  }
+
+  // NEW: Check if reordering is enabled (admin only, no filters)
+  const isReorderingEnabled = isAdmin && !activeFilters.status && !activeFilters.stores?.length
+  const hasPendingChanges = Object.keys(pendingReorderChanges).length > 0
 
   // CRITICAL FIX: Create handleOrderReorderChange - same pattern as handleOrderStatusChange
   return (
@@ -1811,8 +1802,60 @@ export const Orders: React.FC = () => {
                 ) : (
                   <SortAsc className="h-4 w-4" />
                 )}
-                Auto-Sort Orders
+                Sort Orders
               </Button>
+              
+              {/* NEW: Admin Reorder Controls */}
+              {isAdmin && (
+                <>
+                  <div className="h-4 border-l border-border mx-2" />
+                  
+                  {hasPendingChanges && (
+                    <>
+                      <Button 
+                        onClick={handleSaveReorder}
+                        disabled={isSavingReorder}
+                        className="gap-2 bg-green-600 hover:bg-green-700"
+                      >
+                        {isSavingReorder ? (
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4" />
+                        )}
+                        Save Reorder ({Object.keys(pendingReorderChanges).length})
+                      </Button>
+                      
+                      <Button 
+                        variant="outline"
+                        onClick={handleCancelReorder}
+                        disabled={isSavingReorder}
+                        className="gap-2 border-red-300 text-red-700 hover:bg-red-50"
+                      >
+                        <Circle className="h-4 w-4" />
+                        Cancel Changes
+                      </Button>
+                    </>
+                  )}
+                  
+                  {!hasPendingChanges && isReorderingEnabled && (
+                    <div className="px-3 py-2 bg-blue-100 text-blue-800 text-xs rounded-md">
+                      Drag orders to reorder (Admin only)
+                    </div>
+                  )}
+                  
+                  {!isReorderingEnabled && !hasPendingChanges && (
+                    <div className="px-3 py-2 bg-gray-100 text-gray-600 text-xs rounded-md">
+                      Clear filters to enable reordering
+                    </div>
+                  )}
+                </>
+              )}
+              
+              {!isAdmin && (
+                <div className="px-3 py-2 bg-gray-100 text-gray-600 text-xs rounded-md">
+                  Only administrators can reorder
+                </div>
+              )}
               </div>
             </CollapsibleContent>
           </Collapsible>

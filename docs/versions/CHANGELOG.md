@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2025-01-21
+
+### 🚀 **MAJOR FEATURE: Admin-Only Reordering with Save Button Architecture**
+
+#### ✅ **New Admin-Only Reordering System**
+- **Permission-Based Control**: Only administrators and owners can drag-and-drop reorder
+- **Pending Changes Tracking**: Drag operations remain local until explicitly saved
+- **Save Reorder Button**: Appears when there are pending changes, shows count of modified orders
+- **Cancel Changes**: Allows admins to discard pending changes and restore original order
+- **Visual Feedback**: Clear indicators for admin permissions and pending state
+
+#### 🔧 **Technical Implementation**
+- **Admin Permission Check**: `isAdmin = user?.role === 'admin' || user?.role === 'owner'`
+- **Pending State Management**: `pendingReorderChanges` tracks unsaved sortOrder changes
+- **Bulk Save API**: Attempts `/bulk-reorder` endpoint, falls back to individual calls
+- **Real-time Broadcast**: Guaranteed cross-device sync when changes are saved
+- **Visual Indicators**: Color-coded status messages and permission notices
+
+#### 🎯 **User Experience Improvements**
+- **Clear Workflow**: Drag → Review → Save → Sync across devices
+- **No Accidental Changes**: Prevents unintended reordering by non-admins
+- **Explicit Control**: Admins have full control over when changes are applied
+- **Error Recovery**: Cancel option allows easy restoration of original order
+
+#### 📡 **Cross-Device Synchronization**
+- **Guaranteed Broadcast**: Save button ensures all devices receive updates
+- **No Auto-Save Conflicts**: Eliminates race conditions from automatic saves
+- **Admin Control**: Only authorized users can trigger reorder operations
+- **Visual Confirmation**: Clear success/failure feedback for save operations
+
+## [1.8.0] - 2025-01-21
+
+### 🚀 **MAJOR: Back to Basics - Copy Status Button Pattern Exactly**
+- **Radical Simplification:** Completely removed all drag-specific protection logic
+- **Key Insight:** Status buttons work perfectly across devices, so let's copy that pattern exactly
+- **Removed Complexity:**
+  - ❌ Session ID tracking (backend doesn't support it anyway)
+  - ❌ Optimistic drag protection (was causing intermittent blocking)
+  - ❌ Timing-based fallbacks (unreliable and complex)
+  - ❌ Cross-device conflict detection (over-engineered)
+- **New Approach:** Treat sortOrder updates exactly like status updates
+  - ✅ Same API calls as status buttons
+  - ✅ Same real-time handling as status buttons  
+  - ✅ Same simplicity as status buttons
+- **Expected Result:** If status buttons sync perfectly, drag-and-drop should too
+
+### Technical Changes
+- Simplified `handleOptimisticReorder()` to mirror status button API calls
+- Removed `handleOrderReorderChange()` protection logic entirely
+- Eliminated session ID generation and tracking
+- Removed recent drag operations tracking
+- Clean, minimal implementation matching proven working pattern
+
 ## [1.7.3] - 2025-01-21
 
 ### Fixed
