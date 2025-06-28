@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.92] - 2025-12-23
+### 🚨 **CRITICAL FIX: Drag and Drop Reordering System**
+- **Fixed:** State consistency issue where `handleDragEnd` used filtered containers but updated original state
+- **Fixed:** Index mismatch causing wrong containers to be updated during drag operations  
+- **Fixed:** Real-time sync conflicts between optimistic updates and remote updates
+- **Fixed:** Cross-device reordering not syncing properly across users and devices
+
+### ✅ **Technical Improvements**
+- Use original `storeContainers`/`addOnOrders` arrays instead of filtered versions for drag operations
+- Direct container indexing instead of unreliable `storeName` lookup
+- Enhanced real-time conflict detection with `_dragOperation` flag
+- Proper error handling with state rollback on API failures
+- Delayed optimistic updates (100ms) to prevent race conditions
+
+### 🔄 **Real-time System Enhancements**
+- Added drag operation detection to prevent conflicts
+- Improved anti-conflict logic for recent own updates (5-second window)
+- Longer delays for drag operations (150ms vs 50ms) to prevent conflicts
+- Enhanced logging with `[DRAG-DROP-FIXED]` and `[REALTIME-ENHANCED]` prefixes
+
+### 💡 **Impact**
+- **Drag and drop reordering now works reliably** within containers
+- **Real-time sync across devices and users** for order sequences  
+- **No more "stuck" or inconsistent order positions**
+- **Proper error recovery** if backend save fails
+
 ## [1.5.91] - 2025-06-27
 ### 🔧 **Critical Bug Fix - Mobile Real-Time Connection**
 - **Fixed:** Mobile devices stuck at "trying to connect" for real-time updates
