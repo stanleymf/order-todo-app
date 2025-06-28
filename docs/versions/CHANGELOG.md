@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.1] - 2025-01-21
+
+### Fixed
+- **REAL-TIME BROADCAST**: Added missing flags to force real-time broadcasts for reorder operations
+  - Added `_adminReorder: true` flag for admin reorder operations
+  - Added `_forceRealtime: true` flag to explicitly request real-time broadcast
+  - Added `_dragOperation: true` flag (same as working drag operations)
+  - Added `_adminName` for additional backend context
+  - **Issue**: Individual API calls were completing successfully but not triggering cross-device sync
+  - **Solution**: Backend needs specific flags to broadcast sortOrder changes via real-time system
+
+### Technical Changes
+- Enhanced individual API call payload with real-time broadcast flags
+- Maintains backward compatibility with existing endpoint structure
+- Provides fallback when `/bulk-reorder` endpoint unavailable (404)
+
 ## [1.9.0] - 2025-01-21
 
 ### 🚀 **MAJOR FEATURE: Admin-Only Reordering with Save Button Architecture**

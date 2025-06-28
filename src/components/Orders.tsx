@@ -1357,7 +1357,11 @@ export const Orders: React.FC = () => {
               sortOrder,
               deliveryDate,
               _bulkReorder: true,
+              _adminReorder: true,
+              _forceRealtime: true,
+              _dragOperation: true,
               _adminId: user?.id,
+              _adminName: user?.name || user?.email,
               _timestamp: Date.now()
             })
           })
