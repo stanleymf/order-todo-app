@@ -812,12 +812,21 @@ export const Orders: React.FC = () => {
       
       // Check if this update is from the same session (same device)
       const isSameSession = updateSessionId && updateSessionId === sessionId.current
+      const hasSessionInfo = !!updateSessionId
       
-      if (timeSinceLocalDrag < 5000 && isSameSession) {
+      if (hasSessionInfo && timeSinceLocalDrag < 5000 && isSameSession) {
         console.log(`[OPTIMISTIC-DRAG] ⏭️  SKIPPING same-session update for recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago)`)
         return
-      } else if (timeSinceLocalDrag < 5000 && !isSameSession) {
+      } else if (hasSessionInfo && timeSinceLocalDrag < 5000 && !isSameSession) {
         console.log(`[CROSS-DEVICE-SYNC] ✅ ALLOWING cross-device update despite recent local drag: ${orderId} (${timeSinceLocalDrag}ms ago, different session)`)
+      } else if (!hasSessionInfo && timeSinceLocalDrag < 5000) {
+        // FALLBACK: No session info available - assume cross-device after 2 seconds
+        if (timeSinceLocalDrag < 2000) {
+          console.log(`[OPTIMISTIC-DRAG] ⏭️  SKIPPING update for very recent drag (no session info): ${orderId} (${timeSinceLocalDrag}ms ago)`)
+          return
+        } else {
+          console.log(`[CROSS-DEVICE-SYNC] ✅ ALLOWING update after 2s delay (no session info): ${orderId} (${timeSinceLocalDrag}ms ago)`)
+        }
       }
     }
     

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.2] - 2025-01-21
+
+### Fixed
+- **CROSS-DEVICE SYNC**: Fixed session-based protection blocking all updates when session IDs unavailable
+  - Added fallback logic for when backend doesn't include session IDs in real-time updates
+  - Now uses 2-second protection window for immediate optimistic updates, then allows cross-device sync
+  - Cross-device drag operations now sync properly after brief protection period
+  - Status: ✅ **RESOLVED** - All drag operations now sync across devices
+
+### Technical Changes
+- Added `hasSessionInfo` check to distinguish between session-based and time-based protection
+- Implemented 2-second fallback protection when session IDs are missing from real-time updates
+- Enhanced debug logging to show when fallback logic is used
+
 ## [1.7.1] - 2025-01-21
 
 ### Fixed
