@@ -134,7 +134,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    updatedBy: String(change.assigned_by || 'unknown'),
                    updatedAt: String(change.updated_at),
                    deliveryDate: String(change.delivery_date),
-                   sortOrder: change.sort_order ? Number(change.sort_order) : undefined,
+                   sortOrder: change.sort_order !== null && change.sort_order !== undefined ? Number(change.sort_order) : undefined,
                    notes: change.notes ? String(change.notes) : '',
                    timestamp: new Date().toISOString()
                  })
@@ -158,7 +158,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
                    updatedBy: String(change.assigned_to || 'unknown'),
                    updatedAt: String(change.updated_at),
                    deliveryDate: String(change.delivery_date),
-                   sortOrder: change.sort_order ? Number(change.sort_order) : undefined,
+                   sortOrder: change.sort_order !== null && change.sort_order !== undefined ? Number(change.sort_order) : undefined,
                    notes: change.notes ? String(change.notes) : '',
                    timestamp: new Date().toISOString()
                  })

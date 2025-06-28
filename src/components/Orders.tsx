@@ -810,8 +810,20 @@ export const Orders: React.FC = () => {
         // This happens because reorder endpoint doesn't set assigned_by, so SSE sends updatedBy: 'unknown'
         const isLikelyOwnReorderUpdate = (update.updatedBy === 'unknown' || !update.updatedBy) && isRecentSortOrderUpdate
         
+        // DEBUG: Log all sort order updates to diagnose snapback
+        console.log(`[SNAPBACK-DEBUG] Sort order update received:`, {
+          orderId: update.orderId,
+          updatedBy: update.updatedBy,
+          currentUserId: user?.id,
+          isOwnUpdate,
+          timeSinceUpdate: Math.round(timeSinceUpdate/1000),
+          isRecentSortOrderUpdate,
+          isLikelyOwnReorderUpdate,
+          willSkip: (isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate
+        })
+        
         if ((isOwnUpdate && isRecentSortOrderUpdate) || isLikelyOwnReorderUpdate) {
-          console.log(`[REALTIME-SNAPBACK-FIX] Skipping recent sort order update within 10s: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
+          console.log(`[REALTIME-SNAPBACK-FIX] ✅ SKIPPING recent sort order update within 10s: ${update.orderId} (${Math.round(timeSinceUpdate/1000)}s ago) - updatedBy: ${update.updatedBy}`)
           return
         }
         
