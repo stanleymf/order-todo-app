@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.6] - 2025-01-21
+
+### 🔧 **CRITICAL FIX: Bulk-Reorder Endpoint Routing**
+- **Issue**: Bulk-reorder endpoint returning 404 Not Found, forcing fallback to individual API calls
+- **Root Cause**: Endpoint was defined before JWT middleware, making it inaccessible to routing system
+- **Solution**: Moved bulk-reorder endpoint to after JWT middleware for proper authentication and routing
+
+#### **Routing Fix Details**
+- **Endpoint Position**: Moved from line 1700 to after JWT middleware (line 2149+)
+- **Authentication**: Now properly protected and accessible for authenticated admin users
+- **Performance**: Eliminates fallback to 43+ individual API calls during bulk reorder operations
+- **Real-Time**: Ensures proper real-time broadcasting for cross-device sync
+
+**Result**: Bulk reorder operations now use efficient single API call instead of multiple individual calls
+
 ## [1.9.5] - 2025-01-21
 
 ### 🔧 **CRITICAL FIX: Post-Save Interference Prevention**
