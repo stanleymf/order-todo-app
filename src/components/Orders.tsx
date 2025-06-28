@@ -840,7 +840,7 @@ export const Orders: React.FC = () => {
       } else if (newStatus === 'assigned') {
         // Use the assignedTo parameter if provided, otherwise use current user
         const toastAssignedTo = assignedTo || user?.name || user?.email || 'Unknown User'
-        toast.success(`Assigned to ${toastAssignedTo}`)
+        toast.success(`${orderTitle} Assigned to ${toastAssignedTo}`)
       }
     }
   }
