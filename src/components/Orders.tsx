@@ -998,6 +998,8 @@ export const Orders: React.FC = () => {
 
   // Real-time updates hook - STABILIZED (moved here to access handleOrderStatusChange)
   const handleRealtimeUpdate = useCallback((update: any) => {
+    const now = Date.now()
+    console.log(`🔄 [REALTIME-TIMING] Update received at ${new Date(now).toISOString()} for order ${update.orderId || 'unknown'}`)
     console.log('🔄 Real-time update received:', update)
     
     // REMOVED TOGGLE-PROTECTION: No longer needed since we use proper API flow
@@ -1079,7 +1081,10 @@ export const Orders: React.FC = () => {
         const hasPendingChange = pendingReorderChanges[update.orderId] !== undefined
         if (hasPendingChange) {
           console.log(`[REALTIME-PROTECTION] 🛡️ BLOCKING real-time sortOrder update for ${update.orderId} - has pending local change: ${pendingReorderChanges[update.orderId]} vs incoming: ${update.sortOrder}`)
+          console.log(`[REALTIME-PROTECTION] 🛡️ All pending changes:`, Object.keys(pendingReorderChanges))
           return
+        } else {
+          console.log(`[REALTIME-PROTECTION] ✅ No pending change for ${update.orderId}, allowing real-time update: ${update.sortOrder}`)
         }
         
         // Additional protection: Block stale updates immediately after save, but NOT for database refreshes
@@ -1332,20 +1337,23 @@ export const Orders: React.FC = () => {
             const orderIds = newOrders.map((order: any) => order.cardId || order.id)
             
             console.log(`[ADMIN-REORDER] New local order sequence:`, orderIds)
+            console.log(`[ADMIN-REORDER] 🛡️ Current pending changes before update:`, Object.keys(pendingReorderChanges))
             
             // Apply local visual updates only
             orderIds.forEach((orderId, index) => {
               const newSortOrder = (index + 1) * 10
-              console.log(`[ADMIN-REORDER] Local update: ${orderId} -> sortOrder: ${newSortOrder}`)
+              console.log(`[ADMIN-REORDER] 📝 Setting local update: ${orderId} -> sortOrder: ${newSortOrder}`)
               
-              // Update local state
+              // Track as pending change FIRST (for protection)
+              setPendingReorderChanges(prev => {
+                const updated = { ...prev, [orderId]: newSortOrder }
+                console.log(`[ADMIN-REORDER] 🛡️ Updated pending changes:`, Object.keys(updated))
+                return updated
+              })
+              
+              // Then update local state
+              console.log(`[ADMIN-REORDER] 🎨 Applying visual update: ${orderId} -> sortOrder: ${newSortOrder}`)
               handleOrderReorderChange(orderId, newSortOrder, false)
-              
-              // Track as pending change
-              setPendingReorderChanges(prev => ({
-                ...prev,
-                [orderId]: newSortOrder
-              }))
             })
 
             toast.success("Reorder queued - Click 'Save Reorder' to apply changes", {
@@ -1448,10 +1456,8 @@ export const Orders: React.FC = () => {
         const result = await response.json()
         console.log(`[SAVE-REORDER] ✅ Bulk reorder saved to D1 database:`, result)
         
-        // DATABASE-FIRST: Small delay then refresh from database to ensure consistency  
-        setTimeout(async () => {
-          await handleRefreshFromDatabase()
-        }, 500) // 500ms delay to prevent race conditions
+        // DATABASE-FIRST: Refresh from database to ensure consistency
+        await handleRefreshFromDatabase()
         
         // ENHANCED: Broadcast save timestamp for cross-device sync
         const saveTimestamp = Date.now()
@@ -1517,10 +1523,8 @@ export const Orders: React.FC = () => {
         await Promise.all(updatePromises)
         console.log(`[SAVE-REORDER] ✅ Individual API calls completed`)
         
-        // DATABASE-FIRST: Small delay then refresh from database after individual saves
-        setTimeout(async () => {
-          await handleRefreshFromDatabase()
-        }, 500) // 500ms delay to prevent race conditions
+        // DATABASE-FIRST: Refresh from database after individual saves
+        await handleRefreshFromDatabase()
         
         // ENHANCED: Broadcast save timestamp for cross-device sync
         const saveTimestamp = Date.now()
