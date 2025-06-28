@@ -757,13 +757,30 @@ export const Orders: React.FC = () => {
     const isOwnUpdate = update.updatedBy === user?.id || update.updatedBy === user?.email || update.updatedBy === user?.name
     
     if (update.type === 'order_updated') {
+      // CRITICAL FIX: Handle drag operations with special logic
+      const updateChanges = update.changes || update
+      const isDragOperation = updateChanges._dragOperation === true
+      const isRecentDragUpdate = isDragOperation && updateChanges._timestamp && (Date.now() - updateChanges._timestamp < 5000) // 5 second window
+      
+      if (isDragOperation) {
+        console.log(`[REALTIME-ENHANCED] Drag operation detected: ${update.orderId}`)
+        
+        // ANTI-CONFLICT: Skip drag updates from same user if they're recent (already applied optimistically)
+        if (isOwnUpdate && isRecentDragUpdate) {
+          console.log(`[REALTIME-ENHANCED] Skipping recent own drag update: ${update.orderId}`)
+          return
+        }
+        
+        console.log(`[REALTIME-ENHANCED] Processing cross-device drag update: ${update.orderId}`)
+      }
+      
       // Only skip status updates from same user, allow all sortOrder updates for cross-device sync
-      if (isOwnUpdate && update.status && !update.sortOrder) {
-        console.log(`⏭️ [REALTIME] Skipping own STATUS update from ${update.updatedBy}`)
+      if (isOwnUpdate && update.status && !update.sortOrder && !isDragOperation) {
+        console.log(`⏭️ [REALTIME-ENHANCED] Skipping own STATUS update from ${update.updatedBy}`)
         return
       }
       
-      console.log('📦 Processing order update:', update.orderId)
+      console.log(`📦 [REALTIME-ENHANCED] Processing order update: ${update.orderId}${isDragOperation ? ' (drag)' : ''}`)
       
       // Create update data from the polling response
       const updateData = {
@@ -831,8 +848,8 @@ export const Orders: React.FC = () => {
             return sorted
           })
           
-          console.log(`[REALTIME] Re-sorted all containers for sortOrder change: ${update.orderId}`)
-        }, 50) // Small delay to ensure individual update is applied first
+          console.log(`[REALTIME-ENHANCED] Re-sorted all containers for sortOrder change: ${update.orderId}`)
+        }, isDragOperation ? 150 : 50) // Longer delay for drag operations to prevent conflicts
         
       } else {
         // For other non-status updates, use the individual update method
@@ -977,6 +994,8 @@ export const Orders: React.FC = () => {
       return
     }
 
+    console.log(`[DRAG-DROP-FIXED] Starting drag end: ${active.id} -> ${over.id}`)
+
     // Check if dropping into a status column (Unassigned, Prep, Complete)
     const statusColumnMap: Record<string, 'unassigned' | 'assigned' | 'completed'> = {
       'unassigned-column': 'unassigned',
@@ -987,7 +1006,7 @@ export const Orders: React.FC = () => {
     const newStatus = statusColumnMap[over.id as string]
     if (newStatus) {
       // Dropped into a status column - update status
-      console.log(`[DRAG-DROP] Dropped ${active.id} into ${newStatus} column`)
+      console.log(`[DRAG-DROP-FIXED] Dropped ${active.id} into ${newStatus} column`)
       
       // Update the status and save to database
       handleOrderStatusChange(active.id as string, newStatus)
@@ -1011,9 +1030,9 @@ export const Orders: React.FC = () => {
         })
 
         if (response.ok) {
-          console.log(`[DRAG-DROP] Status saved to database: ${cardId} -> ${newStatus}`)
+          console.log(`[DRAG-DROP-FIXED] Status saved to database: ${cardId} -> ${newStatus}`)
         } else {
-          console.error('[DRAG-DROP] Failed to save status:', await response.text())
+          console.error('[DRAG-DROP-FIXED] Failed to save status:', await response.text())
         }
       } catch (error) {
         console.error('[DRAG-DROP] Error saving status:', error)
@@ -1023,105 +1042,157 @@ export const Orders: React.FC = () => {
     }
 
     try {
-      // Find which store container the dragged item belongs to
+      console.log(`[DRAG-DROP-FIXED] Processing reorder operation`)
+      
+      // CRITICAL FIX: Use original storeContainers instead of filtered ones
       let foundInStoreContainer = false
-      for (let containerIndex = 0; containerIndex < filteredStoreContainers.length; containerIndex++) {
-        const container = filteredStoreContainers[containerIndex]
+      
+      // Find which original store container the dragged item belongs to
+      for (let containerIndex = 0; containerIndex < storeContainers.length; containerIndex++) {
+        const container = storeContainers[containerIndex]
         const activeOrderIndex = container.orders.findIndex((order: any) => 
           (order.cardId || order.id) === active.id
         )
 
         if (activeOrderIndex !== -1) {
+          console.log(`[DRAG-DROP-FIXED] Found order ${active.id} in container: ${container.storeName}`)
+          
           // Found the order in this store container
           const newOrderIndex = container.orders.findIndex((order: any) => 
             (order.cardId || order.id) === over.id
           )
 
           if (newOrderIndex !== -1) {
-            // Reorder within the same store container
+            console.log(`[DRAG-DROP-FIXED] Target position found at index ${newOrderIndex}`)
+            
+            // CRITICAL FIX: Reorder within the same store container using original state
             const newOrders = arrayMove(container.orders, activeOrderIndex, newOrderIndex)
             
-            // Update the store containers state
+            // CRITICAL FIX: Update the correct container in state (use direct index)
             const newStoreContainers = [...storeContainers]
-            const originalContainerIndex = newStoreContainers.findIndex(c => c.storeName === container.storeName)
-            if (originalContainerIndex !== -1) {
-              newStoreContainers[originalContainerIndex] = {
-                ...newStoreContainers[originalContainerIndex],
-                orders: newOrders
-              }
-              setStoreContainers(newStoreContainers)
-              
-              // Also update mainOrders state for backward compatibility
-              const allMainOrdersFromContainers = newStoreContainers.flatMap(c => c.orders)
-              setMainOrders(allMainOrdersFromContainers)
+            newStoreContainers[containerIndex] = {
+              ...newStoreContainers[containerIndex],
+              orders: newOrders
             }
             
-            // Extract order IDs in new sequence for this store
+            // Set the updated state
+            setStoreContainers(newStoreContainers)
+            
+            // Also update mainOrders state for backward compatibility
+            const allMainOrdersFromContainers = newStoreContainers.flatMap(c => c.orders)
+            setMainOrders(allMainOrdersFromContainers)
+            
+            // CRITICAL FIX: Extract order IDs in new sequence for this store
             const orderIds = newOrders.map((order: any) => order.cardId || order.id)
             const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
-            // Auto-save the new order
-            await reorderOrders(tenant.id, orderIds, deliveryDate)
+            console.log(`[DRAG-DROP-FIXED] New order sequence:`, orderIds)
             
-            // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
-            if (sendOptimisticUpdate) {
-              console.log(`[DRAG-DROP] Sending optimistic updates for reordered orders`)
-              console.log(`[DRAG-DROP] Order sequence:`, orderIds.map((id, idx) => `${id}: sortOrder ${(idx + 1) * 10}`))
-              orderIds.forEach((orderId, index) => {
-                const sortOrder = (index + 1) * 10
-                console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
-                sendOptimisticUpdate(orderId, {
-                  sortOrder: sortOrder // Same logic as backend
-                })
-              })
+            // CRITICAL FIX: Save to backend FIRST, then send optimistic updates
+            try {
+              await reorderOrders(tenant.id, orderIds, deliveryDate)
+              console.log(`[DRAG-DROP-FIXED] Order sequence saved to backend successfully`)
+              
+              // CRITICAL FIX: Send optimistic updates AFTER successful save to prevent conflicts
+              if (sendOptimisticUpdate) {
+                console.log(`[DRAG-DROP-FIXED] Sending optimistic updates for reordered orders`)
+                
+                // Wait a small moment to avoid race conditions
+                setTimeout(() => {
+                  orderIds.forEach((orderId, index) => {
+                    const sortOrder = (index + 1) * 10
+                    console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
+                    sendOptimisticUpdate(orderId, {
+                      sortOrder: sortOrder,
+                      _dragOperation: true, // Flag to identify drag operations
+                      _timestamp: Date.now()
+                    })
+                  })
+                }, 100) // Small delay to prevent conflicts
+              }
+              
+              toast.success("Order sequence updated")
+              foundInStoreContainer = true
+              
+            } catch (error) {
+              console.error('[DRAG-DROP-FIXED] Failed to save order sequence:', error)
+              
+              // CRITICAL FIX: Rollback state on error
+              console.log(`[DRAG-DROP-FIXED] Rolling back state due to save error`)
+              setStoreContainers(storeContainers) // Restore original state
+              setMainOrders(storeContainers.flatMap(c => c.orders)) // Restore main orders
+              
+              toast.error("Failed to update order sequence: " + (error as Error).message)
             }
             
-            toast.success("Order sequence updated")
-            foundInStoreContainer = true
             break
           }
         }
       }
 
-             // If not found in store containers, check add-on orders
-       if (!foundInStoreContainer) {
-         const activeAddOnIndex = filteredAddOnOrders.findIndex((order: any) => 
-           (order.cardId || order.id) === active.id
-         )
+      // CRITICAL FIX: Handle add-on orders with same approach
+      if (!foundInStoreContainer) {
+        console.log(`[DRAG-DROP-FIXED] Checking add-on orders`)
+        
+        // Find in original addOnOrders array, not filtered
+        const activeAddOnIndex = addOnOrders.findIndex((order: any) => 
+          (order.cardId || order.id) === active.id
+        )
 
-         if (activeAddOnIndex !== -1) {
-           // Reordering add-on orders
-           const oldIndex = activeAddOnIndex
-           const newIndex = filteredAddOnOrders.findIndex((order: any) => 
-             (order.cardId || order.id) === over.id
-           )
+        if (activeAddOnIndex !== -1) {
+          console.log(`[DRAG-DROP-FIXED] Found order ${active.id} in add-on orders`)
+          
+          // Reordering add-on orders
+          const newIndex = addOnOrders.findIndex((order: any) => 
+            (order.cardId || order.id) === over.id
+          )
 
           if (newIndex !== -1) {
-            const newAddOnOrders = arrayMove(filteredAddOnOrders, oldIndex, newIndex)
+            console.log(`[DRAG-DROP-FIXED] Reordering add-on orders: ${activeAddOnIndex} -> ${newIndex}`)
+            
+            const newAddOnOrders = arrayMove(addOnOrders, activeAddOnIndex, newIndex)
+            
+            // Update state
             setAddOnOrders(newAddOnOrders)
             
             // Extract order IDs in new sequence
             const orderIds = newAddOnOrders.map((order: any) => order.cardId || order.id)
             const deliveryDate = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB') : ''
             
-            // Auto-save the new order
-            await reorderOrders(tenant.id, orderIds, deliveryDate)
+            console.log(`[DRAG-DROP-FIXED] New add-on order sequence:`, orderIds)
             
-            // CRITICAL FIX: Send optimistic update to prevent real-time conflicts
-            if (sendOptimisticUpdate) {
-              console.log(`[DRAG-DROP] Sending optimistic updates for reordered add-on orders`)
-              console.log(`[DRAG-DROP] Order sequence:`, orderIds.map((id, idx) => `${id}: sortOrder ${(idx + 1) * 10}`))
-              orderIds.forEach((orderId, index) => {
-                const sortOrder = (index + 1) * 10
-                console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
-                sendOptimisticUpdate(orderId, {
-                  sortOrder: sortOrder // Same logic as backend
-                })
-              })
+            // Save to backend first, then optimistic updates
+            try {
+              await reorderOrders(tenant.id, orderIds, deliveryDate)
+              console.log(`[DRAG-DROP-FIXED] Add-on order sequence saved successfully`)
+              
+              // Send optimistic updates after successful save
+              if (sendOptimisticUpdate) {
+                setTimeout(() => {
+                  orderIds.forEach((orderId, index) => {
+                    const sortOrder = (index + 1) * 10
+                    console.log(`[DRAG-DROP-OPTIMISTIC] Add-on ${orderId} -> sortOrder: ${sortOrder}`)
+                    sendOptimisticUpdate(orderId, {
+                      sortOrder: sortOrder,
+                      _dragOperation: true,
+                      _timestamp: Date.now()
+                    })
+                  })
+                }, 100)
+              }
+              
+              toast.success("Add-on order sequence updated")
+              
+            } catch (error) {
+              console.error('[DRAG-DROP-FIXED] Failed to save add-on order sequence:', error)
+              
+              // Rollback state
+              setAddOnOrders(addOnOrders) // Restore original state
+              toast.error("Failed to update add-on order sequence: " + (error as Error).message)
             }
-            
-            toast.success("Order sequence updated")
           }
+        } else {
+          console.warn(`[DRAG-DROP-FIXED] Order ${active.id} not found in any container`)
         }
       }
     } catch (error) {
