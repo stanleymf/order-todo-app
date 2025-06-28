@@ -1,7 +1,7 @@
 {
   "name": "order-todo-app",
   "private": true,
-  "version": "1.5.94",
+  "version": "1.5.95",
   "description": "A starter template for building React applications with Vite",
   "type": "module",
   "scripts": {
