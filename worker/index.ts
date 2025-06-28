@@ -89,11 +89,6 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
 
     while (true) {
       try {
-        console.log(`[SSE-REALTIME] Checking for changes since ${lastUpdateTime}`)
-        
-        // DEBUG: Add more detailed logging
-        console.log(`[SSE-DEBUG] Query params: tenantId=${tenantId}, lastUpdateTime=${lastUpdateTime}`)
-        
         // Check for changes in order_card_states table (where status updates AND sort_order changes happen)
         const cardStateQuery = `
           SELECT card_id, status, assigned_to, assigned_by, updated_at, delivery_date, sort_order, notes
@@ -104,12 +99,6 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         `
 
         const { results: cardStateChanges } = await c.env.DB.prepare(cardStateQuery).bind(tenantId, lastUpdateTime).all()
-        
-        // DEBUG: Log what we found
-        console.log(`[SSE-DEBUG] Card state query returned ${cardStateChanges?.length || 0} results`)
-        if (cardStateChanges && cardStateChanges.length > 0) {
-          console.log(`[SSE-DEBUG] First change:`, cardStateChanges[0])
-        }
 
         // Check for changes in main tenant_orders table  
         const orderQuery = `
@@ -121,14 +110,11 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
         `
 
         const { results: orderChanges } = await c.env.DB.prepare(orderQuery).bind(tenantId, lastUpdateTime).all()
-        
-        // DEBUG: Log what we found
-        console.log(`[SSE-DEBUG] Order query returned ${orderChanges?.length || 0} results`)
 
         const hasChanges = (cardStateChanges && cardStateChanges.length > 0) || (orderChanges && orderChanges.length > 0)
 
         if (hasChanges) {
-          console.log(`[SSE-REALTIME] Found ${cardStateChanges?.length || 0} card state changes and ${orderChanges?.length || 0} order changes`)
+          console.log(`[SSE-REALTIME] 📨 Found ${cardStateChanges?.length || 0} card state changes and ${orderChanges?.length || 0} order changes`)
           
           const changeEvents = []
 
@@ -186,7 +172,7 @@ app.get("/api/tenants/:tenantId/realtime/orders", (c) => {
               data: JSON.stringify(event),
               event: "order_update",
             })
-            console.log(`[SSE-REALTIME] Sent update event for order ${event.orderId}: ${event.type}`)
+            console.log(`[SSE-REALTIME] ✅ Sent update: ${event.orderId} (${event.type})`)
           }
 
           // Update last check time - use SQLite format to match database

@@ -101,7 +101,7 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
     // Apply optimistically (immediate UI update)
     onUpdate?.(optimisticUpdate)
     
-    console.log('📤 [SSE-REALTIME] Optimistic update applied:', optimisticUpdate)
+    console.log('📤 [SSE-REALTIME] Optimistic update applied for order:', orderId)
     
   }, [tenant?.id, user, onUpdate])
   
@@ -118,7 +118,7 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
     
     const sseUrl = `https://order-to-do.stanleytan92.workers.dev/api/tenants/${tenant.id}/realtime/orders`
     
-    console.log('🔌 [SSE-REALTIME] Connecting to:', sseUrl)
+    console.log('🔌 [SSE-REALTIME] Connecting to realtime updates...')
     
     try {
       eventSourceRef.current = new EventSource(sseUrl)
@@ -130,7 +130,7 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
       }
       
       eventSourceRef.current.addEventListener('connected', (event) => {
-        console.log('🎉 [SSE-REALTIME] Connection established')
+        console.log('🎉 [SSE-REALTIME] Real-time connection established')
       })
       
       eventSourceRef.current.addEventListener('order_update', (event) => {
@@ -141,7 +141,7 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
           // ANTI-DUPLICATE: Check if already processed
           const duplicateKey = `${data.orderId}-${data.timestamp}`
           if (processedUpdateIds.current.has(duplicateKey)) {
-            console.log('⏭️ [SSE-REALTIME] Skipping duplicate update:', duplicateKey)
+            // Skip duplicate - no logging for reduced noise
             return
           }
           processedUpdateIds.current.add(duplicateKey)
@@ -158,8 +158,7 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions = {}) 
       })
       
       eventSourceRef.current.addEventListener('heartbeat', (event) => {
-        // Heartbeat received - connection is alive
-        console.log('💓 [SSE-REALTIME] Heartbeat received')
+        // Heartbeat received - connection is alive (silent for reduced log noise)
       })
       
       eventSourceRef.current.onerror = (error) => {
