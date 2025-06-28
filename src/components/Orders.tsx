@@ -31,7 +31,7 @@ import {
   SortAsc
 } from "lucide-react"
 import { useAuth } from "../contexts/AuthContext"
-import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, reorderOrders, syncOrdersByDate, getUnscheduledOrders } from "../services/api"
+import { getOrdersFromDbByDate, getStores, getOrderCardConfig, updateExistingOrders, deleteOrder, syncOrdersByDate, getUnscheduledOrders } from "../services/api"
 import { useRealtimeWebSocket } from "../hooks/use-realtime-websocket"
 import { OrderDetailCard } from "./OrderDetailCard"
 import { SortableOrderCard } from "./SortableOrderCard"
@@ -1162,28 +1162,40 @@ export const Orders: React.FC = () => {
             
             console.log(`[DRAG-DROP-FIXED] New order sequence:`, orderIds)
             
-            // CRITICAL FIX: Save to backend FIRST, then send optimistic updates
+            // NEW APPROACH: Use individual order-card-states API calls (same as status buttons)
             try {
-              await reorderOrders(tenant.id, orderIds, deliveryDate)
-              console.log(`[DRAG-DROP-FIXED] Order sequence saved to backend successfully`)
+              console.log(`[DRAG-DROP-INDIVIDUAL] Using individual API calls (same as status buttons)`)
               
-              // CRITICAL FIX: Send optimistic updates AFTER successful save to prevent conflicts
-              if (sendOptimisticUpdate) {
-                console.log(`[DRAG-DROP-FIXED] Sending optimistic updates for reordered orders`)
+              // Use the SAME endpoint as status buttons for each order individually
+              const updatePromises = orderIds.map(async (orderId, index) => {
+                const newSortOrder = (index + 1) * 10
+                console.log(`[DRAG-DROP-INDIVIDUAL] Updating ${orderId} -> sortOrder: ${newSortOrder}`)
                 
-                // Wait a small moment to avoid race conditions
-                setTimeout(() => {
-                  orderIds.forEach((orderId, index) => {
-                    const sortOrder = (index + 1) * 10
-                    console.log(`[DRAG-DROP-OPTIMISTIC] ${orderId} -> sortOrder: ${sortOrder}`)
-                    sendOptimisticUpdate(orderId, {
-                      sortOrder: sortOrder,
-                      _dragOperation: true, // Flag to identify drag operations
-                      _timestamp: Date.now()
-                    })
+                const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
+                  method: 'PUT',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                  },
+                  body: JSON.stringify({
+                    sortOrder: newSortOrder,
+                    deliveryDate,
+                    _dragOperation: true, // Flag for real-time system
+                    _timestamp: Date.now()
                   })
-                }, 100) // Small delay to prevent conflicts
-              }
+                })
+
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+                }
+
+                const result = await response.json()
+                console.log(`[DRAG-DROP-INDIVIDUAL] ✅ Updated ${orderId} successfully`)
+                return result
+              })
+
+              await Promise.all(updatePromises)
+              console.log(`[DRAG-DROP-INDIVIDUAL] All sort order updates completed successfully`)
               
               toast.success("Order sequence updated")
               foundInStoreContainer = true
@@ -1235,25 +1247,39 @@ export const Orders: React.FC = () => {
             
             console.log(`[DRAG-DROP-FIXED] New add-on order sequence:`, orderIds)
             
-            // Save to backend first, then optimistic updates
+            // Use individual order-card-states API calls for add-on orders too
             try {
-              await reorderOrders(tenant.id, orderIds, deliveryDate)
-              console.log(`[DRAG-DROP-FIXED] Add-on order sequence saved successfully`)
+              console.log(`[DRAG-DROP-INDIVIDUAL] Using individual API calls for add-on orders`)
               
-              // Send optimistic updates after successful save
-              if (sendOptimisticUpdate) {
-                setTimeout(() => {
-                  orderIds.forEach((orderId, index) => {
-                    const sortOrder = (index + 1) * 10
-                    console.log(`[DRAG-DROP-OPTIMISTIC] Add-on ${orderId} -> sortOrder: ${sortOrder}`)
-                    sendOptimisticUpdate(orderId, {
-                      sortOrder: sortOrder,
-                      _dragOperation: true,
-                      _timestamp: Date.now()
-                    })
+              const updatePromises = orderIds.map(async (orderId, index) => {
+                const newSortOrder = (index + 1) * 10
+                console.log(`[DRAG-DROP-INDIVIDUAL] Add-on ${orderId} -> sortOrder: ${newSortOrder}`)
+                
+                const response = await fetch(`/api/tenants/${tenant.id}/order-card-states/${orderId}`, {
+                  method: 'PUT',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                  },
+                  body: JSON.stringify({
+                    sortOrder: newSortOrder,
+                    deliveryDate,
+                    _dragOperation: true,
+                    _timestamp: Date.now()
                   })
-                }, 100)
-              }
+                })
+
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+                }
+
+                const result = await response.json()
+                console.log(`[DRAG-DROP-INDIVIDUAL] ✅ Add-on ${orderId} updated successfully`)
+                return result
+              })
+
+              await Promise.all(updatePromises)
+              console.log(`[DRAG-DROP-INDIVIDUAL] All add-on order updates completed successfully`)
               
               toast.success("Add-on order sequence updated")
               

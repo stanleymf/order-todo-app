@@ -2153,30 +2153,40 @@ app.put("/api/tenants/:tenantId/orders/reorder", async (c) => {
     const updatePromises = orderIds.map(async (orderId: string, index: number) => {
       const sortOrder = (index + 1) * 10 // Use increments of 10 for easier insertion later
       
-      // First check if record exists to preserve existing fields
-      const existing = await c.env.DB.prepare(`
-        SELECT status, assigned_to, notes FROM order_card_states
-        WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
-      `).bind(tenantId, orderId, deliveryDate).first()
-      
-      // CRITICAL FIX: For reordering, don't set assigned_by to allow cross-device sync
-      const result = await c.env.DB.prepare(`
-        INSERT OR REPLACE INTO order_card_states 
-        (tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `).bind(
-        tenantId, 
-        deliveryDate, 
-        orderId, 
-        existing?.status || 'unassigned',
-        existing?.assigned_to || null,
-        existing?.assigned_by || null, // CRITICAL FIX: Keep existing assigned_by, don't overwrite with current user
-        existing?.notes || null,
-        sortOrder
-      ).run()
+      try {
+        console.log(`[REORDER-DEBUG] Processing order ${orderId} at index ${index} with sortOrder ${sortOrder}`)
+        
+        // First check if record exists to preserve existing fields
+        const existing = await c.env.DB.prepare(`
+          SELECT status, assigned_to, assigned_by, notes FROM order_card_states
+          WHERE tenant_id = ? AND card_id = ? AND delivery_date = ?
+        `).bind(tenantId, orderId, deliveryDate).first()
+        
+        console.log(`[REORDER-DEBUG] Existing record for ${orderId}:`, existing)
+        
+        // CRITICAL FIX: For reordering, don't set assigned_by to allow cross-device sync
+        const result = await c.env.DB.prepare(`
+          INSERT OR REPLACE INTO order_card_states 
+          (tenant_id, delivery_date, card_id, status, assigned_to, assigned_by, notes, sort_order, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        `).bind(
+          tenantId, 
+          deliveryDate, 
+          orderId, 
+          existing?.status || 'unassigned',
+          existing?.assigned_to || null,
+          existing?.assigned_by || null, // CRITICAL FIX: Keep existing assigned_by, don't overwrite with current user
+          existing?.notes || null,
+          sortOrder
+        ).run()
 
-      console.log(`[REORDER-FIXED] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder}) - preserved existing assigned_by for cross-device sync`)
-      return result
+        console.log(`[REORDER-DEBUG] Database result for ${orderId}:`, result)
+        console.log(`[REORDER-FIXED] Set order ${orderId} to position ${index + 1} (sort_order: ${sortOrder}) - preserved existing assigned_by for cross-device sync`)
+        return result
+      } catch (error) {
+        console.error(`[REORDER-ERROR] Failed to update order ${orderId}:`, error)
+        throw error
+      }
     })
 
     await Promise.all(updatePromises)
