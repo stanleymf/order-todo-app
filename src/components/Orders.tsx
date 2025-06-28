@@ -660,12 +660,17 @@ export const Orders: React.FC = () => {
   const stats = getComprehensiveStats()
 
   // Handle status changes from OrderDetailCard
-  const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed', orderTitle?: string, isFromRealtime = false) => {
-    // Update the order status in all relevant arrays
+  const handleOrderStatusChange = (orderId: string, newStatus: 'unassigned' | 'assigned' | 'completed', orderTitle?: string, isFromRealtime = false, assignedTo?: string) => {
+    // Update the order status AND assignedTo in all relevant arrays
     const updateOrderStatus = (orders: any[]) => 
       orders.map((order: any) => 
         (order.cardId === orderId || order.id === orderId) 
-          ? { ...order, status: newStatus }
+          ? { 
+              ...order, 
+              status: newStatus,
+              // CRITICAL FIX: Preserve assignedTo from real-time updates, fallback to current user for local actions
+              assignedTo: assignedTo !== undefined ? assignedTo : (newStatus === 'assigned' ? (user?.name || user?.email) : null)
+            }
           : order
       )
 
@@ -738,40 +743,47 @@ export const Orders: React.FC = () => {
       if (newStatus === 'completed') {
         toast.success(`${orderTitle} is Completed!`)
       } else if (newStatus === 'assigned') {
-        const assignedTo = user?.name || user?.email || 'Unknown User'
-        toast.success(`Assigned to ${assignedTo}`)
+        // Use the assignedTo parameter if provided, otherwise use current user
+        const toastAssignedTo = assignedTo || user?.name || user?.email || 'Unknown User'
+        toast.success(`Assigned to ${toastAssignedTo}`)
       }
     }
   }
 
-  // Batch sortOrder updates to prevent snapback during bulk drag operations
-  const [sortOrderUpdateBatch, setSortOrderUpdateBatch] = useState<{[orderId: string]: number}>({})
-  const sortOrderBatchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Batch updates to prevent snapback during bulk drag operations (now handles status + sortOrder)
+  const [updateBatch, setUpdateBatch] = useState<{[orderId: string]: {sortOrder?: number, status?: string, assignedTo?: string}}>({})
+  const updateBatchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const processBatchedSortOrderUpdates = useCallback(() => {
-    if (Object.keys(sortOrderUpdateBatch).length === 0) return
+  const processBatchedUpdates = useCallback(() => {
+    if (Object.keys(updateBatch).length === 0) return
     
-    console.log(`[REALTIME-BATCH] Processing ${Object.keys(sortOrderUpdateBatch).length} batched sortOrder updates`)
+    console.log(`[REALTIME-BATCH] Processing ${Object.keys(updateBatch).length} batched updates`)
     
-    // Apply all sortOrder updates at once
-    const updateOrdersWithBatchedSortOrders = (orders: any[]) => 
+    // Apply all updates at once (sortOrder, status, assignedTo)
+    const updateOrdersWithBatchedData = (orders: any[]) => 
       orders.map((order: any) => {
         const orderId = order.cardId || order.id || order.orderId
-        if (sortOrderUpdateBatch[orderId] !== undefined) {
-          console.log(`[REALTIME-BATCH] Applying ${orderId} -> sortOrder: ${sortOrderUpdateBatch[orderId]}`)
-          return { ...order, sortOrder: sortOrderUpdateBatch[orderId] }
+        const batchUpdate = updateBatch[orderId]
+        if (batchUpdate) {
+          console.log(`[REALTIME-BATCH] Applying ${orderId} ->`, batchUpdate)
+          return { 
+            ...order, 
+            ...(batchUpdate.sortOrder !== undefined && { sortOrder: batchUpdate.sortOrder }),
+            ...(batchUpdate.status && { status: batchUpdate.status }),
+            ...(batchUpdate.assignedTo !== undefined && { assignedTo: batchUpdate.assignedTo })
+          }
         }
         return order
       })
 
     // Update all arrays at once
-    setAllOrders(prev => updateOrdersWithBatchedSortOrders(prev))
-    setMainOrders(prev => updateOrdersWithBatchedSortOrders(prev))
-    setAddOnOrders(prev => updateOrdersWithBatchedSortOrders(prev))
+    setAllOrders(prev => updateOrdersWithBatchedData(prev))
+    setMainOrders(prev => updateOrdersWithBatchedData(prev))
+    setAddOnOrders(prev => updateOrdersWithBatchedData(prev))
     setStoreContainers(prev => 
       prev.map(container => ({
         ...container,
-        orders: updateOrdersWithBatchedSortOrders(container.orders)
+        orders: updateOrdersWithBatchedData(container.orders)
       }))
     )
 
@@ -787,12 +799,12 @@ export const Orders: React.FC = () => {
       setMainOrders(prev => sortByOrder(prev))
       setAddOnOrders(prev => sortByOrder(prev))
       setAllOrders(prev => sortByOrder(prev))
-      console.log(`[REALTIME-BATCH] Final re-sort completed for ${Object.keys(sortOrderUpdateBatch).length} orders`)
+      console.log(`[REALTIME-BATCH] Final re-sort completed for ${Object.keys(updateBatch).length} orders`)
     }, 50)
 
     // Clear the batch
-    setSortOrderUpdateBatch({})
-  }, [sortOrderUpdateBatch])
+    setUpdateBatch({})
+  }, [updateBatch])
 
   // Real-time updates hook - STABILIZED (moved here to access handleOrderStatusChange)
   const handleRealtimeUpdate = useCallback((update: any) => {
@@ -855,7 +867,9 @@ export const Orders: React.FC = () => {
       if (hasStatusChange && !hasSortOrderChange) {
         // Pure status change (no sortOrder)
         console.log(`[REALTIME] Pure status change detected: ${update.orderId} -> ${update.status}`)
-        handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true)
+        // CRITICAL FIX: Pass assignedTo from real-time update to preserve cross-device attribution
+        console.log(`[REALTIME-ATTRIBUTION] Preserving assignedTo: ${update.assignedTo} for ${update.orderId}`)
+        handleOrderStatusChange(update.orderId, update.status as 'unassigned' | 'assigned' | 'completed', undefined, true, update.assignedTo)
       } else if (hasSortOrderChange) {
         // BATCH SORTORDER UPDATES: Collect multiple updates and process together
         console.log(`[REALTIME-BATCH] SortOrder update detected: ${update.orderId} -> sortOrder: ${update.sortOrder}${hasStatusChange ? ` (also status: ${update.status})` : ''}`)
@@ -877,19 +891,23 @@ export const Orders: React.FC = () => {
         console.log(`[REALTIME-BATCH] ✅ ADDING to batch: ${update.orderId} (updatedBy: ${update.updatedBy || 'unknown'})`)
         
         // Add to batch
-        setSortOrderUpdateBatch(prev => ({
+        setUpdateBatch(prev => ({
           ...prev,
-          [update.orderId]: update.sortOrder
+          [update.orderId]: {
+            sortOrder: update.sortOrder,
+            status: hasStatusChange ? update.status : undefined,
+            assignedTo: hasStatusChange ? update.assignedTo : undefined
+          }
         }))
         
         // Clear existing timeout and set new one (debounce)
-        if (sortOrderBatchTimeoutRef.current) {
-          clearTimeout(sortOrderBatchTimeoutRef.current)
+        if (updateBatchTimeoutRef.current) {
+          clearTimeout(updateBatchTimeoutRef.current)
         }
         
-        sortOrderBatchTimeoutRef.current = setTimeout(() => {
+        updateBatchTimeoutRef.current = setTimeout(() => {
           console.log(`[REALTIME-BATCH] Timeout triggered - processing batch`)
-          processBatchedSortOrderUpdates()
+          processBatchedUpdates()
         }, 200) // Wait 200ms for more updates to batch together
         
       } else {

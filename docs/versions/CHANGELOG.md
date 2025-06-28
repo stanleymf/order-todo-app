@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.5] - 2025-01-21
+### 🚨 **CRITICAL FIX: Cross-Device Attribution & Batch Processing**
+- **Fixed:** Cross-device status attribution bug where Fiona (mobile) assignments showed as "Assigned to Windflower" on desktop instead of "Assigned to Fiona"
+- **Root Cause:** `handleOrderStatusChange` only updated status but ignored `assignedTo` from real-time updates, always using current device user
+- **Solution:** Enhanced `handleOrderStatusChange` to accept and preserve `assignedTo` parameter from real-time updates while fallback to current user for local actions
+- **Fixed:** Batch processing enhanced to handle status + assignedTo fields in addition to sortOrder for complete cross-device drag-drop sync
+- **Impact:** Proper user attribution across devices + complete drag-drop cross-device synchronization
+
 ## [1.6.4] - 2025-01-21
 ### 🚨 **CRITICAL FIX: Batch Processing for Drag-Drop Snapback**
 - **Fixed:** Drag-drop operations causing "snapback" to original order due to 43 individual real-time updates triggering sequential re-sorts with mixed old/new sortOrder values
